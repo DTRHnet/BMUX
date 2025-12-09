@@ -58,6 +58,180 @@ class BMUXClient {
         }
     }
 
+    injectUI() {
+        if (document.getElementById('bmux-overlay')) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'bmux-overlay';
+        overlay.className = 'hidden';
+
+        // Modern HTML Structure
+        overlay.innerHTML = `
+          <div id="bmux-toolbar">
+             <div style="font-weight:bold; margin-right:15px; color:#fff;">BMUX</div>
+             <button class="bmux-btn" id="btn-split-h">Split H</button>
+             <button class="bmux-btn" id="btn-split-v">Split V</button>
+             <button class="bmux-btn" id="btn-new-win">New Window</button>
+             <button class="bmux-btn" id="btn-detach">Detach</button>
+          </div>
+          
+          <div id="bmux-panes">
+            <!-- Panes will be injected here -->
+          </div>
+
+          <!-- Draggable Debug Console -->
+          <div id="bmux-debug-overlay">
+             <div id="bmux-debug-header">Debug Console</div>
+             <div id="bmux-debug-content"></div>
+             <div id="bmux-debug-input-container">
+                <span style="color:#0f0; margin-right:5px;">$</span>
+                <input id="bmux-debug-input" type="text" placeholder="Send command to active pane..." />
+             </div>
+          </div>
+
+          <div id="bmux-command-line">
+            <span>:</span>
+            <input id="bmux-command-input" type="text" />
+          </div>
+          
+          <div id="bmux-status-bar">
+            <span id="bmux-status-left">[NORMAL]</span>
+            <span id="bmux-status-right">Ready</span>
+          </div>
+        `;
+
+        document.body.appendChild(overlay);
+
+        // Cache Elements
+        this.ui = {
+            overlay: overlay,
+            panes: overlay.querySelector('#bmux-panes'),
+            statusBar: overlay.querySelector('#bmux-status-bar'),
+            statusLeft: overlay.querySelector('#bmux-status-left'),
+            commandLine: overlay.querySelector('#bmux-command-line'),
+            commandInput: overlay.querySelector('#bmux-command-input'),
+
+            debug: overlay.querySelector('#bmux-debug-content'),
+            debugHeader: overlay.querySelector('#bmux-debug-header'),
+            debugContainer: overlay.querySelector('#bmux-debug-overlay'),
+            debugInput: overlay.querySelector('#bmux-debug-input'),
+
+            btnSplitH: overlay.querySelector('#btn-split-h'),
+            btnSplitV: overlay.querySelector('#btn-split-v'),
+            btnNewWin: overlay.querySelector('#btn-new-win'),
+            btnDetach: overlay.querySelector('#btn-detach')
+        };
+
+        // Bind Toolbar
+        this.ui.btnSplitH.onclick = () => { this.log("Action: Split Horizontal"); this.splitWindow('horizontal'); };
+        this.ui.btnSplitV.onclick = () => { this.log("Action: Split Vertical"); this.splitWindow('vertical'); };
+        this.ui.btnNewWin.onclick = () => { this.log("Action: New Window"); this.newWindow(); };
+        this.ui.btnDetach.onclick = () => { this.log("Action: Detach"); this.toggle(); };
+
+        // Bind Debug Input
+        this.ui.debugInput.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                const cmd = this.ui.debugInput.value.trim();
+                this.ui.debugInput.value = '';
+
+                if (cmd) {
+                    // Check if it's a BMUX command
+                    if (typeof BMUX_COMMANDS !== 'undefined') {
+                        const [cmdName, ...args] = cmd.split(' ');
+                        const commandDef = BMUX_COMMANDS[cmdName];
+
+                        if (commandDef) {
+                            // Execute command (use active pane or first pane as context)
+                            const activePane = this.ui.panes.querySelector('.bmux-pane.active') ||
+                                this.ui.panes.querySelector('.bmux-pane');
+
+                            if (activePane) {
+                                try {
+                                    const result = await commandDef.execute(activePane, args);
+                                    this.log(`$ ${cmd}`);
+                                    this.log(result);
+                                } catch (err) {
+                                    this.log(`$ ${cmd}`);
+                                    this.log(`Error: ${err.message}`);
+                                }
+                            } else {
+                                this.log(`$ ${cmd}`);
+                                this.log('Error: No active pane');
+                            }
+                        } else {
+                            // Not a command, just log it
+                            this.log(`$ ${cmd}`);
+                        }
+                    } else {
+                        this.log(`$ ${cmd}`);
+                    }
+                }
+                e.stopPropagation();
+            }
+        });
+
+        // Make Debug Draggable
+        this.makeDraggable(this.ui.debugContainer, this.ui.debugHeader);
+
+        // Initial Render
+        this.renderWindow({ root: null });
+    }
+
+    makeDraggable(element, handle) {
+        let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+        handle.onmousedown = dragMouseDown;
+
+        function dragMouseDown(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            document.onmouseup = closeDragElement;
+            document.onmousemove = elementDrag;
+        }
+
+        function elementDrag(e) {
+            e = e || window.event;
+            e.preventDefault();
+            pos1 = pos3 - e.clientX;
+            pos2 = pos4 - e.clientY;
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+            element.style.top = (element.offsetTop - pos2) + "px";
+            element.style.left = (element.offsetLeft - pos1) + "px";
+        }
+
+        function closeDragElement() {
+            document.onmouseup = null;
+            document.onmousemove = null;
+        }
+    }
+
+    setupListeners() {
+        // 1. Message Listener (from Background or Popup)
+        chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
+            // Toggle Command (usually from Popup) - Only Top cares
+            if (this.isTop && request.command === 'toggle-bmux') {
+                this.toggle();
+                sendResponse({ status: 'ok' });
+            }
+
+            // Key Command (Relayed from Background) - Only Top cares
+            if (this.isTop && request.command === 'execute-key') {
+                this.log(`Exec Key: ${request.action}`);
+                this.handleAction(request.action, request.params);
+            }
+
+            if (this.isTop && request.command === 'toggle-control-mode') {
+                this.toggleControlMode();
+            }
+        });
+
+        // 2. Key Listener (Capture locally and send to background)
+        // We capture in capture-phase to intercept before page
+        document.addEventListener('keydown', (e) => this.handleKey(e), true);
+    }
+
     fetchState() {
         chrome.runtime.sendMessage({ command: 'get-state' }, (state) => {
             this.log("State Fetched");
@@ -93,6 +267,16 @@ class BMUXClient {
 
         // CONTROL MODE LOGIC
         if (this.isControlMode) {
+            // Allow typing in debug console even in Control Mode
+            if (document.activeElement === this.ui.debugInput) {
+                return; // Let debug console handle its own keys
+            }
+
+            // Also allow typing in pane command inputs
+            if (document.activeElement && document.activeElement.classList.contains('bmux-pane-cmd-input')) {
+                return; // Let pane command input handle its own keys
+            }
+
             e.preventDefault();
             e.stopPropagation();
 
@@ -119,9 +303,6 @@ class BMUXClient {
                     action: action,
                     params: params
                 });
-                // Optional: Exit control mode after one command? 
-                // TMUX stays in mode? No, TMUX is prefix-based. 
-                // Vim is modal. Let's stay in mode until Esc.
             }
             return;
         }
@@ -234,14 +415,27 @@ class BMUXClient {
 
     splitWindow(direction) {
         if (!this.ui) return;
-        // ... logic from previous step, ensuring we look at 'this.ui.panes' ...
         let activePane = this.ui.panes.querySelector('.bmux-pane.active');
         if (!activePane) activePane = this.ui.panes.querySelector('.bmux-pane');
 
         if (!activePane) {
-            // Init First
             this.renderWindow({ root: null });
             return;
+        }
+
+        // Clone the URL from the active pane (safely handle cross-origin)
+        const activeIframe = activePane.querySelector('iframe');
+        let cloneUrl = window.location.href;
+
+        if (activeIframe) {
+            try {
+                // Try to get the actual src first
+                cloneUrl = activeIframe.src || activeIframe.contentWindow.location.href;
+            } catch (e) {
+                // Cross-origin restriction - use iframe src attribute
+                cloneUrl = activeIframe.getAttribute('src') || window.location.href;
+                this.log(`Cross-origin: Using src attribute (${cloneUrl.substring(0, 50)}...)`);
+            }
         }
 
         const parent = activePane.parentNode;
@@ -253,10 +447,9 @@ class BMUXClient {
         container.style.height = '100%';
         container.style.flexDirection = direction === 'horizontal' ? 'row' : 'column';
 
-        const newPane = document.createElement('div');
-        newPane.className = 'bmux-pane active';
-        newPane.style.flex = '1';
-        newPane.innerHTML = `<iframe src="https://example.com"></iframe>`;
+        // Create new pane with cloned URL and command input
+        const newPane = this.createPaneElement(cloneUrl);
+        newPane.classList.add('active');
 
         activePane.style.flex = '1';
         activePane.classList.remove('active');
@@ -266,6 +459,7 @@ class BMUXClient {
         container.appendChild(newPane);
 
         this.updateSelection();
+        this.log(`Split ${direction}: Cloned ${cloneUrl.substring(0, 50)}...`);
     }
 
     updateSelection() {
@@ -283,45 +477,100 @@ class BMUXClient {
 
     renderWindow(windowData) {
         this.ui.panes.innerHTML = '';
+        const currentUrl = window.location.href;
+        const pane = this.createPaneElement(currentUrl);
+        this.ui.panes.appendChild(pane);
+    }
+
+    createPaneElement(url) {
         const pane = document.createElement('div');
         pane.className = 'bmux-pane active';
         pane.style.flex = '1';
-        pane.innerHTML = '<iframe src="about:blank"></iframe>';
-        this.ui.panes.appendChild(pane);
+
+        // Iframe
+        const iframe = document.createElement('iframe');
+        iframe.src = url || window.location.href;
+        pane.appendChild(iframe);
+
+        // Footer with command input
+        const footer = document.createElement('div');
+        footer.className = 'bmux-pane-footer';
+
+        // Command Input Container
+        const cmdContainer = document.createElement('div');
+        cmdContainer.className = 'bmux-pane-cmd-container';
+
+        const prompt = document.createElement('span');
+        prompt.className = 'bmux-pane-cmd-prompt';
+        prompt.textContent = '>';
+
+        const input = document.createElement('input');
+        input.className = 'bmux-pane-cmd-input';
+        input.type = 'text';
+        input.placeholder = 'Type "help" for commands';
+
+        cmdContainer.appendChild(prompt);
+        cmdContainer.appendChild(input);
+
+        // Output Container
+        const output = document.createElement('div');
+        output.className = 'bmux-pane-output';
+
+        footer.appendChild(cmdContainer);
+        footer.appendChild(output);
+        pane.appendChild(footer);
+
+        // Bind command input
+        input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                const cmdText = input.value.trim();
+                input.value = '';
+
+                if (cmdText) {
+                    await this.executePaneCommand(pane, cmdText, output);
+                }
+                e.stopPropagation();
+            }
+        });
+
+        return pane;
+    }
+
+    async executePaneCommand(pane, cmdText, output) {
+        const [cmd, ...args] = cmdText.split(' ');
+
+        this.log(`Pane Cmd: ${cmdText}`);
+
+        if (typeof BMUX_COMMANDS === 'undefined') {
+            output.textContent = 'Error: Command system not loaded';
+            output.classList.add('visible');
+            return;
+        }
+
+        const commandDef = BMUX_COMMANDS[cmd];
+        if (!commandDef) {
+            output.textContent = `Unknown: ${cmd}. Type "help" for commands.`;
+            output.classList.add('visible');
+            return;
+        }
+
+        try {
+            const result = await commandDef.execute(pane, args);
+            output.textContent = result;
+            output.classList.add('visible');
+
+            if (cmd !== 'help' && !result.startsWith('Error')) {
+                setTimeout(() => output.classList.remove('visible'), 5000);
+            }
+        } catch (e) {
+            output.textContent = `Error: ${e.message}`;
+            output.classList.add('visible');
+        }
     }
 
     buildNode(node) {
         if (node.type === 'pane') {
-            const el = document.createElement('div');
-            el.className = 'bmux-pane';
-            // Note: active state handling might need to be passed down or set separate
-            if (node.active) el.classList.add('active');
-            el.style.flex = node.flex || '1';
-
-            // Pane Content (Iframe)
-            const iframe = document.createElement('iframe');
-            iframe.src = node.url || 'about:blank';
-            el.appendChild(iframe);
-
-            // Pane Footer
-            const footer = document.createElement('div');
-            footer.className = 'bmux-pane-footer';
-            footer.innerHTML = `
-                <button class="bmux-console-toggle">Console</button>
-                <span class="bmux-pane-info">Pane #${node.id.substring(0, 4)}</span>
-            `;
-
-            // Bind Toggle
-            const btn = footer.querySelector('.bmux-console-toggle');
-            btn.onclick = () => {
-                this.log(`Toggling console for pane ${node.id}`);
-                // In future, this would open a per-pane console overlay
-                this.ui.debugContainer.style.display = 'flex'; // Show global debug for now
-                this.ui.debugInput.focus();
-            };
-
-            el.appendChild(footer);
-            return el;
+            return this.createPaneElement(node.url || window.location.href);
         } else if (node.type === 'container') {
             const el = document.createElement('div');
             el.className = 'bmux-split-container';

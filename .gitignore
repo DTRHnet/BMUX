@@ -1,0 +1,37 @@
+# Browser extension artifacts
+*.crx
+*.pem
+*.zip
+
+# Backup files
+*.backup
+*.bak
+*.old
+*.tmp
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+.vscode/
+.idea/
+*.swp
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Dependencies (if added later)
+node_modules/
+package-lock.json
+
+# Build artifacts (if build process added)
+dist/
+build/
+
+# Test artifacts
+coverage/
+.nyc_output/

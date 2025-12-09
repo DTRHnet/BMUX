@@ -1,14 +1,19 @@
 {
     "manifest_version": 3,
     "name": "BMUX",
-    "version": "0.1.0",
+    "version": "0.0.1",
     "description": "A TMUX-inspired Browser Multiplexer",
     "permissions": [
         "tabs",
         "storage",
         "unlimitedStorage",
         "activeTab",
-        "scripting"
+        "scripting",
+        "declarativeNetRequest",
+        "webRequest"
+    ],
+    "host_permissions": [
+        "<all_urls>"
     ],
     "background": {
         "service_worker": "background/main.js"
@@ -23,6 +28,7 @@
                 "<all_urls>"
             ],
             "js": [
+                "content/commands.js",
                 "content/main.js"
             ],
             "css": [
@@ -32,6 +38,15 @@
             "all_frames": true
         }
     ],
+    "declarative_net_request": {
+        "rule_resources": [
+            {
+                "id": "ruleset_1",
+                "enabled": true,
+                "path": "rules.json"
+            }
+        ]
+    },
     "commands": {
         "_execute_action": {
             "suggested_key": {
