@@ -874,6 +874,31 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'inherit': {
+        scope: 'overlay',
+        description: 'Whether brand-new tabs start from the newest layout (on) or one pane (off)',
+        usage: 'inherit [on|off|status]',
+        execute: async function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `New tabs inherit the newest layout: ${client.persistInherit ? 'on' : 'off'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: inherit [on|off|status]';
+            }
+
+            const result = await client.setPersistInherit(action === 'on');
+            if (!result.ok) return 'Error: the background did not answer';
+
+            return result.inherit
+                ? 'New tabs will inherit the newest layout, with their own page in the root pane'
+                : 'New tabs will start with a single pane';
+        }
+    },
+
     'save-layout': {
         scope: 'overlay',
         description: 'Save the current layout under a name; named layouts survive restarts',

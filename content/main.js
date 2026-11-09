@@ -496,11 +496,15 @@ class BMUXClient {
         this.commandHistory = [];     // shared shell-style history for every input
         this.keyLog = [];             // recent key events, for the `keys` command
 
+        this.rootPane = null;         // the pane that represents this tab's own page
+        this.restoredNote = '';       // why the restored layout looks the way it does
+
         this.theme = 'frost';         // 'frost' (default) or 'classic'
         this.debugOpen = false;       // the floating debug window is optional
         this.verbose = false;         // mirror debug output into the focused pane
 
         this.persistEnabled = true;   // auto-restore switch (from the background)
+        this.persistInherit = true;   // new tabs inherit the newest layout
         this.restoring = false;       // true while a snapshot is being applied
         this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
         this.saveTimer = null;
@@ -908,6 +912,7 @@ class BMUXClient {
 
         const reply = await this.persistRequest({ command: 'persist-load' }, BMUX_RESTORE_TIMEOUT);
 
+        if (reply && reply.inherit !== undefined) this.persistInherit = reply.inherit !== false;
         if (reply && reply.enabled !== undefined) {
             // Anything but an explicit false counts as on, so a corrupt stored
             // value can never silently disable restoring.
@@ -917,8 +922,16 @@ class BMUXClient {
         if (reply && reply.snapshot) {
             const applied = this.applySnapshot(reply.snapshot);
             if (applied.ok) {
-                this.restoredFrom = 'session';
-                this.log(`Layout restored: ${applied.panes} pane(s)`);
+                this.restoredFrom = reply.inheritedFrom ? 'inherited' : 'session';
+
+                if (reply.inheritedFrom) {
+                    this.restoredNote = `inherited from tab ${reply.inheritedFrom}`;
+                    this.log(`New tab: inherited the layout from tab ${reply.inheritedFrom} ` +
+                        `(${applied.panes} pane(s); this tab's page is in ${this.getPaneId(this.rootPane)})`);
+                } else {
+                    this.log(`Layout restored: ${applied.panes} pane(s)` +
+                        (this.restoredNote ? ` (${this.restoredNote})` : ''));
+                }
                 return;
             }
             this.log(`Saved layout ignored: ${applied.reason}`);
@@ -980,11 +993,16 @@ class BMUXClient {
             origin = window.location.href;
         }
 
+        const root = this.rootPane && this.getPanes().indexOf(this.rootPane) !== -1
+            ? this.rootPane
+            : this.getPanes()[0];
+
         return {
             version: SNAPSHOT_VERSION,
             savedAt: Date.now(),
             origin: origin,
             url: window.location.href,
+            rootPaneId: root ? this.getPaneId(root) : null,
             activeId: active ? this.getPaneId(active) : null,
             zoomedId: this.zoomedPane ? this.getPaneId(this.zoomedPane) : null,
             nextPaneId: this.nextPaneId,
@@ -1019,12 +1037,21 @@ class BMUXClient {
 
             const byId = new Map();
 
+            // The saved layout belongs to the page it was saved on. If this tab has
+            // since navigated elsewhere, its own page follows the tab: the root pane
+            // gets the current URL and the other panes keep theirs.
+            const currentUrl = window.location.href;
+            const savedUrl = typeof snapshot.url === 'string' ? snapshot.url : '';
+            const followed = !!savedUrl && savedUrl !== currentUrl;
+            const rootId = followed && snapshot.rootPaneId ? String(snapshot.rootPaneId) : null;
+
             const build = (node) => {
                 if (!node) return null;
 
                 if (node.kind === 'leaf') {
                     const data = node.pane || {};
-                    const pane = this.createPaneElement(data.url || window.location.href);
+                    const isRoot = rootId !== null && String(data.id) === rootId;
+                    const pane = this.createPaneElement(isRoot ? currentUrl : (data.url || currentUrl));
                     if (data.id) pane.dataset.paneId = String(data.id);
                     if (data.title) pane.dataset.paneTitle = String(data.title);
                     byId.set(pane.dataset.paneId, pane);
@@ -1094,6 +1121,15 @@ class BMUXClient {
                 this.nextPaneId
             );
 
+            this.rootPane = (rootId !== null ? byId.get(rootId) : null) ||
+                byId.get(String(snapshot.rootPaneId || '')) ||
+                this.getPanes()[0];
+
+            if (followed) {
+                this.restoredNote = 'followed the page';
+                this.log(`Layout follows this tab's page: ${this.getPaneId(this.rootPane)} now shows ${currentUrl}`);
+            }
+
             const active = snapshot.activeId ? byId.get(String(snapshot.activeId)) : null;
             this.setActivePane(active || this.getPanes()[0]);
 
@@ -1138,6 +1174,16 @@ class BMUXClient {
     }
 
     // --- persistence used by the commands ---
+
+    /** Whether brand-new tabs inherit the newest layout. */
+    setPersistInherit(inherit) {
+        this.persistInherit = !!inherit;
+        return this.persistRequest({ command: 'persist-set-inherit', inherit: !!inherit }, 1500)
+            .then((reply) => ({
+                ok: !!(reply && reply.status === 'ok'),
+                inherit: this.persistInherit
+            }));
+    }
 
     setPersistEnabled(enabled) {
         this.persistEnabled = !!enabled;
@@ -3447,6 +3493,8 @@ class BMUXClient {
 
         this.layoutName = null;
 
+        if (this.rootPane === target) this.rootPane = siblingPane;
+
         if (wasActive && siblingPane) {
             this.setActivePane(siblingPane);
         }
@@ -3484,6 +3532,7 @@ class BMUXClient {
         const pane = this.createPaneElement(window.location.href);
         this.ui.panes.appendChild(pane);
         this.layout = bmuxLeaf(pane);
+        this.rootPane = pane;
 
         this.setActivePane(pane);
         this.renderLayout();

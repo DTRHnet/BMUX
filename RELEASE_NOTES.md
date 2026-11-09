@@ -15,7 +15,9 @@
 |------|--------------|
 | Reload survival | Splits, ratios, pane URLs, titles, focus, maximize and console state are saved per tab and restored on load |
 | Storage | `storage.session` per tab (reload-safe, dies with the browser) + `storage.local` for explicit named layouts; never `sync` |
-| Commands | `persist [on\|off\|status]`, `save-layout`, `restore-layout`, `list-layouts`, `delete-layout` |
+| Commands | `persist [on\|off\|status]`, `inherit [on\|off\|status]`, `save-layout`, `restore-layout`, `list-layouts`, `delete-layout` |
+| Follow the page | A layout belongs to the tab, so navigating elsewhere repoints the root pane at the new page and leaves the other panes intact instead of dragging the old site back |
+| Inheritance | A new tab with nothing saved adopts the newest layout from another tab — same splits, its own page in the root pane (`inherit off` to stop it) |
 | Safety | Snapshots validated whole (version, shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB); bad ones ignored, never half-applied |
 | Housekeeping | Tab-close cleanup, startup pruning, 6 h fallback where `storage.session` is missing |
 | Cleanup | The dead session `STATE` machinery and the "State Fetched" stub are gone; `unlimitedStorage` dropped |
@@ -46,6 +48,20 @@ save when the tab is hidden or unloaded. **Reads** happen before the first pane 
 drawn, so a restore never flashes an empty overlay, with an 800 ms ceiling if the
 service worker is cold.
 
+## Following the page, and new tabs
+
+Because a snapshot is stored against the **tab id**, it outlives the address it was
+built on. When the page underneath changes, `applySnapshot` sees a stored `url` that
+no longer matches `window.location.href` and repoints the **root pane** at the
+current page; every other pane keeps its URL, and a plain reload restores the
+layout exactly as saved.
+
+A tab with no snapshot of its own asks the background for the **newest** one saved
+by another tab and adopts its shape — splits, ratios, titles, console state — with
+its own page in the root pane. That is on by default; `inherit off` restores the
+older behaviour of a single fresh pane, and the switch also stops a tab offering
+its layout to others.
+
 ## What does not come back
 
 Restoring **recreates** the panes, so the pages load fresh: scroll position, form
@@ -59,20 +75,23 @@ README leads with four real screenshots captured against
 [dtrh.net](https://www.dtrh.net/) with the unpacked extension: activation and a
 three-pane frost layout, `filter links` with boxes, a hovered match and the refine
 card, a detached console, and the classic palette for comparison
-(`docs/images/`). Every command is documented in both the README tables and the
+(`docs/images/`). All 42 commands are documented in both the README tables and the
 command guide.
 
 ## Verification
 
-- 644 jsdom checks — with the real `background/main.js` running as a second window
+- 811 jsdom checks — with the real `background/main.js` running as a second window
   against in-memory `storage.session` / `storage.local`, so the shipped persistence
   path is exercised end to end: round trip, reload via a fresh content script,
   named layouts, the off switch, corrupt/junk/unsupported/malformed snapshots,
-  caps, tab-close cleanup, startup pruning, exit saves and debounce coalescing.
-- 87 Chromium checks — including a real `page.reload()` restoring a 30/70 split
+  caps, tab-close cleanup, startup pruning, exit saves, debounce coalescing, plus
+  the navigation rule (stale root URL repointed, other panes untouched) and
+  new-tab inheritance.
+- 121 Chromium checks — including a real `page.reload()` restoring a 30/70 split
   with a custom title and the maximize state, pages loading fresh afterwards,
-  `save-layout` → `new-window` → `restore-layout`, and `persist off` → reload →
-  one pane.
+  `save-layout` → `new-window` → `restore-layout`, `persist off` → reload → one
+  pane, a real navigation that keeps the other panes in place, and a second tab
+  inheriting the layout with its own page in the root pane.
 - Not verified: an actual browser restart (the harness cannot restart Chromium),
   the `storage.session` fallback path on a browser that lacks it, and touch input.
 

@@ -92,10 +92,22 @@ Persistence finally exists, is validated, and can be switched off.
   - history is shared between all three inputs, so a command typed in a pane can
     be recalled in the floating console.
 
+- **The layout follows the page.** The tab snapshot is keyed by tab id, so it
+  outlives the address it was built on. When the page underneath changes, the root
+  pane takes the new URL instead of the stale one and every other pane keeps what
+  it was showing; a plain reload still restores the root pane's own URL, because
+  the rule only fires when the tab really moved somewhere else. Switching sites
+  with the overlay on no longer drags the old site back into the layout.
 - **`persist [on|off|status]`** — the auto-restore switch. `off` clears this tab's
   snapshot and stops all writes; named layouts are untouched because they were
   explicit saves. `status` also says where the current layout came from
   (`fresh`, `session` or `named`).
+- **New tabs inherit the newest layout** (`inherit [on|off|status]`, on by
+  default). A tab with no snapshot of its own asks the background for the newest
+  one saved by another tab and adopts its shape — splits, ratios, titles, consoles —
+  with the *new* tab's own page replacing the old root URL. Other panes keep their
+  addresses. `inherit off` makes new tabs start with a single pane again; the
+  switch also gates offering a snapshot to other tabs.
 - **Validation** in the background: snapshots are checked whole before being
   stored or applied — version, tree shape, split ratios in range, URL strings, at
   most 12 panes, depth ≤ 32, ≤ 64 KB. A rejected snapshot is dropped, never
@@ -161,24 +173,29 @@ Persistence finally exists, is validated, and can be switched off.
   `filter links` with boxes, a hovered match and the refine card, a detached
   console, and the classic palette for comparison. `docs/images/` holds them.
 - README, QUICKSTART, COMMAND_USAGE, ADDING_COMMANDS and IMPLEMENTATION were
-  re-checked against the code: every one of the 41 commands is documented in both
+  re-checked against the code: every one of the 42 commands is documented in both
   the README tables and the command guide, and the stale "thick blue border",
   "70% console" and popup wording is gone.
 
 ### Verification
 
 - `node --check` clean; all files kept CRLF; `manifest.json` parses.
-- jsdom: **644 checks** pass, with the real `background/main.js` loaded as a second
+- jsdom: **811 checks** pass, with the real `background/main.js` loaded as a second
   window and wired to in-memory `storage.session` / `storage.local`, so the tests
   exercise the shipped persistence path end to end: round trip (ratios, titles,
   zoom, active pane, ids, consoles), reload via a second content window, named
   layouts (save/list/restore/delete, origin scoping, surviving a reload), the off
   switch, corrupt/junk/unsupported/malformed snapshots, pane/depth/ratio/version
-  caps, tab-close cleanup, startup pruning, exit saves, and debounce coalescing.
-- Chromium 150 with the extension unpacked: **87 checks** pass, including a real
+  caps, tab-close cleanup, startup pruning, exit saves, and debounce coalescing —
+  plus the two newer rules: a snapshot taken on one URL whose root pane is
+  repointed at another when the tab navigates, and a fresh tab adopting the newest
+  snapshot with its own page in the root pane.
+- Chromium 150 with the extension unpacked: **121 checks** pass, including a real
   `page.reload()` restoring two panes at a 30/70 split with the custom title and
   the maximize state, pages loading fresh after restore, `save-layout work` →
-  `new-window` → `restore-layout work`, and `persist off` → reload → one pane.
+  `new-window` → `restore-layout work`, `persist off` → reload → one pane, a real
+  navigation to another page leaving the other panes intact, and a second tab
+  inheriting the layout with its own page in the root pane.
 - Not verified: a real browser restart (the harness cannot restart Chromium), the
   `storage.session` fallback path on a browser that lacks it, and touch input.
 

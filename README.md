@@ -10,7 +10,8 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 > **New in 0.5.0:** your layout survives a reload. Splits, ratios, URLs, titles,
 > focus, zoom and console state are saved per tab and restored on load, named
 > layouts can be saved with `save-layout` / `restore-layout`, and `persist off`
-> switches all of it off.
+> switches all of it off. The layout *follows the page* when the tab navigates
+> elsewhere, and a brand-new tab inherits the newest layout.
 >
 > **New in 0.4.0:** commands chain with `;` (`filter img; filter a`), commands can
 > ask questions you **click** (cards with buttons, digits or `y`/`n`), `filter`
@@ -161,6 +162,14 @@ page loads:
   and height.
 - **Where it lives**: `chrome.storage.session`, keyed by tab id — survives a
   reload or navigation, dies with the browser, never synced.
+- **The layout follows the page.** Because the snapshot belongs to the *tab* and
+  not to the address, navigating somewhere else with the overlay on puts the new
+  page in the root pane and leaves every other pane showing what it was showing —
+  the old site is never dragged back. A plain reload restores everything, root
+  pane included.
+- **A new tab inherits the newest layout** (on by default): same splits, ratios,
+  titles and console state, with the new tab's own page in the root pane.
+  `inherit off` makes new tabs start as a single pane again.
 - **Restored before the first pane is drawn**, so you never see an empty overlay
   flash.
 - **Named layouts** go to `chrome.storage.local` and survive restarts:
@@ -172,10 +181,14 @@ page loads:
 > delete-layout work      # or --all
 > persist off             # stop saving this tab, and clear its snapshot
 > persist status          # on/off, and where the current layout came from
+> inherit status          # does a new tab inherit the newest layout?
+> inherit off             # new tabs start with one pane again
 ```
 
 - **Restoring recreates panes**, so the pages load fresh — scroll position and
-  in-page state cannot be carried over.
+  in-page state cannot be carried over. Inheritance copies the *shape*: the root
+  pane is repointed at the new tab's own URL and the other panes keep their
+  addresses.
 - Snapshots are validated (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep,
   ≤ 64 KB) before they are stored or applied; a bad one is ignored, never partly
   restored.
@@ -420,6 +433,7 @@ These act on the whole overlay.
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
 | `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
+| `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout (default on) | `> inherit off` |
 | `keys` | Print the last key events and what they resolved to (shortcut diagnostics) | `> keys` |
 | `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
 | `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
@@ -627,7 +641,7 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - The layout of each tab (split tree, pane URLs, custom titles, focus, zoom,
   console state) in `chrome.storage.session` — cleared when the browser closes.
 - Named layouts you explicitly saved, per site origin, in `chrome.storage.local`.
-- The auto-restore switch.
+- The auto-restore switch, and whether a new tab inherits the newest layout.
 - **Never `sync`**, never uploaded. `persist off` clears the current tab's
   snapshot; `delete-layout --all` removes a site's named layouts. Both are
   plaintext in your own browser profile, like history.
@@ -667,6 +681,8 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console
   scrollback (transient UI); console open/height is
+- ⏳ **A new tab inherits the newest layout from another tab**, so it copies the
+  shape (fresh pages), not the live pages; only one layout is offered
 - ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
   lost (named layouts remain)
 - ⏳ **`Alt+Shift+B` can be taken** by the window manager or another extension;
@@ -729,6 +745,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Per-tab layout restore (split tree, ratios, URLs, titles, focus, zoom, consoles)
 - [x] Named layouts in `chrome.storage.local` (`save-layout` / `restore-layout` / `list-layouts` / `delete-layout`)
 - [x] `persist [on|off|status]` off switch that also clears the snapshot
+- [x] Layout follows the page on navigation; new tabs inherit the newest layout (`inherit`)
 - [x] Snapshot validation (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB)
 - [x] Background owns persistence, tab-close cleanup and startup pruning
 

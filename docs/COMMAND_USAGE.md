@@ -121,8 +121,8 @@ line) share one editor:
   shared by all inputs — run something in a pane, recall it in the floating
   console. It lives in the page (not persisted across reloads).
 - **Completion** is command-aware: layout names for `select-layout`, flags for
-  `resize-pane` and `split-window`, actions for `log`, `persist`, `control-mode`
-  and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
+  `resize-pane` and `split-window`, actions for `log`, `persist`, `inherit`,
+  `control-mode` and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
   their variants for `filter`, `--all` for `delete-layout`, and so on.
 - Completion works on the segment under the caret, so
   `list-panes; list-p<Tab>` completes the second command.
@@ -278,13 +278,32 @@ Recent keys (newest last):
 ### `persist [on|off|status]`
 `on` and `off` control the automatic per-tab saving. `off` also clears the current
 tab's snapshot (named layouts stay — they were explicit saves). `status` reports
-the mode and where the current layout came from.
+the mode and where the current layout came from (`fresh`, `session`, `named`,
+`inherit` or `followed the page`).
+
+A saved layout belongs to the **tab**, so it survives navigation: when the page
+underneath changes, the root pane takes the new address and the other panes keep
+what they were showing. Reloading restores the layout exactly as it was.
 
 ```
 > persist status
 Auto-restore: on · this layout came from session
 > persist off
 Auto-restore off: the tab snapshot was cleared and nothing more is written
+```
+
+### `inherit [on|off|status]`
+Whether a **new tab** starts from the newest layout in the browser. On by default:
+a tab with nothing saved adopts another tab's splits, ratios, titles and consoles,
+with its own page in the root pane; the other panes keep their addresses. `off`
+makes new tabs open with a single pane. The switch also gates offering a snapshot
+to other tabs.
+
+```
+> inherit status
+New tabs inherit the newest layout: on
+> inherit off
+New tabs now start with a single pane
 ```
 
 ### `save-layout [name]`

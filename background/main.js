@@ -23,6 +23,7 @@
 const SNAPSHOT_VERSION = 1;
 
 const PERSIST_ENABLED_KEY = 'persist:enabled';
+const PERSIST_INHERIT_KEY = 'persist:inherit';
 const TAB_LAYOUT_PREFIX = 'layout:tab:';
 const NAMED_PREFIX = 'layout:named:';
 
@@ -193,6 +194,47 @@ async function getEnabled() {
 async function setEnabled(enabled) {
     await areaSet(localArea(), { [PERSIST_ENABLED_KEY]: !!enabled });
     return !!enabled;
+}
+
+/**
+ * A brand-new tab has no layout of its own. When inheritance is on it starts from
+ * the newest layout any other tab has saved (session storage only, so it never
+ * outlives the browser), with its own page substituted for that layout's root
+ * pane. Off means every new tab starts with a single pane.
+ */
+async function getInherit() {
+    const stored = await areaGet(localArea(), [PERSIST_INHERIT_KEY]);
+    const value = stored[PERSIST_INHERIT_KEY];
+    return value === undefined ? true : !!value;
+}
+
+async function setInherit(inherit) {
+    await areaSet(localArea(), { [PERSIST_INHERIT_KEY]: !!inherit });
+    return !!inherit;
+}
+
+/** The most recently saved layout belonging to a different tab, or null. */
+async function newestOtherLayout(tabId) {
+    const area = sessionArea() || localArea();
+    const everything = await areaGet(area, null);
+    const own = tabLayoutKey(tabId);
+
+    let best = null;
+    Object.keys(everything).forEach((key) => {
+        if (key.indexOf(TAB_LAYOUT_PREFIX) !== 0 || key === own) return;
+
+        const record = everything[key] || {};
+        if (!record.savedAt || !record.snapshot) return;
+        if (!best || record.savedAt > best.savedAt) {
+            best = { savedAt: record.savedAt, snapshot: record.snapshot, tabId: key.slice(TAB_LAYOUT_PREFIX.length) };
+        }
+    });
+
+    if (!best) return null;
+
+    const check = validateSnapshot(best.snapshot);
+    if (!check.ok) return null;
+    return best;
 }
 
 /**
@@ -405,13 +447,26 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         // --- tab layout (session) ---
         case 'persist-load':
-            Promise.all([getEnabled(), loadTabLayout(tabId)]).then(([enabled, loaded]) => {
+            Promise.all([getEnabled(), getInherit(), loadTabLayout(tabId)]).then(async ([enabled, inherit, loaded]) => {
+                let snapshot = loaded.snapshot || null;
+                let inheritedFrom = null;
+
+                if (!snapshot && enabled && inherit) {
+                    const template = await newestOtherLayout(tabId);
+                    if (template) {
+                        snapshot = template.snapshot;
+                        inheritedFrom = template.tabId;
+                    }
+                }
+
                 sendResponse({
                     status: 'ok',
                     enabled: enabled,
+                    inherit: inherit,
                     tabId: tabId,
                     origin: originOf(url),
-                    snapshot: loaded.snapshot || null,
+                    snapshot: snapshot,
+                    inheritedFrom: inheritedFrom,
                     reason: loaded.reason || ''
                 });
             });
@@ -425,6 +480,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         case 'persist-clear':
             clearTabLayout(tabId).then(() => sendResponse({ status: 'ok', tabId: tabId }));
+            return true;
+
+        case 'persist-set-inherit':
+            setInherit(request.inherit).then((inherit) => {
+                sendResponse({ status: 'ok', inherit: inherit });
+            });
             return true;
 
         case 'persist-set-enabled':

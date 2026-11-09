@@ -233,10 +233,11 @@ Two layers, both written by `background/main.js` (the content script never touch
 | `storage.session` | `layout:tab:<tabId>` | reload / navigation of that tab; dies with the browser |
 | `storage.local` | `layout:named:<origin>:<name>` | explicit saves; survives restarts |
 | `storage.local` | `persist:enabled` | the auto-restore switch |
+| `storage.local` | `persist:inherit` | whether a new tab adopts the newest layout |
 
 Messages the content script uses: `persist-load`, `persist-save`, `persist-clear`,
-`persist-set-enabled`, `layout-save`, `layout-list`, `layout-load`,
-`layout-delete`. Every reply carries the origin and tab id; nothing is stored by the
+`persist-set-enabled`, `persist-set-inherit`, `layout-save`, `layout-list`,
+`layout-load`, `layout-delete`. Every reply carries the origin and tab id; nothing is stored by the
 content script.
 
 **Write path.** `renderLayout()` ends with `scheduleSave()` (400 ms debounce);
@@ -252,6 +253,19 @@ from data — one pane per leaf, an `id -> element` map for the active/zoomed pa
 consoles restored, `nextPaneId` at least the highest restored id — inside a
 `restoring` barrier so saves cannot recurse, with `try/finally` so the barrier is
 always cleared.
+
+**Follow the page.** A snapshot records which pane was the root (`rootPaneId`). When
+the reloaded `window.location.href` differs from the snapshot's `url`, `applySnapshot`
+repoints the root pane at the current address and leaves every other pane's URL
+alone — the tab's layout survives navigation without resurrecting the page you left.
+A plain reload matches, so nothing changes; `restoredNote` reads `followed the page`.
+
+**Inheritance.** With `persist:inherit` on, `persist-load` returns
+`inheritedFrom: <tabId>` when the asking tab has no snapshot of its own: the
+background picks the newest valid snapshot from another tab (`newestOtherLayout`),
+and the content script applies it through the same `rootPaneId` path, so the new
+tab shows its own page in the root pane and the copied panes keep theirs. When the
+switch is off, no snapshot is offered to other tabs.
 
 **Validation.** The background validates every snapshot whole (version, node kinds,
 directions, ratios in 1–99%, URL strings, ≤ 12 panes, depth ≤ 32, ≤ 64 KB) before
