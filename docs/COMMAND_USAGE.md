@@ -91,6 +91,31 @@ and relayed to the top frame as a command line (`relay-line` → `execute-line`)
 Typing always wins: while a console or pane input has focus, Control Mode passes
 keystrokes through to it instead of running bindings.
 
+### Editing the line: history and completion
+
+All three command inputs (a pane's console, the floating debug console and the `:`
+line) share one editor:
+
+| Key | Effect |
+|-----|--------|
+| `Enter` | Run the line (`;` chains are split here) |
+| `Up` | Recall the previous command |
+| `Down` | Go forward again; past the newest, restore what you were typing |
+| `Tab` | Complete the command name, then that command's arguments |
+| `Tab` (ambiguous) | Fill in the common prefix; a second `Tab` lists the candidates |
+
+- **History** keeps the last 200 commands, drops consecutive duplicates, and is
+  shared by all inputs — run something in a pane, recall it in the floating
+  console. It lives in the page (not persisted across reloads).
+- **Completion** is command-aware: layout names for `select-layout`, flags for
+  `resize-pane` and `split-window`, actions for `log`, `persist`, `control-mode`
+  and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
+  their variants for `filter`, `--all` for `delete-layout`, and so on.
+- Completion works on the segment under the caret, so
+  `list-panes; list-p<Tab>` completes the second command.
+- Ambiguous candidates are listed in the console (`Completions (5): …`), and a
+  token with no candidates reports `No completion for "…"`.
+
 ---
 
 ## 2. Chaining commands

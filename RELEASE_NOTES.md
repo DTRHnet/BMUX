@@ -19,6 +19,7 @@
 | Safety | Snapshots validated whole (version, shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB); bad ones ignored, never half-applied |
 | Housekeeping | Tab-close cleanup, startup pruning, 6 h fallback where `storage.session` is missing |
 | Cleanup | The dead session `STATE` machinery and the "State Fetched" stub are gone; `unlimitedStorage` dropped |
+| Line editing | `Up`/`Down` history and `Tab` completion in the pane console, the floating console and the `:` line — one shared history, command-aware arguments |
 
 ## The shape of it
 

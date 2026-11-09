@@ -150,7 +150,25 @@ default):
   keyboard equivalents; `clear` empties the scrollback.
 - There is no auto-collapse: a command opens the console and leaves it open.
 
-### 12. **Filter presets and confirmation**
+### 12. **Command line editing**
+`bindCommandInput(input, { onSubmit, report })` is shared by the pane consoles, the
+floating console and the `:` line. It owns Enter (submit), `ArrowUp`/`ArrowDown`
+(history) and `Tab` (completion), and resets the history cursor on a real `input`
+event so typing starts a fresh place in it.
+
+- History is one array on the client (`commandHistory`, 200 entries, consecutive
+  duplicates collapsed), so every input recalls the same commands. Each input
+  keeps its own cursor and draft in `input._bmuxHistory`.
+- `completionFor(segment)` reads the vocabulary from the registry
+  (`BMUX_COMMANDS`, `BMUX_LAYOUT_NAMES`, `BMUX_FILTER_PRESETS`) plus a small
+  per-command argument table (`argumentCandidates`), and completes the last token of
+  the segment found by `lastSegmentStart` — which understands `;`, quotes and
+  `[] () {}`, so chained lines complete the right command.
+- One candidate replaces the token and adds a space; several fill in the common
+  prefix; if the prefix does not grow, the candidates are listed through the
+  input's `report` callback (pane console or debug console).
+
+### 13. **Filter presets and confirmation**
 `BMUX_FILTER_PRESETS` in `content/commands.js` maps a word to a selector plus
 optional variants, and a variant may carry a `test(element, doc, view)` predicate
 for things CSS cannot express (`links internal` resolves each `href` against the
@@ -165,7 +183,7 @@ status line, attaches a `keydown` listener to the pane document so `y` / `n` /
 `resolveFilterConfirm(accept)` is what the `yes` / `no` commands (and the hidden
 `y` / `n` aliases) call, and `filter -y` bypasses the prompt entirely.
 
-### 13. **Command chains**
+### 14. **Command chains**
 `splitCommandLine` splits a line on top-level semicolons (`;` outside quotes and
 `[] () {}`; `\;` is literal) and `runLine` executes the segments one after
 another, awaiting each. Every entry point (debug console, `:` line, pane input,
@@ -176,7 +194,7 @@ Because segments are awaited, a command that raises a prompt blocks the rest of
 the chain until the prompt is answered — which is what makes
 `filter links; list-panes` show the refined result in the second segment.
 
-### 14. **Prompts**
+### 15. **Prompts**
 `ask(pane, { question, details, choices })` returns a promise and renders a card
 above that pane's footer:
 
@@ -196,13 +214,13 @@ above that pane's footer:
 `api.ask` / `api.askText` expose it to commands, and `answerOpenPrompt` is what the
 `yes` / `no` commands call.
 
-### 15. **Per-pane maximize**
+### 16. **Per-pane maximize**
 Every pane footer carries a `⤢` / `⤡` button. A click runs `resize-pane -Z` for
 that pane through the dispatcher, so the pane button, `z` / `Shift+z`, and the
 toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 `refreshPaneControls` syncs the glyphs from the render path.
 
-### 16. **Layout persistence**
+### 17. **Layout persistence**
 Two layers, both written by `background/main.js` (the content script never touches
 `chrome.storage` — `storage.session` is not readable from a content script without
 `setAccessLevel`, and only the background knows the tab id):
@@ -241,7 +259,7 @@ reported as "no snapshot", never partly applied.
 prune session keys for tabs that no longer exist; where `storage.session` is
 missing the tab layer falls back to `local` with a 6 hour expiry.
 
-### 17. **Modern UI Design**
+### 18. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command

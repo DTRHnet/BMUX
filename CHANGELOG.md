@@ -28,6 +28,21 @@ Persistence finally exists, is validated, and can be switched off.
     `delete-layout <name|--all>`;
   - they survive browser restarts, and at most 30 are kept per origin (oldest
     dropped first).
+- **Command line editing in every input.** The pane console, the floating debug
+  console and the `:` line now share one history and one completion engine:
+  - `Up` / `Down` recall the previous commands (`Down` past the newest restores
+    whatever you were typing); consecutive duplicates collapse, and the last 200
+    commands are kept;
+  - `Tab` completes the command name, then that command's arguments — layout
+    names, resize flags, `log` actions, focus directions, pane ids and numbers,
+    filter presets and their variants, and so on;
+  - an unambiguous `Tab` completes and adds a space, an ambiguous one fills in the
+    common prefix, and pressing `Tab` again lists the candidates in the console;
+  - completion works on the segment under the caret, so `list-panes; list-p<Tab>`
+    completes the second command;
+  - history is shared between all three inputs, so a command typed in a pane can
+    be recalled in the floating console.
+
 - **`persist [on|off|status]`** — the auto-restore switch. `off` clears this tab's
   snapshot and stops all writes; named layouts are untouched because they were
   explicit saves. `status` also says where the current layout came from

@@ -66,6 +66,9 @@ const BMUX_FILTER_SCAN_MAX = 5000;
 // Digit-key shortcuts for prompt choices stop at 9.
 const BMUX_PROMPT_MAX_KEYS = 9;
 
+// Shell-style line editing: how many commands the shared history keeps.
+const BMUX_HISTORY_LIMIT = 200;
+
 // Layout persistence: debounce for saves, and how long to wait for the saved
 // layout before rendering a fresh one anyway.
 const BMUX_SAVE_DEBOUNCE = 400;
@@ -200,6 +203,58 @@ function splitCommandLine(line) {
     segments.push(current.trim());
 
     return segments.filter((segment) => segment.length > 0);
+}
+
+/**
+ * Where the command being typed starts: the offset just after the last
+ * top-level `;`, so completion and history work on the segment under the caret.
+ */
+function lastSegmentStart(text) {
+    let quote = null;
+    let depth = 0;
+    let escaped = false;
+    let start = 0;
+
+    for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (character === '\\') {
+            escaped = true;
+            continue;
+        }
+        if (quote) {
+            if (character === quote) quote = null;
+            continue;
+        }
+        if (character === '"' || character === "'") {
+            quote = character;
+            continue;
+        }
+        if (character === '[' || character === '(' || character === '{') depth++;
+        if ((character === ']' || character === ')' || character === '}') && depth > 0) depth--;
+
+        if (character === ';' && depth === 0) start = i + 1;
+    }
+
+    return start;
+}
+
+function longestCommonPrefix(values) {
+    if (!values.length) return '';
+    let prefix = values[0];
+
+    for (let i = 1; i < values.length; i++) {
+        while (prefix.length && values[i].slice(0, prefix.length) !== prefix) {
+            prefix = prefix.slice(0, -1);
+        }
+        if (!prefix) return '';
+    }
+
+    return prefix;
 }
 
 /**
@@ -403,6 +458,8 @@ class BMUXClient {
         this.filters = new Map();  // pane -> filter highlight state
         this.prompts = new Map();  // pane -> open prompt card
 
+        this.commandHistory = [];     // shared shell-style history for every input
+
         this.persistEnabled = true;   // auto-restore switch (from the background)
         this.restoring = false;       // true while a snapshot is being applied
         this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
@@ -579,17 +636,16 @@ class BMUXClient {
         this.ui.btnZoom.onclick = () => this.runCommandAndLog('resize-pane -Z');
         this.ui.btnLayout.onclick = () => this.runCommandAndLog('next-layout');
 
-        // Bind Debug Input
-        this.ui.debugInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const cmd = this.ui.debugInput.value.trim();
-                this.ui.debugInput.value = '';
+        // Bind the debug console input: history, completion and Enter.
+        this.bindCommandInput(this.ui.debugInput, {
+            onSubmit: (cmd) => this.runLine(cmd),
+            report: (text) => this.log(text)
+        });
 
-                if (cmd) {
-                    this.runLine(cmd);
-                }
-                e.stopPropagation();
-            }
+        // The `:` line gets the same editing keys; its Enter is handled by the
+        // document key handler in handleKey().
+        this.bindCommandInput(this.ui.commandInput, {
+            report: (text) => this.log(text)
         });
 
         // Make Debug Draggable, and resizable from its bottom-right corner
@@ -1142,6 +1198,7 @@ class BMUXClient {
         this.ui.commandInput.value = '';
         this.hideCommandMode();
         if (value && value.trim()) {
+            this.rememberCommand(value);
             this.runLine(value);
         }
     }
@@ -1239,6 +1296,218 @@ class BMUXClient {
             this.log(result);
         }
         return result;
+    }
+
+    // --- command line editing: shared history and Tab completion ---
+
+    /** Remember a command in the shared history (consecutive duplicates collapse). */
+    rememberCommand(line) {
+        const text = (line == null ? '' : String(line)).trim();
+        if (!text) return;
+
+        const history = this.commandHistory;
+        if (history[history.length - 1] !== text) history.push(text);
+        while (history.length > BMUX_HISTORY_LIMIT) history.shift();
+    }
+
+    /**
+     * Wire Enter, ArrowUp/ArrowDown (history) and Tab (completion) onto a command
+     * input. `options.onSubmit(value)` runs the line; `options.report(text)` shows
+     * completions or a "no match" note. Without onSubmit, Enter is left to whoever
+     * already handles it (the `:` line).
+     */
+    bindCommandInput(input, options) {
+        const opts = options || {};
+
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (!opts.onSubmit) return;
+
+                const value = input.value;
+                input.value = '';
+                input._bmuxHistory = null;
+                event.stopPropagation();
+
+                if (value && value.trim()) {
+                    this.rememberCommand(value);
+                    opts.onSubmit(value);
+                }
+                return;
+            }
+
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                if (this.recallHistory(input, event.key === 'ArrowUp' ? -1 : 1)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                return;
+            }
+
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                event.stopPropagation();
+                this.completeInput(input, opts.report);
+            }
+        });
+
+        // Typing (not a programmatic recall) starts a fresh place in history.
+        input.addEventListener('input', () => {
+            input._bmuxHistory = null;
+        });
+    }
+
+    /** Walk the shared history. Returns true when the key was used. */
+    recallHistory(input, step) {
+        const history = this.commandHistory;
+        if (!history.length) return false;
+
+        if (!input._bmuxHistory) {
+            input._bmuxHistory = { index: history.length, draft: input.value };
+        }
+
+        const state = input._bmuxHistory;
+        if (state.index >= history.length) state.draft = input.value;
+
+        const next = bmuxClamp(state.index + step, 0, history.length);
+        state.index = next;
+        input.value = next === history.length ? state.draft : history[next];
+
+        try {
+            input.setSelectionRange(input.value.length, input.value.length);
+        } catch (e) {
+            // some input types do not support selection
+        }
+
+        return true;
+    }
+
+    /** What could complete the segment of the line before the caret. */
+    completionFor(segment) {
+        const trailingSpace = /\s$/.test(segment);
+        const words = segment.trim().length ? segment.trim().split(/\s+/) : [];
+        const current = trailingSpace ? '' : (words.length ? words[words.length - 1] : '');
+        const prior = trailingSpace ? words : words.slice(0, -1);
+        const head = prior.length ? prior.join(' ') + ' ' : '';
+
+        let pool;
+        if (!prior.length) {
+            pool = Object.keys(BMUX_COMMANDS);
+        } else {
+            pool = this.argumentCandidates(prior[0], prior.slice(1));
+        }
+
+        const seen = {};
+        const candidates = pool
+            .filter((candidate) => candidate && candidate.toLowerCase().indexOf(current.toLowerCase()) === 0)
+            .filter((candidate) => {
+                if (seen[candidate]) return false;
+                seen[candidate] = true;
+                return true;
+            })
+            .sort();
+
+        return {
+            head: head,
+            current: current,
+            candidates: candidates,
+            common: longestCommonPrefix(candidates)
+        };
+    }
+
+    /** Argument vocabulary for a command, for Tab after the command name. */
+    argumentCandidates(command, args) {
+        const ids = this.getPanes().map((pane) => this.getPaneId(pane));
+        const numbers = this.getPanes().map((pane, index) => String(index + 1));
+
+        switch (command) {
+            case 'focus-pane':
+                return ['up', 'down', 'left', 'right'].concat(ids, numbers);
+            case 'kill-pane':
+            case 'swap-pane':
+                return ids.concat(numbers);
+            case 'resize-pane':
+                return ['-L', '-R', '-U', '-D', '-x', '-Z'];
+            case 'select-layout':
+                return typeof BMUX_LAYOUT_NAMES !== 'undefined' ? BMUX_LAYOUT_NAMES.slice() : [];
+            case 'log':
+                return ['toggle', 'on', 'off', 'clear', 'size'];
+            case 'control-mode':
+                return ['on', 'off', 'toggle'];
+            case 'persist':
+                return ['on', 'off', 'status'];
+            case 'cycle-pane':
+                return ['next', 'prev'];
+            case 'split-window':
+                return ['-h', '-v', '-l', '-b', '-d'];
+            case 'list-panes':
+                return ['-j', '--json'];
+            case 'capture-pane':
+                return ['-n'];
+            case 'delete-layout':
+                return ['--all'];
+            case 'filter': {
+                if (typeof BMUX_FILTER_PRESETS === 'undefined') return [];
+
+                const flags = ['-n', '-y', '-l', '-c', '--in', '--not-in', '--text',
+                    '--visible', '--unique', '--replace', '--presets'];
+                const presets = Object.keys(BMUX_FILTER_PRESETS);
+
+                // A second word after a preset completes that preset's variants.
+                if (args.length === 1) {
+                    const preset = BMUX_FILTER_PRESETS[args[0].toLowerCase()];
+                    if (preset && preset.variants) {
+                        return Object.keys(preset.variants).concat(flags);
+                    }
+                }
+
+                return presets.concat(flags);
+            }
+            default:
+                return [];
+        }
+    }
+
+    /** Tab: complete the segment under the caret, or list what could follow. */
+    completeInput(input, report) {
+        const value = input.value;
+        const caret = input.selectionStart == null ? value.length : input.selectionStart;
+        const before = value.slice(0, caret);
+        const after = value.slice(caret);
+
+        const segment = before.slice(lastSegmentStart(before));
+        const result = this.completionFor(segment);
+
+        if (!result.candidates.length) {
+            if (report && result.current) report(`No completion for "${result.current}"`);
+            return;
+        }
+
+        const typed = `${result.head}${result.current}`;
+        const tailStart = before.length - typed.length;
+
+        const replaceTail = (text) => {
+            input.value = before.slice(0, tailStart) + text + after;
+            const caretAt = tailStart + text.length;
+            try {
+                input.setSelectionRange(caretAt, caretAt);
+            } catch (e) {
+                // ignore
+            }
+        };
+
+        if (result.candidates.length === 1) {
+            replaceTail(`${result.head}${result.candidates[0]} `);
+            return;
+        }
+
+        if (result.common.length > result.current.length) {
+            replaceTail(`${result.head}${result.common}`);
+            return;
+        }
+
+        if (report) {
+            report(`Completions (${result.candidates.length}): ${result.candidates.join('  ')}`);
+        }
     }
 
     // --- Pane primitives (used by commands.js through api.client) ---
@@ -2936,16 +3205,12 @@ class BMUXClient {
             this.cancelPrompt(pane, 'the pane navigated');
         });
 
-        // Bind command input
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const cmdText = input.value.trim();
-                input.value = '';
-                e.stopPropagation();
-
-                if (cmdText) {
-                    this.runPaneCommand(pane, cmdText, output);
-                }
+        // Bind the pane command input: history, completion and Enter.
+        this.bindCommandInput(input, {
+            onSubmit: (cmdText) => this.runPaneCommand(pane, cmdText),
+            report: (text) => {
+                this.appendPaneOutput(pane, text, 'result');
+                this.setPaneConsoleOpen(pane, true);
             }
         });
 

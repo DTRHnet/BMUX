@@ -196,6 +196,18 @@ The console under each pane's input is a scrollback, not a flash message:
   layout changes and zoom.
 - `clear` empties the scrollback.
 
+**Line editing works like a shell** — in the pane console, the floating console and
+the `:` line:
+
+| Key | Effect |
+|-----|--------|
+| `Up` / `Down` | Recall previous commands (`Down` past the newest restores your draft) |
+| `Tab` | Complete the command name, then its arguments (layouts, flags, presets, pane ids, directions…) |
+
+An unambiguous `Tab` completes and adds a space; an ambiguous one fills in the
+common prefix, and a second `Tab` lists the candidates. History is shared across all
+inputs and keeps the last 200 commands.
+
 ### 🔎 Filter highlighting
 `filter` inspects a same-origin pane and *shows* you what matched:
 

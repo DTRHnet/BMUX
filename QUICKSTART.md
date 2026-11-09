@@ -71,6 +71,15 @@ yes / no                                  - Type the answer instead
 Esc                                       - Cancel the prompt
 ```
 
+## Command line editing (every input)
+```
+Up / Down       - Recall previous commands (Down past the newest restores your draft)
+Tab             - Complete the command name, then its arguments
+Tab Tab         - List the candidates in the console
+```
+Ctrl+b keys still apply: this is the input's own editing, in the pane console, the
+floating console and the `:` line, which all share one history.
+
 ## Maximize a pane
 ```
 ⤢ button in the pane footer  - Maximize that pane (same as Ctrl+b, Shift+z)
