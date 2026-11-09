@@ -53,6 +53,64 @@ const BMUX_PANE_INDEX_TIMEOUT = 2000;
 // Layout presets, in cycle order for next-layout.
 const BMUX_LAYOUTS = ['even-horizontal', 'main-vertical', 'even-vertical', 'main-horizontal', 'tiled'];
 
+// Filter highlights: how many boxes are drawn by default, and the hard ceiling.
+const BMUX_FILTER_MAX = 200;
+const BMUX_FILTER_MAX_HARD = 1000;
+
+// Debounce for re-drawing boxes when the filtered page changes underneath them.
+const BMUX_FILTER_REFRESH_DELAY = 300;
+
+// Styles for the boxes, injected into the filtered pane's own document so the
+// overlay cannot be affected by the pane's CSS and is removed with it.
+const BMUX_FILTER_CSS = `
+[data-bmux-filter-layer] {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+  z-index: 2147483646;
+}
+[data-bmux-filter] {
+  position: absolute;
+  box-sizing: border-box;
+  pointer-events: none;
+  outline: 2px solid rgba(255, 214, 0, 0.95);
+  outline-offset: 0;
+  background: rgba(255, 214, 0, 0.10);
+  border-radius: 2px;
+}
+[data-bmux-filter]::before,
+[data-bmux-filter]::after {
+  content: '';
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  background: #ffd600;
+}
+[data-bmux-filter]::before { left: -3px; top: -3px; }
+[data-bmux-filter]::after { right: -3px; bottom: -3px; }
+[data-bmux-filter].bmux-filter-hover {
+  outline-color: #00ff88;
+  background: rgba(0, 255, 136, 0.18);
+}
+[data-bmux-filter].bmux-filter-hover::before,
+[data-bmux-filter].bmux-filter-hover::after { background: #00ff88; }
+.bmux-filter-index {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform: translateY(-100%);
+  padding: 1px 4px;
+  border-radius: 3px 3px 0 0;
+  background: #ffd600;
+  color: #000;
+  font: 10px/1.2 'Consolas', monospace;
+  pointer-events: none;
+}
+[data-bmux-filter].bmux-filter-hover .bmux-filter-index { background: #00ff88; }
+`;
+
 function bmuxClamp(value, low, high) {
     if (value < low) return low;
     if (value > high) return high;
@@ -160,6 +218,31 @@ function pickPaneInDirection(panes, current, direction, rectOf) {
     return { pane: others[0].pane, wrapped: true };
 }
 
+/**
+ * Short, human name for a matched element: TAG#id.first-class, plus a title,
+ * aria-label or text snippet when the element carries one.
+ */
+function bmuxDescribeElement(element) {
+    if (!element || !element.tagName) return '?';
+
+    let name = element.tagName;
+    if (element.id) name += `#${element.id}`;
+
+    const className = typeof element.className === 'string' ? element.className : '';
+    if (className) {
+        name += '.' + className.trim().split(/\s+/).slice(0, 3).join('.');
+    }
+
+    const attribute = element.getAttribute
+        ? (element.getAttribute('aria-label') || element.getAttribute('title') || element.getAttribute('name') || '')
+        : '';
+    const snippet = attribute || (element.textContent || '').trim().replace(/\s+/g, ' ');
+
+    if (snippet) name += ` "${snippet.slice(0, 32)}${snippet.length > 32 ? '…' : ''}"`;
+
+    return name.slice(0, 96);
+}
+
 // --- Layout tree helpers (pure data, no DOM) ---
 
 function bmuxLeaf(pane) {
@@ -231,6 +314,8 @@ class BMUXClient {
 
         this.paneIndexPrompt = false;
         this.paneIndexTimer = null;
+
+        this.filters = new Map();  // pane -> filter highlight state
 
         this.ui = null;
         this.handles = [];
@@ -482,9 +567,11 @@ class BMUXClient {
         window.addEventListener('blur', () => this.syncActivePaneFromFocus(), true);
 
         // 4. The overlay can be resized; pane rects are fractions, so one render
-        // keeps every pane proportional to the new size.
+        // keeps every pane proportional to the new size. Filter boxes are in
+        // document coordinates, so they are re-measured as well.
         window.addEventListener('resize', () => {
             if (this.ui) this.renderLayout();
+            Array.from(this.filters.keys()).forEach((pane) => this.refreshFilter(pane));
         });
     }
 
@@ -555,6 +642,17 @@ class BMUXClient {
                 this.clearPaneIndexes();
                 return;
             }
+        }
+
+        // Highlighted filter boxes are on screen: Escape takes them down before
+        // anything else consuming Escape (the `escape` binding below does the same
+        // for frames, which cannot see the top frame's filter state).
+        if (e.key === 'Escape' && this.hasActiveFilters()) {
+            e.preventDefault();
+            e.stopPropagation();
+            const cleared = this.clearAllFilters();
+            this.log(`Cleared ${cleared} filter highlight(s)`);
+            return;
         }
 
         // CONTROL MODE LOGIC
@@ -1326,6 +1424,266 @@ class BMUXClient {
         return { ok: true };
     }
 
+    // --- filter highlights ---
+
+    hasActiveFilters() {
+        return this.filters.size > 0;
+    }
+
+    /** Name a matched element for the status line and command output. */
+    describeElement(element) {
+        return bmuxDescribeElement(element);
+    }
+
+    /** Footer status segment: "FILTER: <selector> - <element>". */
+    setPaneStatus(pane, text, mode) {
+        const element = pane && pane.querySelector ? pane.querySelector('.bmux-pane-status') : null;
+        if (!element) return;
+
+        element.textContent = text || '';
+        element.classList.toggle('bmux-pane-status-filtering', mode === 'filtering');
+        element.classList.toggle('bmux-pane-status-hovering', mode === 'hovering');
+    }
+
+    /**
+     * Box every element matching `selector` inside a same-origin pane, and follow
+     * the pointer with that pane's status line.
+     *
+     * The boxes live in the pane's own document, positioned in document
+     * coordinates, so they scroll with the page and cannot be disturbed by the
+     * overlay. They are removed by clearFilter (Esc, `filter -c`, navigation).
+     *
+     * Returns { ok, matched, shown } or { ok: false, message }.
+     */
+    filterPane(pane, selector, opts) {
+        const options = opts || {};
+
+        if (!this.ui || !pane) return { ok: false, message: 'No pane to filter' };
+
+        const iframe = pane.querySelector('iframe');
+        if (!iframe) return { ok: false, message: 'No iframe found in pane' };
+
+        let doc = null;
+        try {
+            doc = iframe.contentDocument || (iframe.contentWindow && iframe.contentWindow.document);
+        } catch (e) {
+            doc = null; // cross-origin
+        }
+
+        if (!doc || !doc.documentElement) {
+            return {
+                ok: false,
+                message: `Cross-origin content: cannot highlight inside ${this.getPaneUrl(pane)}`
+            };
+        }
+
+        let matched;
+        try {
+            matched = Array.prototype.slice.call(doc.querySelectorAll(selector));
+        } catch (e) {
+            return { ok: false, message: `Invalid selector "${selector}"` };
+        }
+
+        this.clearFilter(pane);
+
+        const max = Math.max(1, Math.min(
+            parseInt(options.max, 10) || BMUX_FILTER_MAX,
+            BMUX_FILTER_MAX_HARD
+        ));
+
+        const layer = doc.createElement('div');
+        layer.setAttribute('data-bmux-filter-layer', '');
+
+        const style = doc.createElement('style');
+        style.setAttribute('data-bmux-filter-layer', '');
+        style.textContent = BMUX_FILTER_CSS;
+        layer.appendChild(style);
+
+        doc.documentElement.appendChild(layer);
+
+        const state = {
+            selector: selector,
+            max: max,
+            doc: doc,
+            iframe: iframe,
+            layer: layer,
+            boxes: [],
+            elements: [],
+            indexByElement: new Map(),
+            total: 0,
+            onMove: null,
+            onLeave: null,
+            observer: null,
+            refreshTimer: null
+        };
+        this.filters.set(pane, state);
+
+        const result = this.redrawFilterBoxes(pane, state, matched);
+
+        const hoverIndex = (target) => {
+            let node = target;
+            while (node) {
+                if (state.indexByElement.has(node)) return state.indexByElement.get(node);
+                node = node.parentElement;
+            }
+            return -1;
+        };
+
+        state.onMove = (event) => {
+            const index = hoverIndex(event.target);
+
+            state.boxes.forEach((entry, position) => {
+                entry.box.classList.toggle('bmux-filter-hover', position === index);
+            });
+
+            if (index === -1) {
+                this.setPaneStatus(pane,
+                    `FILTER: ${selector} · ${state.elements.length} match(es)`, 'filtering');
+            } else {
+                this.setPaneStatus(pane,
+                    `FILTER: ${selector} - ${bmuxDescribeElement(state.elements[index])} · ` +
+                    `${index + 1}/${state.elements.length}`, 'hovering');
+            }
+        };
+
+        state.onLeave = () => {
+            state.boxes.forEach((entry) => entry.box.classList.remove('bmux-filter-hover'));
+            this.setPaneStatus(pane,
+                `FILTER: ${selector} · ${state.elements.length} match(es)`, 'filtering');
+        };
+
+        // A key pressed with the focus inside the pane document never reaches the
+        // top frame's key handler, so Escape is caught here as well. This listener
+        // only exists while a highlight is on screen, so it cannot steal Escape
+        // from the page at any other time.
+        state.onKey = (event) => {
+            if (event.key !== 'Escape') return;
+            event.preventDefault();
+            event.stopPropagation();
+            const cleared = this.clearAllFilters();
+            this.log(`Cleared ${cleared} filter highlight(s)`);
+        };
+
+        doc.addEventListener('mousemove', state.onMove, true);
+        doc.addEventListener('mouseleave', state.onLeave, true);
+        doc.addEventListener('keydown', state.onKey, true);
+
+        // Keep the boxes honest when the page changes underneath them.
+        const view = doc.defaultView;
+        if (view && typeof view.MutationObserver === 'function' && doc.body) {
+            state.observer = new view.MutationObserver(() => {
+                if (state.refreshTimer) return;
+                state.refreshTimer = setTimeout(() => {
+                    state.refreshTimer = null;
+                    this.refreshFilter(pane);
+                }, BMUX_FILTER_REFRESH_DELAY);
+            });
+            state.observer.observe(doc.body, { childList: true, subtree: true, attributes: true });
+        }
+
+        state.onLeave();
+
+        return { ok: true, matched: matched.length, shown: result.shown };
+    }
+
+    /** Draw (or re-draw) one box per match, capped by the filter's max. */
+    redrawFilterBoxes(pane, state, matched) {
+        const doc = state.doc;
+        const view = doc.defaultView || window;
+
+        state.boxes.forEach((entry) => entry.box.remove());
+        state.boxes = [];
+        state.indexByElement = new Map();
+
+        const shown = matched.slice(0, state.max);
+        const scrollX = view.scrollX || doc.documentElement.scrollLeft || 0;
+        const scrollY = view.scrollY || doc.documentElement.scrollTop || 0;
+
+        state.elements = shown;
+        state.total = matched.length;
+
+        shown.forEach((element, index) => {
+            state.indexByElement.set(element, index);
+
+            const rect = element.getBoundingClientRect();
+            const box = doc.createElement('div');
+            box.setAttribute('data-bmux-filter', String(index + 1));
+            box.style.left = `${Math.round(rect.left + scrollX)}px`;
+            box.style.top = `${Math.round(rect.top + scrollY)}px`;
+            box.style.width = `${Math.max(1, Math.round(rect.width))}px`;
+            box.style.height = `${Math.max(1, Math.round(rect.height))}px`;
+
+            const label = doc.createElement('span');
+            label.className = 'bmux-filter-index';
+            label.textContent = String(index + 1);
+            box.appendChild(label);
+
+            state.layer.appendChild(box);
+            state.boxes.push({ element: element, box: box });
+        });
+
+        return { matched: matched.length, shown: shown.length };
+    }
+
+    /** Re-query the selector and redraw, for pages that change while filtered. */
+    refreshFilter(pane) {
+        const state = this.filters.get(pane);
+        if (!state) return null;
+
+        const doc = state.doc;
+        if (!doc || !doc.documentElement || !doc.documentElement.contains(state.layer)) {
+            this.clearFilter(pane);
+            return null;
+        }
+
+        let matched;
+        try {
+            matched = Array.prototype.slice.call(doc.querySelectorAll(state.selector));
+        } catch (e) {
+            this.clearFilter(pane);
+            return null;
+        }
+
+        const result = this.redrawFilterBoxes(pane, state, matched);
+        this.setPaneStatus(pane,
+            `FILTER: ${state.selector} · ${state.elements.length} match(es)`, 'filtering');
+        return result;
+    }
+
+    clearFilter(pane) {
+        const state = this.filters.get(pane);
+        if (!state) return false;
+
+        try {
+            if (state.refreshTimer) clearTimeout(state.refreshTimer);
+            if (state.observer) state.observer.disconnect();
+            if (state.onMove && state.doc) state.doc.removeEventListener('mousemove', state.onMove, true);
+            if (state.onLeave && state.doc) state.doc.removeEventListener('mouseleave', state.onLeave, true);
+            if (state.onKey && state.doc) state.doc.removeEventListener('keydown', state.onKey, true);
+            if (state.layer && state.layer.parentNode) state.layer.parentNode.removeChild(state.layer);
+        } catch (e) {
+            // The document may already be gone (navigation, pane removal).
+        }
+
+        this.filters.delete(pane);
+        this.setPaneStatus(pane, '', null);
+        return true;
+    }
+
+    /** Clear one pane's highlight, or every highlight when no pane is given. */
+    clearFilters(pane) {
+        if (pane) return this.clearFilter(pane) ? 1 : 0;
+        return this.clearAllFilters();
+    }
+
+    clearAllFilters() {
+        let cleared = 0;
+        Array.from(this.filters.keys()).forEach((target) => {
+            if (this.clearFilter(target)) cleared++;
+        });
+        return cleared;
+    }
+
     // --- display-panes ---
 
     displayPanes() {
@@ -1441,6 +1799,7 @@ class BMUXClient {
         const wasActive = this.getActivePane() === target;
 
         this.clearPaneIndexes();
+        this.clearFilter(target);
         if (this.zoomedPane === target) this.zoomedPane = null;
         if (this.lastActivePane === target) this.lastActivePane = null;
 
@@ -1473,6 +1832,7 @@ class BMUXClient {
     /** Reset the overlay to a single pane showing the current page. */
     renderWindow() {
         this.clearPaneIndexes();
+        this.clearAllFilters();
         this.zoomedPane = null;
         this.layoutName = null;
         this.lastActivePane = null;
@@ -1525,6 +1885,9 @@ class BMUXClient {
         title.className = 'bmux-pane-title';
         title.textContent = '';
 
+        const status = document.createElement('span');
+        status.className = 'bmux-pane-status';
+
         const badge = document.createElement('span');
         badge.className = 'bmux-pane-badge';
         badge.title = 'Pane number and id (focus-pane <number|%id>)';
@@ -1532,6 +1895,7 @@ class BMUXClient {
         cmdContainer.appendChild(prompt);
         cmdContainer.appendChild(input);
         cmdContainer.appendChild(title);
+        cmdContainer.appendChild(status);
         cmdContainer.appendChild(badge);
 
         const output = document.createElement('div');
@@ -1541,8 +1905,13 @@ class BMUXClient {
         footer.appendChild(output);
         pane.appendChild(footer);
 
-        // Page title can become known only after the iframe loads (same-origin).
-        iframe.addEventListener('load', () => this.refreshPaneTitles());
+        // The page title can become known only after the iframe loads (same-origin).
+        // A load also means the document was replaced, so any filter overlay
+        // pointing into the old one is gone.
+        iframe.addEventListener('load', () => {
+            this.refreshPaneTitles();
+            if (this.filters.has(pane)) this.clearFilter(pane);
+        });
 
         // Bind command input
         input.addEventListener('keydown', (e) => {

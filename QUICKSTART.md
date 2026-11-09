@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.1.0**
+**Version 0.2.0**
 
 ## Activation
 ```
@@ -22,7 +22,8 @@ q            - Show pane numbers; press a digit to jump
 o / ;        - Cycle to the next pane / back to the previous one
 Space        - Next layout preset
 :            - Command prompt
-Esc          - Exit Control Mode (or cancel the numbers)
+Esc          - Clear filter boxes; if none, exit Control Mode
+               (display-panes numbers cancel first)
 ```
 
 ## Legacy Mode (TMUX-style)
@@ -53,7 +54,21 @@ Layout              - Cycle layout presets
 Click a pane / its iframe   - Focus it (blue border)
 Drag a boundary             - Resize the split
 Double-click a boundary     - Reset that split to 50/50
+Hover a boxed match         - Names it in that pane's status line
 ```
+
+## Filter highlighting
+```
+> filter .card              - Box every match in this pane, numbered
+> filter -n 50 .card        - Cap the boxes (default 200)
+> filter -l a               - List matches only, draw nothing
+> filter -c                 - Remove the boxes
+Esc                         - Clear the boxes (from the page, an input,
+                              or with focus inside the pane)
+```
+Each box has an outline plus corner ticks so tiny elements are findable. Hovering
+one writes `FILTER: .card - DIV.card "Product" · 3/12` into the pane's footer
+status line and turns that box green. Same-origin panes only.
 
 ## Focusing Panes
 ```
@@ -110,7 +125,8 @@ Changing layout never reloads the pages in the panes.
 > help              - List all commands
 > source            - View HTML source in pane
 > restore           - Exit console view
-> filter div        - Find all divs
+> filter div        - Box every div, name each on hover
+> filter -c         - Clear the boxes
 > capture-pane      - Print the pane's visible text
 > rename-pane Docs  - Title shown in the footer ("-" clears it)
 > url               - Show current URL
@@ -149,6 +165,8 @@ $ source            - Affects active pane (blue border)
 - **Control Mode** prevents typing on page (good for GitHub, etc.)
 - **Numbers move, ids do not**: after a split, numbers are renumbered but `%N`
   ids stay with their pane, so scripts should use ids
+- **`filter` draws over the page, never into it**: boxes are sibling overlays in
+  the pane document, so the page's own layout is untouched
 - **`source` command** converts pane to terminal view
 - **CSP removal** lets you load any site (GitHub, Google, etc.)
 

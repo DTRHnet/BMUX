@@ -95,6 +95,7 @@ keystrokes through to it instead of running bindings.
 | Click inside a pane's iframe | Focus that pane (works cross-origin, via the window blur/`activeElement` sync) |
 | Drag the boundary between two panes | Resize that split |
 | Double-click a boundary | Reset that split to 50/50 |
+| Hover a boxed match (after `filter`) | Names it in that pane's status line |
 
 Handles are 8 px wide with a hairline marker and a `col-resize`/`row-resize`
 cursor. While dragging, a shield covers the overlay so the pointer cannot slip
@@ -246,6 +247,11 @@ command with `off`.
 ### `command-prompt`
 Opens the `:` command line. Bound to `:` in both key tables.
 
+### `escape`
+What `Esc` runs. It clears filter highlights if any are on screen, otherwise it
+leaves Control Mode. It exists as a command so a key pressed inside a pane frame —
+which cannot see the top frame's filter state — resolves to the same behaviour.
+
 ### `help`
 Lists every command, grouped into overlay commands and pane commands, with each
 one's description and usage. Generated from the registry, so it cannot go stale.
@@ -278,16 +284,66 @@ URL: https://github.com/...
 Returns the pane from the console view to the browser view.
 `Already in browser view` if it was not in console view.
 
-### `filter <selector>`
-Lists elements matching a CSS selector (same-origin only), also logging the
-elements to the browser console. An invalid selector returns an error instead of
-throwing.
+### `filter <selector> [-n <max>] | filter -l <selector> | filter -c`
+Finds elements with a CSS selector and **boxes them inside the pane**, then names
+each one in the pane's status line as you pass over it.
 
 ```
-> filter .product-name
-=== Found 3 element(s): ".product-name" ===
+> filter .card
+=== 2 match(es): ".card" ===
 
-[0] SPAN.product-name
+[1] DIV#alpha.card "Product card"
+[2] DIV.card "Beta card"
+
+Boxed 2 of 2 match(es). Hover one to name it in the pane status line; Esc or "filter -c" clears.
+```
+
+What you see:
+
+- One **box per match**: 2px amber outline, a light wash, and 7px corner ticks so
+  even a tiny or zero-height element is findable. Each box carries a numbered tab
+  matching the list above.
+- **Hover a match** and the pane footer's status segment names it:
+
+  ```
+  FILTER: .card - DIV#alpha.card "Product card" · 1/2
+  ```
+
+  That box turns green. Move off a match and the segment reverts to
+  `FILTER: .card · 2 match(es)`.
+- The overlay is drawn as sibling elements in the pane's own document, in
+  document coordinates: it scrolls with the page, and the page's layout is not
+  touched (nothing is wrapped, moved or given attributes).
+- A `MutationObserver` re-queries the selector and redraws when the page changes,
+  so matches added or removed after the filter was applied appear and disappear.
+  Pages that move elements without mutating the DOM (CSS transitions) need the
+  filter re-run.
+
+Options:
+
+| Form | Meaning |
+|------|---------|
+| `filter <selector>` | Box every match (up to 200) |
+| `filter -n <max>` | Cap the boxes, e.g. `filter -n 50 .card` (ceiling 1000) |
+| `filter -l <selector>` | List matches only, draw nothing |
+| `filter -c` / `--clear` | Remove the boxes and the status line |
+
+Clearing:
+
+- **`Esc`** clears the highlights before anything else consumes Escape — from the
+  top frame, from the debug console or a pane input, and with the focus clicked
+  inside the pane (a second `Esc` then leaves Control Mode as usual).
+- **`filter -c`** clears them from the command surface.
+
+Same-origin only: a cross-origin pane cannot be measured or written into, so the
+command reports which URL blocked it and draws nothing. An invalid selector is
+reported instead of throwing.
+
+```
+> filter ???
+Error: Invalid selector "???"
+> filter #nothing
+No elements match "#nothing"
 ```
 
 ### `capture-pane [-n <lines>]`
@@ -339,6 +395,8 @@ The debug console and the `:` line always act on the **active pane**:
 - Blue glowing border
 - Has the `.active` class
 - Shown in the status bar as `pane 2 %2 · 30%x100%`
+- Its footer has a per-pane status segment, used by `filter` to name the element
+  under the pointer
 
 Ways to change it:
 

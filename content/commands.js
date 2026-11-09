@@ -117,7 +117,7 @@ const BMUX_KEYBINDINGS = {
         'o': 'cycle-pane next',
         ';': 'last-pane',
         'Space': 'next-layout',
-        'Escape': 'control-mode off'
+        'Escape': 'escape'
     },
     prefix: {
         '%': 'split-window -h',
@@ -562,6 +562,23 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'escape': {
+        scope: 'overlay',
+        description: 'What Esc does: clear filter highlights if any, otherwise leave Control Mode',
+        usage: 'escape',
+        execute: function (api, args) {
+            const client = api.client;
+
+            if (client.hasActiveFilters()) {
+                const cleared = client.clearAllFilters();
+                return `Cleared ${cleared} filter highlight(s)`;
+            }
+
+            client.setControlMode(false);
+            return 'Control Mode: false';
+        }
+    },
+
     'command-prompt': {
         scope: 'overlay',
         description: 'Open the : command line (same commands, typed instead of clicked)',
@@ -648,49 +665,87 @@ const BMUX_COMMANDS = {
 
     'filter': {
         scope: 'pane',
-        description: 'Filter and display specific HTML elements from the page',
-        usage: 'filter <selector>  (e.g., filter div, filter .className, filter #id)',
-        execute: async function (api, args) {
+        description: 'Box every element matching a selector in the pane, and name each one on hover',
+        usage: 'filter <selector> [-n <max>] | filter -l <selector> | filter -c',
+        execute: function (api, args) {
+            const client = api.client;
             const pane = api.pane;
             if (!pane) return 'Error: No pane to filter';
 
-            if (args.length === 0) {
-                return 'Error: Specify a CSS selector (e.g., filter div)';
+            let clear = false;
+            let listOnly = false;
+            let max = null;
+            const selectorParts = [];
+
+            for (let i = 0; i < args.length; i++) {
+                const arg = args[i];
+
+                if (arg === '-c' || arg === '--clear') {
+                    clear = true;
+                } else if (arg === '-l' || arg === '--list') {
+                    listOnly = true;
+                } else if (arg === '-n' || arg === '--max') {
+                    const parsed = parseInt(args[i + 1], 10);
+                    if (!isFinite(parsed) || parsed <= 0) {
+                        return 'Error: Usage: filter <selector> [-n <max>]';
+                    }
+                    max = parsed;
+                    i++;
+                } else if (arg !== '') {
+                    selectorParts.push(arg);
+                }
             }
 
-            const selector = args.join(' ');
-            const iframe = pane.querySelector('iframe');
-            if (!iframe) {
-                return 'Error: No iframe found in pane';
+            if (clear) {
+                const cleared = client.clearFilters(pane);
+                return cleared
+                    ? `Cleared ${cleared} filter highlight(s)`
+                    : 'No filter highlights to clear';
             }
+
+            const selector = selectorParts.join(' ').trim();
+            if (!selector) {
+                return 'Error: Usage: filter <selector> [-n <max>] | filter -l <selector> | filter -c';
+            }
+
+            const iframe = pane.querySelector('iframe');
+            if (!iframe) return 'Error: No iframe found in pane';
 
             const doc = safeGetIframeDocument(iframe);
             if (!doc) {
-                const url = safeGetIframeUrl(iframe);
-                return `Error: Cross-origin content\nURL: ${url}\n\nTip: Use 'url' command to load a same-origin page.`;
+                return `Error: Cross-origin content\nURL: ${safeGetIframeUrl(iframe)}\n\n` +
+                    'Boxing matches needs a same-origin pane.';
             }
 
             let elements;
             try {
-                elements = doc.querySelectorAll(selector);
+                elements = Array.prototype.slice.call(doc.querySelectorAll(selector));
             } catch (e) {
                 return `Error: Invalid selector "${selector}"`;
             }
 
-            if (elements.length === 0) {
-                return `No elements found matching: ${selector}`;
+            if (!elements.length) {
+                client.clearFilter(pane);
+                return `No elements match "${selector}"`;
             }
 
-            let output = `=== Found ${elements.length} element(s): "${selector}" ===\n\n`;
-            elements.forEach((el, i) => {
-                output += `[${i}] ${el.tagName}`;
-                if (el.id) output += `#${el.id}`;
-                if (el.className) output += `.${el.className}`;
-                output += '\n';
-                console.log(`Element ${i}:`, el);
-            });
-            output += '\nFull elements logged to console.';
-            return output;
+            const listed = elements.slice(0, 20).map((element, index) =>
+                `[${index + 1}] ${client.describeElement(element)}`);
+
+            let output = `=== ${elements.length} match(es): "${selector}" ===\n\n${listed.join('\n')}`;
+            if (elements.length > listed.length) {
+                output += `\n... ${elements.length - listed.length} more not listed`;
+            }
+
+            if (listOnly) {
+                return `${output}\n\nList only (-l): nothing drawn.`;
+            }
+
+            const result = client.filterPane(pane, selector, { max: max });
+            if (!result.ok) return `Error: ${result.message}`;
+
+            return `${output}\n\nBoxed ${result.shown} of ${result.matched} match(es). ` +
+                'Hover one to name it in the pane status line; Esc or "filter -c" clears.';
         }
     },
 

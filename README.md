@@ -1,12 +1,16 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.1.0**
+**Version 0.2.0**
 
 A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.1.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.2.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.2.0:** `filter` is now a visual tool — it boxes every match inside
+> the pane, names each one in the pane's status line as you hover it, and clears
+> with `Esc` or `filter -c`.
+>
 > **New in 0.1.0:** percentage splits, mouse-draggable split boundaries, zoom,
 > layout presets, real `kill-pane`, pane titles, swap/rotate, `display-panes`,
 > `capture-pane`, and a ratio-driven layout engine that never reparents a pane —
@@ -97,6 +101,35 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
   there (`q` in Control Mode)
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
+
+### 🔎 Filter highlighting
+`filter` inspects a same-origin pane and *shows* you what matched:
+
+```
+> filter .card
+=== 2 match(es): ".card" ===
+
+[1] DIV#alpha.card "Product card"
+[2] DIV.card "Beta card"
+
+Boxed 2 of 2 match(es). Hover one to name it in the pane status line; Esc or "filter -c" clears.
+```
+
+- Every match gets a **box** in the pane: 2px outline, light wash, and 7px corner
+  ticks so a tiny or zero-height element is still visible, with a numbered tab.
+- **Hover a match** and the pane's footer status line names it —
+  `FILTER: .card - DIV#alpha.card "Product card" · 1/2` — and the box turns green.
+  Move away and it falls back to `FILTER: .card · 2 match(es)`.
+- **Live**: a MutationObserver re-queries and redraws when the page changes.
+- `filter -l .card` lists without drawing, `filter -n 50 .card` caps the boxes
+  (default 200), `filter -c` clears.
+- **`Esc` clears the boxes** — before it does anything else, from the top frame,
+  from an input, or with the focus clicked inside the pane. A second `Esc` still
+  leaves Control Mode.
+- Nothing is injected around your page's elements: the boxes are sibling
+  overlays in the pane document, so the page's layout is untouched.
+- **Same-origin only** — a cross-origin pane cannot be measured or written into,
+  and `filter` says so.
 
 ### 🏷️ Pane identity and titles
 - **Numbers** - layout order (top-to-bottom, left-to-right), recomputed after
@@ -194,6 +227,7 @@ These act on the whole overlay.
 | `detach` | Hide or show the overlay | `> detach` |
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
+| `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
 
 ### Pane Commands
 
@@ -204,7 +238,9 @@ for the console and `:` line.
 |---------|-------------|---------|
 | `source` | View HTML source (transforms pane) | `> source` |
 | `restore` | Return from console to browser view | `> restore` |
-| `filter <selector>` | Find elements by CSS selector | `> filter .btn` |
+| `filter <selector> [-n max]` | Box matches in the pane and name them on hover | `> filter .card` |
+| `filter -l <selector>` | List matches without drawing | `> filter -l a` |
+| `filter -c` | Clear the highlight boxes | `> filter -c` |
 | `capture-pane [-n lines]` | Print the pane's visible text (same-origin) | `> capture-pane -n 20` |
 | `rename-pane <title\|->` | Title shown in the pane footer; `-` clears it | `> rename-pane Docs` |
 | `url [new-url]` | Show or change pane URL | `> url github.com` |
@@ -401,8 +437,10 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - ⏳ **No `break-pane` / `join-pane`**
 - ⏳ **No broadcasting** of input to several panes
 - ⏳ **Mouse only** - resizing needs a pointer; touch is not handled
-- ⏳ **Cross-origin panes** cannot be inspected (`source`, `filter`,
+- ⏳ **Cross-origin panes** cannot be inspected or boxed (`source`, `filter`,
   `capture-pane`); navigation, reload, sizing and reordering work regardless
+- ⏳ **Filter boxes are measured when drawn** — a page that moves elements without
+  mutating the DOM (CSS transitions) needs the filter re-run
 - ⏳ `kill-pane` refuses the last pane (use `new-window` to reset)
 
 ---
@@ -421,6 +459,13 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] One command registry shared by buttons, console, `:` line, pane inputs and keys
 
 ### Version 0.2.0
+- [x] `filter` boxes every match in the pane, with numbered corner marks
+- [x] Hover names the matched element in the pane status line
+- [x] Live re-query when the page changes under the boxes
+- [x] `Esc` / `filter -c` to clear, from the top frame and from inside the pane
+- [x] `filter -l` (list only) and `filter -n <max>` (box cap)
+
+### Version 0.3.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
@@ -472,4 +517,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.1.0 | Last Updated: November 2026
+Version 0.2.0 | Last Updated: November 2026

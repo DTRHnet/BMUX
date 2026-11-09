@@ -26,7 +26,8 @@ When activated (via `Alt+Shift+B` or popup button):
   `%` split horizontal, `"` split vertical, `c` new-window, `d` detach,
   `x` kill-pane, `:` command-prompt, arrows focus-pane, `Alt+arrows` resize,
   `z` zoom, `q` display-panes, `o` next pane, `;` previous pane, `Space`
-  next-layout, `Esc` control-mode off
+  next-layout, `Esc` the `escape` command (clear filter highlights, else leave
+  Control Mode)
 
 ### 4. **Layout engine**
 The layout is a binary split tree, held in `BMUXClient.layout`:
@@ -107,11 +108,37 @@ directional focus move unzooms first so it reads the real geometry.
   tables and the background relay. `runCommand` never throws: command errors and
   bad input come back as strings.
 
-### 10. **Modern UI Design**
+### 10. **Filter overlay**
+`filter <selector>` turns element search into something visible:
+
+- `filterPane(pane, selector, { max })` injects one `[data-bmux-filter-layer]`
+  into the pane's own document (same-origin only) and appends a
+  `[data-bmux-filter]` box per match, positioned in document coordinates
+  (`getBoundingClientRect() + scrollX/scrollY`), so boxes scroll with the page.
+  Each box is `pointer-events: none`, carries its 1-based index, and gets its
+  outline, wash and corner ticks from a `<style>` injected with the layer.
+- `mousemove`/`mouseleave` listeners on that document walk from the event target
+  up the tree to find a boxed element, move the `bmux-filter-hover` class, and
+  write `FILTER: <selector> - <element> · <n>/<total>` into the pane footer's
+  status segment (`setPaneStatus`, yellow while filtering, green while hovering).
+- A debounced `MutationObserver` re-queries the selector and redraws, so pages
+  that add or remove matches stay in sync.
+- `Esc` clears the overlay before anything else consumes Escape: the top frame
+  handles it directly, and while a highlight exists the same listener is attached
+  to the pane document, because a key pressed with the focus inside a pane never
+  reaches the top frame's key handler. The `escape` command gives keys relayed
+  from a pane frame the same behaviour.
+- `clearFilter(pane)` removes the layer, the listeners, the observer and the
+  status text, and is called when the pane navigates (`iframe` load), is killed,
+  or the overlay resets. Cross-origin panes cannot be measured or written into,
+  so `filter` reports why and draws nothing.
+
+### 11. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable debug console**: floating, scrollback, runs any command
-- **Per-pane footer**: title, `>` command input, `[number id]` badge, output area
+- **Per-pane footer**: title, `>` command input, status segment (filter names),
+  `[number id]` badge, output area
 - **Status bar**: `[CONTROL MODE]`/`[NORMAL]` on the left, focused pane and size
   (plus `· ZOOM`) on the right
 - **display-panes**: large numbers over each pane while picking
@@ -204,9 +231,11 @@ to `content/commands.js` only.
 5. **No multiple windows / layout tabs**: `new-window` resets the overlay
 6. **No floating panes, break/join pane, or input broadcasting**
 7. **Mouse only**: resizing requires a pointer; touch is not handled
-8. **Cross-origin panes** cannot be inspected (`source`, `filter`,
+8. **Cross-origin panes** cannot be inspected or boxed (`source`, `filter`,
    `capture-pane`); navigation, reload, sizing and reordering work regardless
-9. **`kill-pane` refuses the last pane**; use `new-window` to reset
+9. **Filter boxes are measured when drawn**: pages that move elements without
+   mutating the DOM (CSS transitions) need the filter re-run
+10. **`kill-pane` refuses the last pane**; use `new-window` to reset
 
 ## Troubleshooting
 

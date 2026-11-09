@@ -1,3 +1,55 @@
+# BMUX Version 0.2.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.2.0
+**Release Date**: November 9, 2026
+**Status**: Visual filter release
+**License**: MIT
+
+---
+
+## Highlights
+
+**`filter` now shows you what it found.** Every match gets a box inside the pane,
+a numbered tab, and a name in the pane's status line while you hover it.
+
+| Area | What shipped |
+|------|--------------|
+| Highlighting | `filter <selector>` boxes every match: outline, wash, corner ticks, index tab |
+| Naming | Hover a match -> `FILTER: .card - DIV#alpha.card "Product card" · 1/2` in the pane footer, box turns green |
+| Live | Debounced MutationObserver re-queries and redraws when the page changes |
+| Limits | `filter -n <max>` (default 200, ceiling 1000), `filter -l` lists only |
+| Clearing | `Esc` (top frame, inputs, or with focus inside the pane) and `filter -c` |
+| Keys | New `escape` command, so keys relayed from a pane frame behave the same |
+
+## How it is drawn
+
+The boxes are sibling overlays appended to the pane document by the top frame:
+one `[data-bmux-filter-layer]` with a `[data-bmux-filter]` per match, positioned in
+document coordinates, `pointer-events: none`, styled by an injected `<style>`.
+Nothing is wrapped, moved or restyled on the page itself, so the page's layout is
+untouched; boxes scroll with the content and are removed as a unit.
+
+Same-origin only: a cross-origin pane cannot be measured or written into, and
+`filter` says so instead of pretending.
+
+## Verification
+
+- 481 jsdom checks and 49 checks in Chromium 150 with the extension loaded
+  unpacked, including a real `filter .box` on a live page, real hover naming
+  (`· 1/2` then `· 2/2`), Escape from console focus and from inside the pane, and
+  `filter -c`.
+- Not verified: cross-origin panes, touch input, and the MutationObserver refresh
+  in a real browser (jsdom only).
+
+## Breaking changes
+
+None. `filter` without a selector is now a usage error, and its output wording
+changed; the command still exists with the same name and scope.
+
+---
+
 # BMUX Version 0.1.0 - Release Summary
 
 ## Release Information

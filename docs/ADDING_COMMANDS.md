@@ -56,6 +56,21 @@ Rules that keep commands consistent with the rest of BMUX:
    page inside it. Use the layout primitives (`api.client.splitWindow`,
    `killPane`, `applyLayout`, `swapPanes`, `rotatePanes`, `setPaneSize`,
    `zoomPane`) instead of touching the DOM structure.
+7. **Do not restyle the page inside a pane.** Anything you draw for the user
+   (like the `filter` boxes) should be sibling overlays you own and clean up:
+   `filterPane` appends one `[data-bmux-filter-layer]` to the pane document and
+   `clearFilter` takes it away. Never wrap or mutate the page's own elements.
+
+### Drawing an overlay into a pane
+
+`filter` is the worked example: `filterPane` creates a layer plus one box per
+match in the pane's document, positions each box in document coordinates
+(`getBoundingClientRect() + scroll`), styles them through an injected `<style>`,
+and attaches `mousemove`/`mouseleave`/`keydown` listeners to that document so the
+pane's status line can follow the pointer and `Esc` can clear the overlay. The
+listeners are stored on the state object and removed by `clearFilter`, and the
+whole state is dropped when the pane navigates (`iframe` load), is killed, or the
+overlay resets.
 
 ## Adding a pane command
 
@@ -147,6 +162,12 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `swapPanes(a, b)` | Trade two panes' positions |
 | `rotatePanes(reverse)` | Move every pane one slot |
 | `displayPanes()` | Show pane numbers for two seconds |
+| `filterPane(pane, selector, { max })` | Box matches inside a same-origin pane; returns `{ ok, matched, shown }` |
+| `refreshFilter(pane)` | Re-measure and redraw that pane's boxes |
+| `clearFilter(pane)` / `clearAllFilters()` | Remove the boxes and the status line |
+| `hasActiveFilters()` | Whether any pane is currently boxed |
+| `setPaneStatus(pane, text, mode)` | Write the pane's status segment (`'filtering'`/`'hovering'`) |
+| `describeElement(element)` | `TAG#id.class "snippet"` for a matched element |
 | `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
 | `newWindow()` | Reset to a single pane |
 | `toggle()` | Hide or show the overlay |
@@ -206,7 +227,7 @@ Pane scope:
 |---------|-------------|
 | `source` | Show the pane's HTML in a console view |
 | `restore` | Return from console view to browser view |
-| `filter <selector>` | List elements matching a CSS selector |
+| `filter <selector> [-n max]` / `filter -l` / `filter -c` | Box matches in the pane, name them on hover, list only, or clear |
 | `capture-pane [-n lines]` | Print the pane's visible text |
 | `rename-pane <title\|->` | Set or clear the footer title |
 | `url [new-url]` | Show or change the pane URL |

@@ -5,6 +5,76 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-11-09
+
+`filter` became a visual tool: every match is boxed in the pane and named as you
+pass over it.
+
+### Added
+
+- **Filter highlighting.** `filter <selector>` now draws a box around every match
+  inside the pane — a 2px outline, a light wash and 7px corner ticks, so even a
+  tiny or zero-height element is findable — with a numbered tab on each box.
+- **Live element naming.** Moving the pointer over a match writes
+  `FILTER: <selector> - <element> · <n>/<total>` into that pane's footer status
+  line (the element's `TAG#id.class` plus a title, aria-label or text snippet),
+  turns that box green, and falls back to
+  `FILTER: <selector> · <n> match(es)` when the pointer leaves a match.
+- **Live refresh.** A `MutationObserver` (debounced 300ms) re-queries the selector
+  and redraws the boxes when the page changes underneath them, so matches added
+  or removed after the filter was applied show up.
+- **`filter -l <selector>`** lists matches without drawing anything.
+- **`filter -n <max>`** caps how many boxes are drawn (default 200, hard ceiling
+  1000) while still reporting every match.
+- **`filter -c`** / `--clear` removes the boxes and the status line.
+- **`Esc` clears the highlights** — from the top frame, from the debug console or
+  a pane input, and from inside the pane itself (a pane document is a different
+  frame, so the filter installs its own Escape listener for as long as the boxes
+  are on screen). Highlights are cleared before Escape does anything else, so
+  Control Mode and `display-panes` still get their own Escape afterwards.
+- **`escape` command**, so a key pressed in a pane frame — which cannot see the
+  top frame's filter state — resolves to the same behaviour: clear highlights if
+  any, otherwise leave Control Mode.
+- **Per-pane status segment** in the footer: yellow while filtered, green while
+  naming a hovered match.
+
+### Changed
+
+- The boxes live in the pane's own document, positioned in document coordinates,
+  so they scroll with the page and vanish with it. Nothing is drawn into the
+  page's layout: no wrapper elements around page content, no attribute changes on
+  page elements, no reflow.
+- `filter` with no selector is now a usage error.
+- Filter state is dropped when the pane navigates (`iframe` load), when the pane
+  is killed, and when the overlay resets; the pane's Escape listener is removed
+  with it.
+
+### Notes
+
+- **Same-origin only.** A cross-origin pane cannot be measured or written into, so
+  `filter` reports why and draws nothing. Navigation, sizing and reordering still
+  work there.
+- Boxes reflect the DOM at the moment they are drawn. A page that moves elements
+  without mutating the DOM (CSS transitions, scroll-driven layout) will not
+  trigger the observer — re-run `filter` (or resize the window) to re-measure.
+- Two panes can be filtered independently; `Esc` clears all highlights, `filter
+  -c` clears the pane it was run for.
+
+### Verification
+
+- `node --check` clean; all files kept CRLF line endings.
+- jsdom: **481 checks** pass, including boxes drawn per match, hover naming and
+  index, hover class movement, `mouseleave` fallback, Escape from the top frame
+  and from inside the pane document, `filter -c`, `-l`, `-n`, invalid selectors,
+  the cross-origin refusal, and filter state dropped on kill.
+- Chromium 150 with the extension loaded unpacked: **49 checks** pass, including a
+  real `filter .box` on a live page (2 boxes injected into the pane document),
+  real mouse hover producing `FILTER: .box - DIV.box "one" · 1/2` and then
+  `· 2/2` for the second element, Escape clearing the boxes from the console
+  focus and from inside the pane, and `filter -c`.
+- Not verified: cross-origin panes (every browser check is same-origin), the
+  MutationObserver refresh path in a real browser (jsdom only), and touch input.
+
 ## [0.1.0] - 2026-11-09
 
 A ratio-driven layout engine, real pane management, and one command registry that
@@ -231,7 +301,7 @@ every entry point shares.
 
 ---
 
-## Planned for 0.2.0
+## Planned for 0.3.0
 
 - Floating panes (a pane that overlays the layout instead of taking space)
 - `break-pane` / `join-pane`

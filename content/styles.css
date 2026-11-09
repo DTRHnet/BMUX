@@ -319,6 +319,25 @@
   height: 2px;
 }
 
+/* Per-pane status segment: names the hovered filter match, e.g.
+   "FILTER: .card - DIV.card "Product" · 3/12". */
+.bmux-pane-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: #ffd600;
+}
+
+.bmux-pane-status.bmux-pane-status-hovering {
+  color: #00ff88;
+}
+
 /* Pane title in the footer: auto from the page, or set with rename-pane */
 .bmux-pane-title {
   flex: 0 1 auto;
