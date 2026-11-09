@@ -195,7 +195,7 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `scheduleSave()` / `saveNow(reason)` | Persist the layout (debounced / immediately) |
 | `serializeLayout()` | The current layout as a snapshot object |
 | `applySnapshot(snapshot)` | Rebuild the overlay from a snapshot |
-| `setPersistEnabled(on)`, `saveNamedLayout(name)`, `listNamedLayouts()`, `restoreNamedLayout(name)`, `deleteNamedLayout(name)` | The persistence commands' client side |
+| `setPersistEnabled(on)`, `setPersistInherit(on)`, `saveNamedLayout(name)`, `listNamedLayouts()`, `restoreNamedLayout(name)`, `deleteNamedLayout(name)` | The persistence commands' client side |
 
 ## Adding a filter preset
 
@@ -322,13 +322,24 @@ The snapshot shape, if you need to read one:
 ```javascript
 {
   version: 1, savedAt: 0, origin: 'https://example.com', url: 'https://example.com/',
-  activeId: '%2', zoomedId: null, nextPaneId: 3,
+  rootPaneId: '%1', activeId: '%2', zoomedId: null, nextPaneId: 3,
+  prefs: { theme: 'frost', debugOpen: false, verbose: false },
   consoles: { '%1': { open: true, height: 180 } },
   layout: { kind: 'split', direction: 'row', ratio: 0.3,
             first:  { kind: 'leaf', pane: { id: '%1', url: '…', title: 'Docs' } },
             second: { kind: 'leaf', pane: { id: '%2', url: '…' } } }
 }
 ```
+
+**`rootPaneId` is the pane that follows the page.** The snapshot belongs to the
+tab, not to the address: when the tab reloads somewhere else, `applySnapshot()`
+writes `window.location.href` into that pane and leaves every other pane alone. If
+your command tracks "the page this layout was made for", read
+`client.rootPane` / the pane URL rather than `snapshot.url`, and expect the two to
+differ after a navigation. A tab that has no snapshot of its own may also be
+handed another tab's (newest) snapshot when inheritance is on (`inherit off` to
+disable); the same root-pane substitution applies, so never assume the restored
+panes are the ones the snapshot recorded.
 
 ## Adding a key binding
 
@@ -387,6 +398,7 @@ Pane scope:
 | `debug [on\|off\|toggle]` / `verbose [on\|off\|status]` | Debug window and verbose mirroring |
 | `info [section]` / `theme [frost\|classic]` / `keys` | Diagnostics and palette |
 | `persist [on\|off\|status]` | Per-tab auto-restore switch |
+| `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout |
 | `save-layout [name]` / `restore-layout <name>` / `list-layouts` / `delete-layout <name\|--all>` | Named layouts |
 | `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
 | `capture-pane [-n lines]` | Print the pane's visible text |

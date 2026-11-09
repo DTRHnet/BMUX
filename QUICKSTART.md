@@ -49,9 +49,14 @@ Automatic         - Splits, ratios, URLs, titles, focus, zoom and consoles are
 > delete-layout work      - Remove it (or --all)
 > persist off             - Stop saving this tab and clear its snapshot
 > persist status          - On/off, and where the current layout came from
+> inherit off             - New tabs stop inheriting the newest layout
 ```
-Restoring recreates the panes, so the pages load fresh (scroll position is not
-kept). `persist off` is the privacy switch; nothing is ever synced.
+The layout belongs to the tab, so it **follows the page**: navigate somewhere else
+and the root pane takes the new address while the other panes stay as they were. A
+brand-new tab inherits the newest layout (`inherit`), with its own page in the root
+pane. Restoring recreates the panes, so the pages load fresh (scroll position is not
+kept). `persist off` stops saving this tab and `inherit off` stops a tab offering
+its layout to new ones; nothing is ever synced.
 
 ## Chaining commands
 ```
