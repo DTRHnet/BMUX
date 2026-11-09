@@ -48,9 +48,14 @@ Press `:` in Control Mode and type a command. Same dispatcher, same commands.
 ```
 
 ### Per-pane input (`>` prompt, bottom of each pane)
-Runs any command with **that pane** as the context, and shows the result in that
-pane's output area. Overlay commands work here too — they just act on the whole
-overlay.
+Runs any command with **that pane** as the context, and appends the command line
+and its result to that pane's console (the scrollback under the input). Overlay
+commands work here too — they just act on the whole overlay.
+
+The console opens when a command produces output and stays open: it scrolls,
+keeps the last 100 blocks, has a toggle button (`▸` / `▾`) in the footer, and its
+top edge can be dragged to resize it (double-click resets, `log size 240` sets it
+from the command line).
 
 ```
 > source
@@ -72,7 +77,8 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 | `:` | `command-prompt` | same |
 | `←` `→` `↑` `↓` | `focus-pane left/right/up/down` | same |
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
-| `z` | `resize-pane -Z` | same |
+| `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
+| `l` | `log toggle` (this pane's console) | same |
 | `q` | `display-panes` | same |
 | `o` | `cycle-pane next` | same |
 | `;` | `last-pane` | same |
@@ -96,6 +102,9 @@ keystrokes through to it instead of running bindings.
 | Drag the boundary between two panes | Resize that split |
 | Double-click a boundary | Reset that split to 50/50 |
 | Hover a boxed match (after `filter`) | Names it in that pane's status line |
+| Drag a pane console's top edge | Resize that console (minimum 40px, max 70% of the pane) |
+| Double-click a pane console's edge | Reset its height to 140px |
+| Drag the floating console's corner | Resize the floating console |
 
 Handles are 8 px wide with a hairline marker and a `col-resize`/`row-resize`
 cursor. While dragging, a shield covers the overlay so the pointer cannot slip
@@ -252,9 +261,23 @@ What `Esc` runs. It clears filter highlights if any are on screen, otherwise it
 leaves Control Mode. It exists as a command so a key pressed inside a pane frame —
 which cannot see the top frame's filter state — resolves to the same behaviour.
 
+### `log [toggle|on|off|clear|size <px>]`
+Opens, closes, resizes or empties the active pane's console (the scrollback under
+its input). `l` in Control Mode is the same as `log toggle`.
+
+```
+> log size 240
+Console height 240px
+> log off
+Console closed
+```
+
+Heights are clamped to 40px and to 70% of the pane.
+
 ### `help`
 Lists every command, grouped into overlay commands and pane commands, with each
 one's description and usage. Generated from the registry, so it cannot go stale.
+Hidden aliases (`y`, `n`) are left out.
 
 ---
 
@@ -324,9 +347,75 @@ Options:
 | Form | Meaning |
 |------|---------|
 | `filter <selector>` | Box every match (up to 200) |
+| `filter <preset> [variant]` | Preset query, e.g. `filter links internal` |
+| `filter --presets` | List the preset vocabulary |
 | `filter -n <max>` | Cap the boxes, e.g. `filter -n 50 .card` (ceiling 1000) |
-| `filter -l <selector>` | List matches only, draw nothing |
+| `filter -l <target>` | List matches only, draw nothing |
+| `filter -y <target>` | Skip the confirmation prompt |
 | `filter -c` / `--clear` | Remove the boxes and the status line |
+
+### Filter presets
+
+A preset word expands into a selector, and a variant can narrow it with a
+predicate that CSS cannot express on its own ("internal" means the link resolves
+to *this document's* origin, including `#anchor` and `/path`):
+
+```
+> filter links              # every a[href]
+> filter links internal     # links that stay on this site
+> filter links external     # links that leave it
+> filter links empty        # links with no text
+> filter images large       # img wider than 200px
+> filter images noalt       # img with no alt text
+> filter images broken      # img that failed to load
+> filter text main          # paragraphs inside the main content
+> filter tables rows        # every table row
+> filter media video        # videos and player embeds
+```
+
+| Preset | Selector | Variants |
+|--------|----------|----------|
+| `links` | `a[href]` | `internal`, `external`, `empty` |
+| `images` | `img` | `large`, `noalt`, `broken` |
+| `headings` | `h1`…`h6` | — |
+| `text` | `p, li, td, th, dd, blockquote` | `main` |
+| `inputs` | `input, select, textarea` | — |
+| `buttons` | `button, input[type=submit], [role=button]` | — |
+| `tables` | `table` | `rows`, `cells` |
+| `media` | `img, video, audio, iframe, canvas, picture` | `video` |
+| `prices` | `[data-price], .price, .product-price, [itemprop=price], .amount` | — |
+| `comments` | `.comment, .comment-body, .reply, [data-comment], #comments li` | — |
+| `authors` | `.byline, [rel=author], [itemprop=author], .author` | — |
+| `dates` | `time, [datetime], .date, .published` | — |
+| `articles` | `article` | `headlines` |
+| `forms` | `form` | — |
+| `code` | `pre, code` | — |
+| `main` | `main, article, #content, .post-content, [role=main]` | — |
+
+`filter --presets` prints the same table from the registry, so it cannot go stale.
+
+### Confirming big or preset queries
+
+A preset, or any filter matching more than 25 elements, asks before drawing:
+
+```
+> filter links
+=== 2 match(es): links (a[href]) ===
+
+[1] A "internal link"
+[2] A "external link"
+
+2 match(es) for links. Box them? Type "yes" / "no" (or press y / n; Esc cancels, "filter -y" skips this prompt).
+> yes
+Boxed 2 of 2 match(es) for links
+```
+
+- `yes` / `no` answer it (the hidden aliases `y` / `n` do the same), so it works
+  from the console, a pane input, or the keyboard.
+- `y` / `n` / `Esc` answer it directly when the focus is not in a text field —
+  including with the focus clicked inside the page.
+- An unanswered prompt times out after 15 seconds and draws nothing.
+- `filter -y links` skips the prompt entirely, for scripts.
 
 Clearing:
 

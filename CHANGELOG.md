@@ -5,6 +5,98 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-11-09
+
+The pane console became usable (it opens, stays open, scrolls and resizes),
+`filter` learned preset words and a yes/no confirmation, and `Shift+z` maximizes a
+pane the way tmux does.
+
+### Added
+
+- **Pane console that stays put.** The console under each pane's input is now a
+  real scrollback:
+  - every command line and its result is appended (capped at 100 blocks) and the
+    log scrolls, instead of the result replacing the previous one and then being
+    hidden after five seconds;
+  - it opens when a command produces output and **no longer auto-collapses**;
+  - a toggle button in the footer (`▸` / `▾`) reopens or hides it at any time;
+  - its top edge is a drag grip: drag to resize (minimum 40px, maximum 70% of the
+    pane), double-click to reset to 140px;
+  - the height and the open/closed state survive layout changes, zoom and
+    swapping;
+  - `log toggle|on|off|clear|size <px>` does the same from the command line, and
+    the `l` key toggles it in Control Mode and after `Ctrl+b`.
+- `clear` now empties the console scrollback.
+- **Filter presets.** `filter <preset> [variant]` expands a word into a selector,
+  and a variant can narrow it with a predicate that CSS cannot express:
+  - `links` (`a[href]`) with `internal`, `external`, `empty`;
+  - `images` (`img`) with `large`, `noalt`, `broken`;
+  - `headings`, `text` (with `main`), `inputs`, `buttons`;
+  - `tables` (with `rows`, `cells`), `media` (with `video`);
+  - `prices`, `comments`, `authors`, `dates`, `articles` (with `headlines`),
+    `forms`, `code`, `main`.
+  - `filter --presets` prints the vocabulary with the selector each word expands
+    to.
+  - "Internal" means "resolves to the pane document's origin" (falling back to
+    its base URI for documents without an origin of their own), so `#anchor` and
+    `/path` links count as internal while `mailto:` and `https://elsewhere` do
+    not.
+- **Yes/no before drawing.** A preset, or any filter matching more than 25
+  elements, asks first:
+  `2 match(es) for links. Box them? Type "yes" / "no" (or press y / n; Esc
+  cancels, "filter -y" skips this prompt).`
+  - `yes` / `no` commands answer it, and `y` / `n` are hidden aliases, so the
+    prompt works from the console, a pane input or the keyboard;
+  - `y` / `n` / `Esc` answer it directly too, including with the focus clicked
+    inside the page;
+  - an unanswered prompt times out after 15 seconds and draws nothing;
+  - `filter -y …` skips the prompt.
+- **`Shift+z`** toggles pane zoom (Ctrl+b then Shift+z, or in Control Mode). `z`
+  still works.
+- The floating debug console can be resized by dragging its bottom-right corner.
+
+### Changed
+
+- Filter status and hover text use the preset name (`FILTER: links internal …`)
+  instead of the raw selector when a preset was used, and listings show the
+  preset beside the selector it expanded to.
+- `help` skips commands marked `hidden` (currently the `y` and `n` aliases).
+
+### Fixed
+
+- The pane console could not be reopened after its five-second auto-collapse. The
+  auto-collapse is gone, and the toggle button and `log toggle` can reopen it.
+- The pane console could not scroll: `overflow-y: auto` now lives on the log
+  element instead of on a panel that was `display: none` when idle.
+- A pane console resized by drag kept its height only until the next command; the
+  height is stored on the pane.
+
+### Notes
+
+- The console panel takes space from the pane's iframe while open (it is part of
+  the pane's flex column), so a very tall console shrinks the page view — that is
+  what the drag limit is for.
+- Presets are only as good as the page's markup: `prices` and `comments` rely on
+  conventional class/attribute names and will find nothing on a site that does not
+  use them; plain selectors remain the escape hatch.
+- Cross-origin panes still cannot be boxed at all, presets included.
+
+### Verification
+
+- `node --check` clean; all files kept CRLF; `manifest.json` parses.
+- jsdom: **558 checks** pass — console open/close/toggle/drag/`log size`/`clear`
+  and scrollback accumulation, preset resolution and variants (`links internal`
+  excluding an off-site link), the confirmation prompt (`yes`/`no`/`y`/`n`/`Esc`,
+  `-y`), `Shift+z` zoom, plus everything from 0.2.0.
+- Chromium 150 with the extension unpacked: **65 checks** pass — the console
+  opening on a command and still open after 5.3s, a real grip drag making it
+  taller, `log off`/`log on` preserving the scrollback, a preset asking before
+  drawing and `yes` boxing it, `filter -y links internal` boxing only the on-site
+  link, and `Shift+z` maximizing and restoring.
+- Not verified: touch input, cross-origin panes, and the 15-second prompt timeout
+  in a real browser (jsdom covers the cancel path; the timeout itself is not
+  exercised by either suite).
+
 ## [0.2.0] - 2026-11-09
 
 `filter` became a visual tool: every match is boxed in the pane and named as you
@@ -301,7 +393,7 @@ every entry point shares.
 
 ---
 
-## Planned for 0.3.0
+## Planned for 0.4.0
 
 - Floating panes (a pane that overlays the layout instead of taking space)
 - `break-pane` / `join-pane`

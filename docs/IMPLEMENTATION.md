@@ -25,9 +25,9 @@ When activated (via `Alt+Shift+B` or popup button):
 - Keys resolve through `BMUX_KEYBINDINGS.control` in `content/commands.js`:
   `%` split horizontal, `"` split vertical, `c` new-window, `d` detach,
   `x` kill-pane, `:` command-prompt, arrows focus-pane, `Alt+arrows` resize,
-  `z` zoom, `q` display-panes, `o` next pane, `;` previous pane, `Space`
-  next-layout, `Esc` the `escape` command (clear filter highlights, else leave
-  Control Mode)
+  `z` / `Shift+z` zoom, `l` log toggle (pane console), `q` display-panes, `o`
+  next pane, `;` previous pane, `Space` next-layout, `Esc` the `escape` command
+  (clear filter highlights, else leave Control Mode)
 
 ### 4. **Layout engine**
 The layout is a binary split tree, held in `BMUXClient.layout`:
@@ -133,12 +133,44 @@ directional focus move unzooms first so it reads the real geometry.
   or the overlay resets. Cross-origin panes cannot be measured or written into,
   so `filter` reports why and draws nothing.
 
-### 11. **Modern UI Design**
+### 11. **Pane console**
+Each pane's footer ends in a console panel (`display: flex` when open, closed by
+default):
+
+- `appendPaneOutput(pane, text, kind)` appends one block per command line and per
+  result to `.bmux-pane-output-log` (capped at 100 blocks), keeping the newest in
+  view unless the user has scrolled away from the bottom.
+- `setPaneConsoleOpen` / `togglePaneConsole` flip the `open` class and the footer
+  toggle glyph; the open state and the height live in `data-console-open` /
+  `data-console-height`, so they survive splits, layout changes, zoom and
+  swapping (panes are never recreated).
+- The panel's top edge is a grip: `startConsoleResize` converts the vertical drag
+  into a height clamped to 40px … 70% of the pane, and double-click resets it.
+- `log toggle|on|off|clear|size <px>` and the `l` key are the command-line and
+  keyboard equivalents; `clear` empties the scrollback.
+- There is no auto-collapse: a command opens the console and leaves it open.
+
+### 12. **Filter presets and confirmation**
+`BMUX_FILTER_PRESETS` in `content/commands.js` maps a word to a selector plus
+optional variants, and a variant may carry a `test(element, doc, view)` predicate
+for things CSS cannot express (`links internal` resolves each `href` against the
+pane document's origin, falling back to its base URI for documents without an
+origin of their own). `collectFilterMatches(pane, selector, test)` runs the query
+and the predicate without drawing anything.
+
+`filter` asks before drawing when the query is a preset or matches more than 25
+elements: `requestFilterConfirm` stores a pending prompt, writes it into the pane
+status line, attaches a `keydown` listener to the pane document so `y` / `n` /
+`Esc` work with the focus inside the page, and starts a 15-second timeout.
+`resolveFilterConfirm(accept)` is what the `yes` / `no` commands (and the hidden
+`y` / `n` aliases) call, and `filter -y` bypasses the prompt entirely.
+
+### 13. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
-- **Draggable debug console**: floating, scrollback, runs any command
+- **Draggable, resizable debug console**: floating, scrollback, runs any command
 - **Per-pane footer**: title, `>` command input, status segment (filter names),
-  `[number id]` badge, output area
+  console toggle, `[number id]` badge, and a resizable console panel
 - **Status bar**: `[CONTROL MODE]`/`[NORMAL]` on the left, focused pane and size
   (plus `· ZOOM`) on the right
 - **display-panes**: large numbers over each pane while picking

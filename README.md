@@ -1,12 +1,17 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.2.0**
+**Version 0.3.0**
 
 A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.2.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.3.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.3.0:** the per-pane console is a real scrollback (opens, stays
+> open, scrolls, drag to resize, `l` or `log toggle`), `filter` understands preset
+> words (`filter links internal`) and asks yes/no before boxing a preset or a big
+> result, and `Shift+z` maximizes a pane like tmux.
+>
 > **New in 0.2.0:** `filter` is now a visual tool — it boxes every match inside
 > the pane, names each one in the pane's status line as you hover it, and clears
 > with `Esc` or `filter -c`.
@@ -102,6 +107,19 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
 
+### 💻 Per-pane console you can actually read
+The console under each pane's input is a scrollback, not a flash message:
+
+- Every command and its result is appended and kept (100 blocks), with a
+  **scrollbar**.
+- It **stays open** — the five-second auto-collapse is gone.
+- A toggle button in the footer (`▸` / `▾`), the `l` key, or `log toggle` opens
+  and closes it whenever you like.
+- **Drag its top edge** to make it taller (up to 70% of the pane; double-click to
+  reset; `log size 240` works too). The height and open state survive splits,
+  layout changes and zoom.
+- `clear` empties the scrollback.
+
 ### 🔎 Filter highlighting
 `filter` inspects a same-origin pane and *shows* you what matched:
 
@@ -121,8 +139,20 @@ Boxed 2 of 2 match(es). Hover one to name it in the pane status line; Esc or "fi
   `FILTER: .card - DIV#alpha.card "Product card" · 1/2` — and the box turns green.
   Move away and it falls back to `FILTER: .card · 2 match(es)`.
 - **Live**: a MutationObserver re-queries and redraws when the page changes.
+- **Preset words** expand into whole queries, with variants that need a real
+  predicate rather than a selector:
+  `filter links` · `filter links internal` · `filter links external` ·
+  `filter images large` · `filter images noalt` · `filter headings` ·
+  `filter text` · `filter text main` · `filter inputs` · `filter buttons` ·
+  `filter tables rows` · `filter media video` · `filter prices` ·
+  `filter comments` · `filter authors` · `filter dates` ·
+  `filter articles headlines` · `filter forms` · `filter code` · `filter main`.
+  `filter --presets` prints the vocabulary with the selector behind each word.
+- **It asks before drawing** when you use a preset or match more than 25
+  elements: `2 match(es) for links. Box them? Type "yes" / "no" (or press y / n;
+  Esc cancels, "filter -y" skips this prompt).`
 - `filter -l .card` lists without drawing, `filter -n 50 .card` caps the boxes
-  (default 200), `filter -c` clears.
+  (default 200), `filter -c` clears, `filter -y …` skips the prompt.
 - **`Esc` clears the boxes** — before it does anything else, from the top frame,
   from an input, or with the focus clicked inside the pane. A second `Esc` still
   leaves Control Mode.
@@ -228,6 +258,7 @@ These act on the whole overlay.
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
+| `yes` / `no` | Answer a filter confirmation prompt (`y` / `n` are aliases) | `> yes` |
 
 ### Pane Commands
 
@@ -238,14 +269,17 @@ for the console and `:` line.
 |---------|-------------|---------|
 | `source` | View HTML source (transforms pane) | `> source` |
 | `restore` | Return from console to browser view | `> restore` |
-| `filter <selector> [-n max]` | Box matches in the pane and name them on hover | `> filter .card` |
+| `filter <selector> [-n max] [-y]` | Box matches in the pane and name them on hover | `> filter .card` |
+| `filter <preset> [variant]` | Preset query, e.g. `links internal`, `images large` | `> filter links internal` |
+| `filter --presets` | List the preset vocabulary | `> filter --presets` |
 | `filter -l <selector>` | List matches without drawing | `> filter -l a` |
 | `filter -c` | Clear the highlight boxes | `> filter -c` |
 | `capture-pane [-n lines]` | Print the pane's visible text (same-origin) | `> capture-pane -n 20` |
 | `rename-pane <title\|->` | Title shown in the pane footer; `-` clears it | `> rename-pane Docs` |
 | `url [new-url]` | Show or change pane URL | `> url github.com` |
 | `reload` | Reload the pane | `> reload` |
-| `clear` | Clear command output | `> clear` |
+| `log [toggle\|on\|off\|clear\|size px]` | Show, hide, resize or clear this pane's console | `> log size 240` |
+| `clear` | Empty the pane console scrollback | `> clear` |
 
 Bad input never throws: an unknown command, an unknown pane, a missing argument,
 an unknown flag or an out-of-range size returns a message and leaves the layout
@@ -284,9 +318,10 @@ scripting:
 | `x` | `kill-pane` |
 | `←` `→` `↑` `↓` | Move focus, with wrap-around |
 | `Alt+←/→/↑/↓` | Resize (move the boundary) |
-| `z` | `resize-pane -Z` (zoom toggle) |
+| `z` / `Shift+z` | `resize-pane -Z` (zoom toggle — the tmux `prefix + Z`) |
 | `q` | `display-panes` (press a number to jump) |
 | `o` / `;` | `cycle-pane next` / `last-pane` |
+| `l` | `log toggle` (open/close this pane's console) |
 | `Space` | `next-layout` |
 | `:` | `command-prompt` |
 | `Esc` | Exit Control Mode (or cancel `display-panes`) |
@@ -308,6 +343,8 @@ a command line, so keys are not a second code path.
 | Click inside a pane's iframe | Focus that pane (cross-origin safe) |
 | Drag a boundary between panes | Resize the split |
 | Double-click a boundary | Reset that split to 50/50 |
+| Drag a pane console's top edge | Resize that console (double-click resets it) |
+| Drag the debug console's corner | Resize the floating console |
 
 ---
 
@@ -441,6 +478,10 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   `capture-pane`); navigation, reload, sizing and reordering work regardless
 - ⏳ **Filter boxes are measured when drawn** — a page that moves elements without
   mutating the DOM (CSS transitions) needs the filter re-run
+- ⏳ **A filter prompt times out after 15s** and draws nothing; re-run the filter
+  if you miss it
+- ⏳ **Presets depend on the page's markup** — `prices`/`comments` need
+  conventional class names, so plain selectors are the fallback
 - ⏳ `kill-pane` refuses the last pane (use `new-window` to reset)
 
 ---
@@ -466,6 +507,13 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] `filter -l` (list only) and `filter -n <max>` (box cap)
 
 ### Version 0.3.0
+- [x] Pane console: persistent scrollback, toggle button, drag resize, `log` command
+- [x] Filter presets (`links internal`, `images large`, …) with `--presets`
+- [x] Yes/no confirmation before boxing a preset or a large result
+- [x] `Shift+z` zoom toggle (tmux `prefix + Z`)
+- [x] Resizable floating debug console
+
+### Version 0.4.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
@@ -517,4 +565,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.2.0 | Last Updated: November 2026
+Version 0.3.0 | Last Updated: November 2026

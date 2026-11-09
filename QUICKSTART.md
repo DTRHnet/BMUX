@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.2.0**
+**Version 0.3.0**
 
 ## Activation
 ```
@@ -17,7 +17,8 @@ d            - Detach (hide overlay)
 x            - Kill pane (last pane is refused)
 Arrow        - Move focus left / right / up / down (wraps at the edge)
 Alt+Arrow    - Resize: move the boundary 2%
-z            - Zoom the focused pane (toggle)
+z / Shift+z  - Zoom the focused pane (toggle; tmux prefix + Z)
+l            - Open/close this pane's console
 q            - Show pane numbers; press a digit to jump
 o / ;        - Cycle to the next pane / back to the previous one
 Space        - Next layout preset
@@ -57,15 +58,29 @@ Double-click a boundary     - Reset that split to 50/50
 Hover a boxed match         - Names it in that pane's status line
 ```
 
+## Pane console
+```
+Run any command             - Opens the console and appends to the scrollback
+Click the footer toggle     - Open/close it (also: l, or > log toggle)
+Drag its top edge           - Resize (double-click resets; > log size 240)
+> clear                     - Empty the scrollback
+```
+It stays open with a scrollbar; it no longer auto-collapses after a few seconds.
+
 ## Filter highlighting
 ```
 > filter .card              - Box every match in this pane, numbered
+> filter links internal     - Preset words: links that stay on this site
+> filter images large       - images wider than 200px
+> filter --presets          - List every preset and variant
 > filter -n 50 .card        - Cap the boxes (default 200)
 > filter -l a               - List matches only, draw nothing
 > filter -c                 - Remove the boxes
-Esc                         - Clear the boxes (from the page, an input,
-                              or with focus inside the pane)
+> filter -y links           - Skip the yes/no prompt
+yes / no  (or y / n)        - Answer a prompt: "2 match(es) — box them?"
+Esc                         - Cancel a prompt, else clear the boxes
 ```
+Presets and results over 25 elements ask before drawing.
 Each box has an outline plus corner ticks so tiny elements are findable. Hovering
 one writes `FILTER: .card - DIV.card "Product" · 3/12` into the pane's footer
 status line and turns that box green. Same-origin panes only.

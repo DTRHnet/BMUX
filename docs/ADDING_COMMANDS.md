@@ -52,6 +52,8 @@ Rules that keep commands consistent with the rest of BMUX:
 4. **Never throw for bad input.** Return an error or usage line. The dispatcher
    catches throws, but a clear message is better than `Error: undefined`.
 5. **`usage` starts with the command name**, because `help` prints it verbatim.
+6. **Add `hidden: true`** for a command that exists for scripting or aliases and
+   should not appear in `help` (`y` and `n` are hidden aliases of `yes` / `no`).
 6. **Do not move pane elements in the DOM.** Reparenting an iframe reloads the
    page inside it. Use the layout primitives (`api.client.splitWindow`,
    `killPane`, `applyLayout`, `swapPanes`, `rotatePanes`, `setPaneSize`,
@@ -167,6 +169,14 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `clearFilter(pane)` / `clearAllFilters()` | Remove the boxes and the status line |
 | `hasActiveFilters()` | Whether any pane is currently boxed |
 | `setPaneStatus(pane, text, mode)` | Write the pane's status segment (`'filtering'`/`'hovering'`) |
+| `collectFilterMatches(pane, selector, test)` | Query a pane (plus an optional predicate) without drawing; `{ ok, doc, elements }` |
+| `requestFilterConfirm(pane, selector, opts)` | Ask for a yes/no answer before drawing |
+| `resolveFilterConfirm(accept)` | Answer that prompt (what `yes` / `no` call) |
+| `hasPendingConfirm()` | Whether a prompt is waiting |
+| `appendPaneOutput(pane, text, kind)` | Append a block to a pane console (`'command'` or `'result'`) |
+| `setPaneConsoleOpen(pane, open)` / `togglePaneConsole(pane)` | Open, close or toggle the pane console |
+| `clearPaneConsole(pane)` | Empty the pane console scrollback |
+| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 70% of the pane) |
 | `describeElement(element)` | `TAG#id.class "snippet"` for a matched element |
 | `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
 | `newWindow()` | Reset to a single pane |
@@ -174,6 +184,31 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `setControlMode(on)` | Set Control Mode |
 | `showCommandMode()` / `hideCommandMode()` | Open/close the `:` line |
 | `log(message)` | Append to the debug console |
+
+## Adding a filter preset
+
+Presets live in `BMUX_FILTER_PRESETS` in `content/commands.js` and are pure data:
+
+```javascript
+const BMUX_FILTER_PRESETS = {
+    // ...
+    'cards': {
+        selector: '.card, article',
+        description: 'cards and article blocks',
+        variants: {
+            // A variant may narrow the selector...
+            'tall': { description: 'cards taller than 400px', selector: '.card', test: (el) => el.offsetHeight > 400 },
+            // ...or change it outright.
+            'links': { description: 'links inside cards', selector: '.card a[href]' }
+        }
+    }
+};
+```
+
+`filter cards tall` then means "a `.card` taller than 400px", which no single CSS
+selector expresses. A `test(element, doc, view)` predicate runs inside the pane
+document, and returning `false` (or throwing) simply drops the element. Add the
+preset, reload, and both `filter cards` and `filter --presets` pick it up.
 
 ## Adding a key binding
 
@@ -227,7 +262,9 @@ Pane scope:
 |---------|-------------|
 | `source` | Show the pane's HTML in a console view |
 | `restore` | Return from console view to browser view |
-| `filter <selector> [-n max]` / `filter -l` / `filter -c` | Box matches in the pane, name them on hover, list only, or clear |
+| `filter <selector\|preset> [-n max] [-y]` / `filter -l` / `filter -c` / `filter --presets` | Box matches in the pane, name them on hover, list only, clear, or list the preset vocabulary |
+| `yes` / `no` (`y` / `n` hidden) | Answer a filter confirmation prompt |
+| `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
 | `capture-pane [-n lines]` | Print the pane's visible text |
 | `rename-pane <title\|->` | Set or clear the footer title |
 | `url [new-url]` | Show or change the pane URL |

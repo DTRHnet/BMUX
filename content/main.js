@@ -57,6 +57,15 @@ const BMUX_LAYOUTS = ['even-horizontal', 'main-vertical', 'even-vertical', 'main
 const BMUX_FILTER_MAX = 200;
 const BMUX_FILTER_MAX_HARD = 1000;
 
+// How long a filter confirmation prompt stays open, in ms.
+const BMUX_CONFIRM_TIMEOUT = 15000;
+
+// Pane console: height when first opened, the drag limits, and scrollback cap.
+const BMUX_CONSOLE_HEIGHT = 140;
+const BMUX_CONSOLE_MIN_HEIGHT = 40;
+const BMUX_CONSOLE_MAX_RATIO = 0.7;
+const BMUX_CONSOLE_MAX_BLOCKS = 100;
+
 // Debounce for re-drawing boxes when the filtered page changes underneath them.
 const BMUX_FILTER_REFRESH_DELAY = 300;
 
@@ -316,6 +325,7 @@ class BMUXClient {
         this.paneIndexTimer = null;
 
         this.filters = new Map();  // pane -> filter highlight state
+        this.pendingConfirm = null; // a filter prompt waiting for yes/no
 
         this.ui = null;
         this.handles = [];
@@ -499,11 +509,47 @@ class BMUXClient {
             }
         });
 
-        // Make Debug Draggable
+        // Make Debug Draggable, and resizable from its bottom-right corner
         this.makeDraggable(this.ui.debugContainer, this.ui.debugHeader);
+
+        const debugGrip = document.createElement('div');
+        debugGrip.className = 'bmux-debug-grip';
+        debugGrip.title = 'Drag to resize the console';
+        this.ui.debugContainer.appendChild(debugGrip);
+        this.makeResizable(this.ui.debugContainer, debugGrip);
 
         // Initial Render
         this.renderWindow();
+    }
+
+    /** Resize a fixed-position panel by dragging a corner grip. */
+    makeResizable(element, grip) {
+        grip.addEventListener('mousedown', (event) => {
+            if (event.button !== undefined && event.button !== 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+
+            const startX = event.clientX;
+            const startY = event.clientY;
+            const startWidth = element.offsetWidth;
+            const startHeight = element.offsetHeight;
+            const previousCursor = document.body.style.cursor;
+            document.body.style.cursor = 'nwse-resize';
+
+            const move = (moveEvent) => {
+                element.style.width = `${bmuxClamp(startWidth + (moveEvent.clientX - startX), 220, window.innerWidth - 40)}px`;
+                element.style.height = `${bmuxClamp(startHeight + (moveEvent.clientY - startY), 140, window.innerHeight - 80)}px`;
+            };
+
+            const up = () => {
+                document.removeEventListener('mousemove', move, true);
+                document.removeEventListener('mouseup', up, true);
+                document.body.style.cursor = previousCursor;
+            };
+
+            document.addEventListener('mousemove', move, true);
+            document.addEventListener('mouseup', up, true);
+        });
     }
 
     makeDraggable(element, handle) {
@@ -623,6 +669,16 @@ class BMUXClient {
                 this.hideCommandMode();
                 e.preventDefault(); e.stopPropagation();
             }
+            return;
+        }
+
+        // A filter prompt is waiting: y / n / Escape answer it, from anywhere
+        // that is not a text field (the yes/no commands cover the rest).
+        if (this.pendingConfirm && !this.isTypingTarget() &&
+            (e.key === 'Escape' || /^[yn]$/i.test(e.key))) {
+            e.preventDefault();
+            e.stopPropagation();
+            this.resolveFilterConfirm(/^y$/i.test(e.key));
             return;
         }
 
@@ -1455,9 +1511,14 @@ class BMUXClient {
      *
      * Returns { ok, matched, shown } or { ok: false, message }.
      */
-    filterPane(pane, selector, opts) {
-        const options = opts || {};
-
+    /**
+     * Query a same-origin pane for `selector`, then optionally narrow with a
+     * `test(element, doc, view)` predicate (used by the filter presets, which
+     * need real predicates for things like same-origin links).
+     *
+     * Returns { ok, doc, iframe, elements } or { ok: false, message }.
+     */
+    collectFilterMatches(pane, selector, test) {
         if (!this.ui || !pane) return { ok: false, message: 'No pane to filter' };
 
         const iframe = pane.querySelector('iframe');
@@ -1477,12 +1538,47 @@ class BMUXClient {
             };
         }
 
-        let matched;
+        let elements;
         try {
-            matched = Array.prototype.slice.call(doc.querySelectorAll(selector));
+            elements = Array.prototype.slice.call(doc.querySelectorAll(selector));
         } catch (e) {
             return { ok: false, message: `Invalid selector "${selector}"` };
         }
+
+        if (typeof test === 'function') {
+            const view = doc.defaultView || window;
+            elements = elements.filter((element) => {
+                try {
+                    return !!test(element, doc, view);
+                } catch (e) {
+                    return false;
+                }
+            });
+        }
+
+        return { ok: true, doc: doc, iframe: iframe, elements: elements };
+    }
+
+    /**
+     * Box every element matching `selector` inside a same-origin pane, and follow
+     * the pointer with that pane's status line.
+     *
+     * The boxes live in the pane's own document, positioned in document
+     * coordinates, so they scroll with the page and cannot be disturbed by the
+     * overlay. They are removed by clearFilter (Esc, `filter -c`, navigation).
+     *
+     * Returns { ok, matched, shown } or { ok: false, message }.
+     */
+    filterPane(pane, selector, opts) {
+        const options = opts || {};
+
+        if (!this.ui || !pane) return { ok: false, message: 'No pane to filter' };
+
+        const collected = this.collectFilterMatches(pane, selector, options.test);
+        if (!collected.ok) return { ok: false, message: collected.message };
+
+        const doc = collected.doc;
+        const matched = collected.elements;
 
         this.clearFilter(pane);
 
@@ -1503,9 +1599,11 @@ class BMUXClient {
 
         const state = {
             selector: selector,
+            label: options.label || selector,
+            test: options.test || null,
             max: max,
             doc: doc,
-            iframe: iframe,
+            iframe: collected.iframe,
             layer: layer,
             boxes: [],
             elements: [],
@@ -1513,6 +1611,7 @@ class BMUXClient {
             total: 0,
             onMove: null,
             onLeave: null,
+            onKey: null,
             observer: null,
             refreshTimer: null
         };
@@ -1538,10 +1637,10 @@ class BMUXClient {
 
             if (index === -1) {
                 this.setPaneStatus(pane,
-                    `FILTER: ${selector} · ${state.elements.length} match(es)`, 'filtering');
+                    `FILTER: ${state.label} · ${state.elements.length} match(es)`, 'filtering');
             } else {
                 this.setPaneStatus(pane,
-                    `FILTER: ${selector} - ${bmuxDescribeElement(state.elements[index])} · ` +
+                    `FILTER: ${state.label} - ${bmuxDescribeElement(state.elements[index])} · ` +
                     `${index + 1}/${state.elements.length}`, 'hovering');
             }
         };
@@ -1549,7 +1648,7 @@ class BMUXClient {
         state.onLeave = () => {
             state.boxes.forEach((entry) => entry.box.classList.remove('bmux-filter-hover'));
             this.setPaneStatus(pane,
-                `FILTER: ${selector} · ${state.elements.length} match(es)`, 'filtering');
+                `FILTER: ${state.label} · ${state.elements.length} match(es)`, 'filtering');
         };
 
         // A key pressed with the focus inside the pane document never reaches the
@@ -1584,6 +1683,105 @@ class BMUXClient {
         state.onLeave();
 
         return { ok: true, matched: matched.length, shown: result.shown };
+    }
+
+    // --- filter confirmation prompt ---
+
+    hasPendingConfirm() {
+        return !!this.pendingConfirm;
+    }
+
+    /**
+     * Ask before drawing a large or preset filter. The answer comes from the
+     * `yes` / `no` commands (y / n also work from the keyboard, and Escape
+     * cancels) so it works from the console, a pane input, or with the focus
+     * clicked inside the page.
+     */
+    requestFilterConfirm(pane, selector, opts) {
+        const options = opts || {};
+        this.clearPendingConfirm();
+
+        const collected = this.collectFilterMatches(pane, selector, options.test);
+        const count = collected.ok ? collected.elements.length : 0;
+        const label = options.label || selector;
+
+        const pending = {
+            pane: pane,
+            selector: selector,
+            label: label,
+            options: { max: options.max, test: options.test, label: label },
+            doc: collected.ok ? collected.doc : null,
+            onKey: null,
+            timer: null
+        };
+        this.pendingConfirm = pending;
+
+        this.setPaneStatus(pane, `FILTER: ${label} - ${count} match(es) — yes / no`, 'filtering');
+
+        if (pending.doc) {
+            pending.onKey = (event) => {
+                const key = String(event.key || '');
+                if (key === 'Escape' || /^[yn]$/i.test(key)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.resolveFilterConfirm(/^y$/i.test(key));
+                }
+            };
+            try {
+                pending.doc.addEventListener('keydown', pending.onKey, true);
+            } catch (e) {
+                pending.onKey = null;
+            }
+        }
+
+        pending.timer = setTimeout(() => {
+            this.clearPendingConfirm('prompt timed out, nothing drawn');
+        }, BMUX_CONFIRM_TIMEOUT);
+
+        return { ok: true, count: count };
+    }
+
+    /** Answer a pending filter prompt. */
+    resolveFilterConfirm(accept) {
+        const pending = this.pendingConfirm;
+        if (!pending) return { ok: false, message: 'Nothing to confirm' };
+
+        this.clearPendingConfirm();
+
+        if (!accept) {
+            this.setPaneStatus(pending.pane, `FILTER: ${pending.label} — cancelled`, 'filtering');
+            return { ok: true, applied: false, label: pending.label };
+        }
+
+        const result = this.filterPane(pending.pane, pending.selector, pending.options);
+        if (!result.ok) return { ok: false, message: result.message };
+
+        return {
+            ok: true,
+            applied: true,
+            label: pending.label,
+            matched: result.matched,
+            shown: result.shown
+        };
+    }
+
+    clearPendingConfirm(reason) {
+        const pending = this.pendingConfirm;
+        if (!pending) return false;
+
+        this.pendingConfirm = null;
+        if (pending.timer) clearTimeout(pending.timer);
+
+        if (pending.onKey && pending.doc) {
+            try {
+                pending.doc.removeEventListener('keydown', pending.onKey, true);
+            } catch (e) {
+                // document already gone
+            }
+        }
+
+        if (reason) this.log(`Filter prompt: ${reason}`);
+        return true;
     }
 
     /** Draw (or re-draw) one box per match, capped by the filter's max. */
@@ -1636,17 +1834,15 @@ class BMUXClient {
             return null;
         }
 
-        let matched;
-        try {
-            matched = Array.prototype.slice.call(doc.querySelectorAll(state.selector));
-        } catch (e) {
+        const collected = this.collectFilterMatches(pane, state.selector, state.test);
+        if (!collected.ok || collected.doc !== doc) {
             this.clearFilter(pane);
             return null;
         }
 
-        const result = this.redrawFilterBoxes(pane, state, matched);
+        const result = this.redrawFilterBoxes(pane, state, collected.elements);
         this.setPaneStatus(pane,
-            `FILTER: ${state.selector} · ${state.elements.length} match(es)`, 'filtering');
+            `FILTER: ${state.label} · ${state.elements.length} match(es)`, 'filtering');
         return result;
     }
 
@@ -1888,6 +2084,14 @@ class BMUXClient {
         const status = document.createElement('span');
         status.className = 'bmux-pane-status';
 
+        // Console toggle: the pane's own scrollback stays available until it is
+        // closed, and can be reopened from here (or with `log toggle`).
+        const consoleButton = document.createElement('button');
+        consoleButton.className = 'bmux-pane-console-btn';
+        consoleButton.type = 'button';
+        consoleButton.textContent = '\u25B8';
+        consoleButton.title = "Show this pane's console (log toggle)";
+
         const badge = document.createElement('span');
         badge.className = 'bmux-pane-badge';
         badge.title = 'Pane number and id (focus-pane <number|%id>)';
@@ -1896,14 +2100,35 @@ class BMUXClient {
         cmdContainer.appendChild(input);
         cmdContainer.appendChild(title);
         cmdContainer.appendChild(status);
+        cmdContainer.appendChild(consoleButton);
         cmdContainer.appendChild(badge);
 
+        // Console panel: a drag grip on its top edge, then the scrollback log.
         const output = document.createElement('div');
         output.className = 'bmux-pane-output';
+
+        const grip = document.createElement('div');
+        grip.className = 'bmux-pane-output-grip';
+        grip.title = 'Drag to resize this console; double-click to reset';
+
+        const outputLog = document.createElement('div');
+        outputLog.className = 'bmux-pane-output-log';
+
+        output.appendChild(grip);
+        output.appendChild(outputLog);
 
         footer.appendChild(cmdContainer);
         footer.appendChild(output);
         pane.appendChild(footer);
+
+        consoleButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.togglePaneConsole(pane);
+        });
+
+        grip.addEventListener('mousedown', (event) => this.startConsoleResize(event, pane));
+        grip.addEventListener('dblclick', () => this.setPaneConsoleHeight(pane, BMUX_CONSOLE_HEIGHT));
 
         // The page title can become known only after the iframe loads (same-origin).
         // A load also means the document was replaced, so any filter overlay
@@ -1929,25 +2154,132 @@ class BMUXClient {
         return pane;
     }
 
-    /** Run a command typed into a pane's input, showing the result in that pane. */
-    async runPaneCommand(pane, cmdText, output) {
+    /**
+     * Run a command typed into a pane's input. The command line and its result are
+     * appended to that pane's scrollback, and the console is opened and left open
+     * (it used to auto-collapse after five seconds, with no way back).
+     */
+    async runPaneCommand(pane, cmdText) {
+        this.appendPaneOutput(pane, `> ${cmdText}`, 'command');
+        this.setPaneConsoleOpen(pane, true);
+
         const result = await this.runCommand(cmdText, { pane: pane });
-        const name = cmdText.split(/\s+/)[0];
 
-        if (output) {
-            output.textContent = result || '';
-            if (result) {
-                output.classList.add('visible');
-            } else {
-                output.classList.remove('visible');
-            }
-
-            if (result && name !== 'help' && !result.startsWith('Error')) {
-                setTimeout(() => output.classList.remove('visible'), 5000);
-            }
+        if (result) {
+            this.appendPaneOutput(pane, result, 'result');
         }
 
         return result;
+    }
+
+    // --- pane console (the scrollback under each pane's input) ---
+
+    isPaneConsoleOpen(pane) {
+        return !!(pane && pane.dataset && pane.dataset.consoleOpen === '1');
+    }
+
+    setPaneConsoleOpen(pane, open) {
+        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        if (!output) return false;
+
+        pane.dataset.consoleOpen = open ? '1' : '0';
+        output.classList.toggle('open', !!open);
+
+        const button = pane.querySelector('.bmux-pane-console-btn');
+        if (button) {
+            button.textContent = open ? '\u25BE' : '\u25B8';
+            button.title = open
+                ? "Hide this pane's console (log toggle)"
+                : "Show this pane's console (log toggle)";
+        }
+
+        output.style.height = `${this.getPaneConsoleHeight(pane)}px`;
+
+        if (open) {
+            const log = output.querySelector('.bmux-pane-output-log');
+            if (log) log.scrollTop = log.scrollHeight;
+        }
+
+        return !!open;
+    }
+
+    togglePaneConsole(pane) {
+        return this.setPaneConsoleOpen(pane, !this.isPaneConsoleOpen(pane));
+    }
+
+    getPaneConsoleHeight(pane) {
+        const stored = pane && pane.dataset ? parseInt(pane.dataset.consoleHeight, 10) : NaN;
+        return isFinite(stored) && stored > 0 ? stored : BMUX_CONSOLE_HEIGHT;
+    }
+
+    /** Set the console height in px, clamped to the pane. Returns the applied px. */
+    setPaneConsoleHeight(pane, px) {
+        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        if (!output) return 0;
+
+        const paneHeight = pane.getBoundingClientRect ? (pane.getBoundingClientRect().height || 0) : 0;
+        const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_RATIO) : 600;
+        const applied = Math.round(bmuxClamp(Number(px) || BMUX_CONSOLE_HEIGHT, BMUX_CONSOLE_MIN_HEIGHT, max));
+
+        pane.dataset.consoleHeight = String(applied);
+        output.style.height = `${applied}px`;
+        return applied;
+    }
+
+    /** Append one block to a pane's scrollback, keeping the newest in view. */
+    appendPaneOutput(pane, text, kind) {
+        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        if (!log) return false;
+
+        const block = document.createElement('div');
+        block.className = `bmux-pane-output-block bmux-pane-output-${kind || 'result'}`;
+        block.textContent = text == null ? '' : String(text);
+
+        const nearBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+        log.appendChild(block);
+
+        while (log.childElementCount > BMUX_CONSOLE_MAX_BLOCKS) {
+            log.removeChild(log.firstChild);
+        }
+
+        if (nearBottom) log.scrollTop = log.scrollHeight;
+        return true;
+    }
+
+    clearPaneConsole(pane) {
+        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        if (!log) return false;
+        log.textContent = '';
+        return true;
+    }
+
+    /** Drag the top edge of a pane's console to resize it. */
+    startConsoleResize(event, pane) {
+        if (event.button !== undefined && event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const output = pane.querySelector('.bmux-pane-output');
+        if (!output) return;
+
+        const startY = event.clientY;
+        const startHeight = this.getPaneConsoleHeight(pane);
+        const previousCursor = document.body.style.cursor;
+        document.body.style.cursor = 'row-resize';
+
+        const move = (moveEvent) => {
+            this.setPaneConsoleHeight(pane, startHeight + (startY - moveEvent.clientY));
+        };
+
+        const up = () => {
+            document.removeEventListener('mousemove', move, true);
+            document.removeEventListener('mouseup', up, true);
+            document.body.style.cursor = previousCursor;
+            this.log(`Console height: ${this.getPaneConsoleHeight(pane)}px`);
+        };
+
+        document.addEventListener('mousemove', move, true);
+        document.addEventListener('mouseup', up, true);
     }
 
     updateUI(state) {

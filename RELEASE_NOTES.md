@@ -1,3 +1,57 @@
+# BMUX Version 0.3.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.3.0
+**Release Date**: November 9, 2026
+**Status**: Console and filter-usability release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Pane console | Persistent scrollback with a scrollbar, toggle button, drag-to-resize, `log` command and `l` key; no more five-second auto-collapse |
+| Debug console | Resizable from its bottom-right corner, still draggable |
+| Filter presets | `filter links internal`, `images large`, `tables rows`, `media video`, `prices`, `comments`, … plus `filter --presets` |
+| Confirmation | Presets and result sets over 25 ask first: `yes` / `no` (or `y` / `n` / `Esc`), with `filter -y` to skip |
+| Zoom | `Shift+z` toggles zoom, the tmux `prefix + Z` binding |
+
+## Why these three
+
+1. **The pane console was write-once.** It showed one result, hid itself after
+   five seconds and could not be reopened. It is now a scrollback that stays open,
+   scrolls, toggles from the footer, and resizes by dragging its top edge — the
+   height and open state per pane.
+2. **`filter` needed vocabulary.** `filter links internal` now works because a
+   preset can carry a predicate (`href` resolved against the pane's origin, with
+   a base-URI fallback), which no selector can express alone. Presets and big
+   results ask for a yes/no answer before drawing, so a stray `filter div` no
+   longer paints a thousand boxes.
+3. **tmux muscle memory.** `Ctrl+b` then `Shift+z` maximizes the focused pane and
+   the same chord restores the layout, exactly like tmux (Control Mode `Shift+z`
+   too; `z` still works).
+
+## Verification
+
+- 558 jsdom checks and 65 checks in Chromium 150 with the extension loaded
+  unpacked, including: the console opening on a command and still being open after
+  5.3s, a real grip drag making it taller, `log off`/`log on` preserving the
+  scrollback, a preset asking before drawing with `yes` boxing it, `filter -y
+  links internal` boxing only the on-site link, and `Shift+z` maximizing and
+  restoring the pane.
+- Not verified: touch input, cross-origin panes, and the 15-second prompt timeout
+  in a real browser.
+
+## Breaking changes
+
+None. `clear` now empties the pane console scrollback rather than the old output
+line, and `filter` asks before large queries; both are documented.
+
+---
+
 # BMUX Version 0.2.0 - Release Summary
 
 ## Release Information

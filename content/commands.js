@@ -45,6 +45,193 @@ const BMUX_RESIZE_STEP = 2;
 // Default number of lines returned by capture-pane.
 const BMUX_CAPTURE_LINES = 40;
 
+// A filter that is a preset, or that matches more than this many elements, asks
+// for a yes/no answer before drawing anything.
+const BMUX_FILTER_CONFIRM_THRESHOLD = 25;
+
+// --- filter presets -------------------------------------------------------
+//
+// A preset is a word that expands to a selector, optionally narrowed by a
+// variant and by a predicate. `filter links internal` therefore means "every
+// link whose resolved origin is this page's origin", which no CSS selector can
+// express on its own.
+
+function bmuxLinkTarget(element, doc, view) {
+    const href = element && element.getAttribute ? element.getAttribute('href') : '';
+    if (!href) return null;
+
+    try {
+        const base = doc.baseURI || (view.location && view.location.href) || undefined;
+        const resolved = new URL(href, base);
+        if (resolved.protocol === 'javascript:' || resolved.protocol === 'data:') return null;
+        return resolved;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * The origin a link's "internal" judgement is made against: the pane document's
+ * own origin, or — for pages that have no origin of their own (about:blank,
+ * srcdoc) — the origin of its base URI.
+ */
+function bmuxDocumentOrigin(doc, view) {
+    const origin = view && view.location ? view.location.origin : null;
+    if (origin && origin !== 'null') return origin;
+
+    try {
+        return new URL(doc.baseURI).origin;
+    } catch (e) {
+        return null;
+    }
+}
+
+function bmuxLinkIsInternal(element, doc, view) {
+    const resolved = bmuxLinkTarget(element, doc, view);
+    if (!resolved) return false;
+    const origin = bmuxDocumentOrigin(doc, view);
+    return !!origin && resolved.origin === origin;
+}
+
+function bmuxLinkIsExternal(element, doc, view) {
+    const resolved = bmuxLinkTarget(element, doc, view);
+    if (!resolved) return false;
+    const origin = bmuxDocumentOrigin(doc, view);
+    return !!origin && resolved.origin !== origin;
+}
+
+function bmuxImageIsLarge(element) {
+    return (element.naturalWidth || 0) > 200;
+}
+
+function bmuxImageIsBroken(element) {
+    return !!element.complete && (element.naturalWidth || 0) === 0;
+}
+
+const BMUX_FILTER_PRESETS = {
+    'links': {
+        selector: 'a[href]',
+        description: 'every link',
+        variants: {
+            'internal': {
+                description: 'links that stay on this site',
+                selector: 'a[href]',
+                test: bmuxLinkIsInternal
+            },
+            'external': {
+                description: 'links that leave this site',
+                selector: 'a[href]',
+                test: bmuxLinkIsExternal
+            },
+            'empty': {
+                description: 'links with no text',
+                selector: 'a[href]:empty, a[href="#"], a[href=""]'
+            }
+        }
+    },
+    'images': {
+        selector: 'img',
+        description: 'every image',
+        variants: {
+            'large': { description: 'images wider than 200px', selector: 'img', test: bmuxImageIsLarge },
+            'noalt': { description: 'images with no alt text', selector: 'img:not([alt])' },
+            'broken': { description: 'images that failed to load', selector: 'img', test: bmuxImageIsBroken }
+        }
+    },
+    'headings': {
+        selector: 'h1, h2, h3, h4, h5, h6',
+        description: 'every heading'
+    },
+    'text': {
+        selector: 'p, li, td, th, dd, blockquote',
+        description: 'readable text blocks',
+        variants: {
+            'main': {
+                description: 'text inside the main content',
+                selector: 'main p, article p, #content p, .post-content p, [role="main"] p'
+            }
+        }
+    },
+    'inputs': {
+        selector: 'input, select, textarea',
+        description: 'form fields'
+    },
+    'buttons': {
+        selector: 'button, input[type="submit"], input[type="button"], [role="button"]',
+        description: 'clickable buttons'
+    },
+    'tables': {
+        selector: 'table',
+        description: 'tables',
+        variants: {
+            'rows': { description: 'table rows', selector: 'table tr' },
+            'cells': { description: 'table cells', selector: 'table td, table th' }
+        }
+    },
+    'media': {
+        selector: 'img, video, audio, iframe, canvas, picture',
+        description: 'images, videos and embeds',
+        variants: {
+            'video': {
+                description: 'videos and player embeds',
+                selector: 'video, iframe[src*="youtube"], iframe[src*="vimeo"], iframe[src*="player"]'
+            }
+        }
+    },
+    'prices': {
+        selector: '[data-price], .price, .product-price, [itemprop="price"], .amount',
+        description: 'prices'
+    },
+    'comments': {
+        selector: '.comment, .comment-body, .reply, [data-comment], #comments li',
+        description: 'comments and replies'
+    },
+    'authors': {
+        selector: '.byline, [rel="author"], [itemprop="author"], .author',
+        description: 'author names'
+    },
+    'dates': {
+        selector: 'time, [datetime], .date, .published',
+        description: 'dates and timestamps'
+    },
+    'articles': {
+        selector: 'article',
+        description: 'articles',
+        variants: {
+            'headlines': {
+                description: 'article headlines',
+                selector: 'article h1, article h2, .headline, h1.article-title'
+            }
+        }
+    },
+    'forms': { selector: 'form', description: 'forms' },
+    'code': { selector: 'pre, code', description: 'code blocks' },
+    'main': {
+        selector: 'main, article, #content, .post-content, [role="main"]',
+        description: 'main content containers'
+    }
+};
+
+/** `filter --presets`: the preset vocabulary, with its variants. */
+function bmuxPresetListing() {
+    let text = 'Filter presets (filter <preset> [variant]):\n\n';
+
+    Object.keys(BMUX_FILTER_PRESETS).forEach((name) => {
+        const preset = BMUX_FILTER_PRESETS[name];
+        text += `${name}\n  ${preset.description}\n  selector: ${preset.selector}\n`;
+
+        const variants = preset.variants ? Object.keys(preset.variants) : [];
+        variants.forEach((variant) => {
+            const entry = preset.variants[variant];
+            text += `  variant ${variant}: ${entry.description} (${entry.selector || preset.selector})\n`;
+        });
+
+        text += '\n';
+    });
+
+    return text.trimEnd();
+}
+
 // Helper function to safely access iframe content
 function safeGetIframeDocument(iframe) {
     if (!iframe) return null;
@@ -113,9 +300,11 @@ const BMUX_KEYBINDINGS = {
         'Alt+ArrowLeft': `resize-pane -L ${BMUX_RESIZE_STEP}`,
         'Alt+ArrowRight': `resize-pane -R ${BMUX_RESIZE_STEP}`,
         'z': 'resize-pane -Z',
+        'Z': 'resize-pane -Z',
         'q': 'display-panes',
         'o': 'cycle-pane next',
         ';': 'last-pane',
+        'l': 'log toggle',
         'Space': 'next-layout',
         'Escape': 'escape'
     },
@@ -135,9 +324,11 @@ const BMUX_KEYBINDINGS = {
         'Alt+ArrowLeft': `resize-pane -L ${BMUX_RESIZE_STEP}`,
         'Alt+ArrowRight': `resize-pane -R ${BMUX_RESIZE_STEP}`,
         'z': 'resize-pane -Z',
+        'Z': 'resize-pane -Z',
         'q': 'display-panes',
         'o': 'cycle-pane next',
         ';': 'last-pane',
+        'l': 'log toggle',
         'Space': 'next-layout'
     }
 };
@@ -154,6 +345,7 @@ const BMUX_COMMANDS = {
             const groups = { overlay: [], pane: [] };
 
             for (const [name, definition] of Object.entries(BMUX_COMMANDS)) {
+                if (definition.hidden) continue;
                 const group = definition.scope === 'pane' ? groups.pane : groups.overlay;
                 group.push({ name: name, definition: definition });
             }
@@ -579,6 +771,54 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'yes': {
+        scope: 'overlay',
+        description: 'Confirm a pending filter prompt: box the matches',
+        usage: 'yes  (alias: y)',
+        execute: function (api, args) {
+            const result = api.client.resolveFilterConfirm(true);
+            if (!result.ok) return `Error: ${result.message}`;
+
+            return `Boxed ${result.shown} of ${result.matched} match(es) for ${result.label}`;
+        }
+    },
+
+    'no': {
+        scope: 'overlay',
+        description: 'Cancel a pending filter prompt',
+        usage: 'no  (alias: n)',
+        execute: function (api, args) {
+            const result = api.client.resolveFilterConfirm(false);
+            if (!result.ok) return `Error: ${result.message}`;
+
+            return `Cancelled ${result.label}: nothing drawn`;
+        }
+    },
+
+    'y': {
+        scope: 'overlay',
+        hidden: true,
+        description: 'Alias of yes',
+        usage: 'y',
+        execute: function (api, args) {
+            const result = api.client.resolveFilterConfirm(true);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Boxed ${result.shown} of ${result.matched} match(es) for ${result.label}`;
+        }
+    },
+
+    'n': {
+        scope: 'overlay',
+        hidden: true,
+        description: 'Alias of no',
+        usage: 'n',
+        execute: function (api, args) {
+            const result = api.client.resolveFilterConfirm(false);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Cancelled ${result.label}: nothing drawn`;
+        }
+    },
+
     'command-prompt': {
         scope: 'overlay',
         description: 'Open the : command line (same commands, typed instead of clicked)',
@@ -665,8 +905,8 @@ const BMUX_COMMANDS = {
 
     'filter': {
         scope: 'pane',
-        description: 'Box every element matching a selector in the pane, and name each one on hover',
-        usage: 'filter <selector> [-n <max>] | filter -l <selector> | filter -c',
+        description: 'Box every match in the pane, name each one on hover; understands preset words like "links internal"',
+        usage: 'filter <selector|preset> [-n <max>] [-y] | filter -l <target> | filter -c | filter --presets',
         execute: function (api, args) {
             const client = api.client;
             const pane = api.pane;
@@ -674,8 +914,10 @@ const BMUX_COMMANDS = {
 
             let clear = false;
             let listOnly = false;
+            let autoConfirm = false;
+            let showPresets = false;
             let max = null;
-            const selectorParts = [];
+            const words = [];
 
             for (let i = 0; i < args.length; i++) {
                 const arg = args[i];
@@ -684,6 +926,10 @@ const BMUX_COMMANDS = {
                     clear = true;
                 } else if (arg === '-l' || arg === '--list') {
                     listOnly = true;
+                } else if (arg === '-y' || arg === '--yes') {
+                    autoConfirm = true;
+                } else if (arg === '--presets' || arg === 'presets') {
+                    showPresets = true;
                 } else if (arg === '-n' || arg === '--max') {
                     const parsed = parseInt(args[i + 1], 10);
                     if (!isFinite(parsed) || parsed <= 0) {
@@ -692,9 +938,11 @@ const BMUX_COMMANDS = {
                     max = parsed;
                     i++;
                 } else if (arg !== '') {
-                    selectorParts.push(arg);
+                    words.push(arg);
                 }
             }
+
+            if (showPresets) return bmuxPresetListing();
 
             if (clear) {
                 const cleared = client.clearFilters(pane);
@@ -703,36 +951,53 @@ const BMUX_COMMANDS = {
                     : 'No filter highlights to clear';
             }
 
-            const selector = selectorParts.join(' ').trim();
-            if (!selector) {
-                return 'Error: Usage: filter <selector> [-n <max>] | filter -l <selector> | filter -c';
+            const target = words.join(' ').trim();
+            if (!target) {
+                return 'Error: Usage: filter <selector|preset> [-n <max>] [-y] | filter -l <target> | ' +
+                    'filter -c | filter --presets';
             }
 
-            const iframe = pane.querySelector('iframe');
-            if (!iframe) return 'Error: No iframe found in pane';
+            // Resolve a preset word (plus optional variant) into a selector + test.
+            let preset = null;
+            let variant = null;
+            let selector = target;
+            let test = null;
+            let label = target;
 
-            const doc = safeGetIframeDocument(iframe);
-            if (!doc) {
-                return `Error: Cross-origin content\nURL: ${safeGetIframeUrl(iframe)}\n\n` +
-                    'Boxing matches needs a same-origin pane.';
+            const first = words[0] ? words[0].toLowerCase() : '';
+            if (Object.prototype.hasOwnProperty.call(BMUX_FILTER_PRESETS, first)) {
+                preset = BMUX_FILTER_PRESETS[first];
+                selector = preset.selector;
+
+                const second = words[1] ? words[1].toLowerCase() : '';
+                if (second) {
+                    if (preset.variants && Object.prototype.hasOwnProperty.call(preset.variants, second)) {
+                        variant = preset.variants[second];
+                        if (variant.selector) selector = variant.selector;
+                        if (variant.test) test = variant.test;
+                    } else {
+                        const known = preset.variants ? Object.keys(preset.variants) : [];
+                        return `Error: "${words[0]}" has no variant "${words[1]}".` +
+                            (known.length ? ` Try: ${known.join(', ')}` : ' It takes no variant.');
+                    }
+                }
+
+                label = `${first}${variant && words[1] ? ' ' + words[1].toLowerCase() : ''}`;
             }
 
-            let elements;
-            try {
-                elements = Array.prototype.slice.call(doc.querySelectorAll(selector));
-            } catch (e) {
-                return `Error: Invalid selector "${selector}"`;
-            }
+            const collected = client.collectFilterMatches(pane, selector, test);
+            if (!collected.ok) return `Error: ${collected.message}`;
 
+            const elements = collected.elements;
             if (!elements.length) {
                 client.clearFilter(pane);
-                return `No elements match "${selector}"`;
+                return `No elements match ${label} (${selector})`;
             }
 
             const listed = elements.slice(0, 20).map((element, index) =>
                 `[${index + 1}] ${client.describeElement(element)}`);
 
-            let output = `=== ${elements.length} match(es): "${selector}" ===\n\n${listed.join('\n')}`;
+            let output = `=== ${elements.length} match(es): ${label} (${selector}) ===\n\n${listed.join('\n')}`;
             if (elements.length > listed.length) {
                 output += `\n... ${elements.length - listed.length} more not listed`;
             }
@@ -741,10 +1006,22 @@ const BMUX_COMMANDS = {
                 return `${output}\n\nList only (-l): nothing drawn.`;
             }
 
-            const result = client.filterPane(pane, selector, { max: max });
-            if (!result.ok) return `Error: ${result.message}`;
+            // A preset, or a big result set, asks first.
+            const needsConfirm = !autoConfirm &&
+                (preset != null || elements.length > BMUX_FILTER_CONFIRM_THRESHOLD);
 
-            return `${output}\n\nBoxed ${result.shown} of ${result.matched} match(es). ` +
+            if (needsConfirm) {
+                const asked = client.requestFilterConfirm(pane, selector, { max: max, test: test, label: label });
+                if (!asked.ok) return `Error: ${asked.message || 'Cannot ask for confirmation'}`;
+
+                return `${output}\n\n${elements.length} match(es) for ${label}. ` +
+                    'Box them? Type "yes" / "no" (or press y / n; Esc cancels, "filter -y" skips this prompt).';
+            }
+
+            const applied = client.filterPane(pane, selector, { max: max, test: test, label: label });
+            if (!applied.ok) return `Error: ${applied.message}`;
+
+            return `${output}\n\nBoxed ${applied.shown} of ${applied.matched} match(es). ` +
                 'Hover one to name it in the pane status line; Esc or "filter -c" clears.';
         }
     },
@@ -855,16 +1132,58 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'log': {
+        scope: 'pane',
+        description: 'Open, close, resize or clear this pane console (the scrollback under its input)',
+        usage: 'log [toggle|on|off|clear|size <px>]',
+        execute: function (api, args) {
+            const client = api.client;
+            const pane = api.pane;
+            if (!pane) return 'Error: No pane';
+
+            const action = (args[0] || 'toggle').toLowerCase();
+
+            if (action === 'toggle') {
+                const open = client.togglePaneConsole(pane);
+                return open ? 'Console open' : 'Console closed';
+            }
+
+            if (action === 'on' || action === 'open') {
+                client.setPaneConsoleOpen(pane, true);
+                return 'Console open';
+            }
+
+            if (action === 'off' || action === 'close') {
+                client.setPaneConsoleOpen(pane, false);
+                return 'Console closed';
+            }
+
+            if (action === 'clear') {
+                client.clearPaneConsole(pane);
+                return 'Console cleared';
+            }
+
+            if (action === 'size') {
+                const px = parseInt(args[1], 10);
+                if (!isFinite(px) || px <= 0) return 'Error: Usage: log size <px>';
+                client.setPaneConsoleOpen(pane, true);
+                const applied = client.setPaneConsoleHeight(pane, px);
+                return `Console height ${applied}px`;
+            }
+
+            return 'Error: Usage: log [toggle|on|off|clear|size <px>]';
+        }
+    },
+
     'clear': {
         scope: 'pane',
-        description: 'Clear the command output',
+        description: 'Clear this pane console scrollback',
         usage: 'clear',
         execute: function (api, args) {
             const pane = api.pane;
             if (!pane) return '';
 
-            const output = pane.querySelector('.bmux-pane-output');
-            if (output) output.textContent = '';
+            api.client.clearPaneConsole(pane);
             return '';
         }
     }
@@ -876,6 +1195,8 @@ if (typeof module !== 'undefined' && module.exports) {
         BMUX_COMMANDS: BMUX_COMMANDS,
         BMUX_KEYBINDINGS: BMUX_KEYBINDINGS,
         BMUX_DIRECTIONS: BMUX_DIRECTIONS,
-        BMUX_LAYOUT_NAMES: BMUX_LAYOUT_NAMES
+        BMUX_LAYOUT_NAMES: BMUX_LAYOUT_NAMES,
+        BMUX_FILTER_PRESETS: BMUX_FILTER_PRESETS,
+        BMUX_FILTER_CONFIRM_THRESHOLD: BMUX_FILTER_CONFIRM_THRESHOLD
     };
 }
