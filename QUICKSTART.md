@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.5.0**
+**Version 0.6.0**
 
 ## Activation
 ```
@@ -57,6 +57,23 @@ brand-new tab inherits the newest layout (`inherit`), with its own page in the r
 pane. Restoring recreates the panes, so the pages load fresh (scroll position is not
 kept). `persist off` stops saving this tab and `inherit off` stops a tab offering
 its layout to new ones; nothing is ever synced.
+
+## Scripts (.bmux files)
+```
+script demo         - Run the built-in demo (about a minute)
+script file         - Pick a .bmux file; it loads into the panel
+script file --run   - Pick one and start it immediately
+script run          - Run what is in the panel (Ctrl+Enter in the panel too)
+script stop         - Stop after this command, or cut a sleep short
+script status       - Panel state, line count, what is running
+sleep 2.5           - Wait (2, 0.5, 250ms); a plain command, works in chains
+```
+A `.bmux` file is one command per line, `#` for comments, `sleep` to pace it;
+`;` chaining works inside a line. The panel shows `7/26 · select-layout
+main-vertical` while it runs, and every step is echoed into the console with its
+result. Two examples ship in `examples/`: `demo.bmux` (site-agnostic, what
+`script demo` runs) and `dtrh-tour.bmux` (a three-page tour of dtrh.net).
+Full reference: `docs/SCRIPTS.md`.
 
 ## Chaining commands
 ```

@@ -899,6 +899,93 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'sleep': {
+        scope: 'overlay',
+        description: 'Pause for N seconds (2, 0.5, 250ms) — the pacing for .bmux scripts',
+        usage: 'sleep <seconds>',
+        execute: async function (api, args) {
+            if (typeof bmuxParseSleepArg !== 'function') {
+                return 'Error: Script support is not loaded';
+            }
+
+            const parsed = bmuxParseSleepArg(args[0]);
+            if (!parsed.ok) return `Error: ${parsed.error}`;
+
+            const finished = await api.client.sleepSeconds(parsed.seconds);
+            return finished
+                ? `Slept ${bmuxSleepLabel(parsed.seconds)}`
+                : 'Sleep cancelled';
+        }
+    },
+
+    'script': {
+        scope: 'overlay',
+        description: 'Run a .bmux script: the panel, a file from disk, or the built-in demo',
+        usage: 'script [run|file|demo|open|close|stop|status]',
+        execute: async function (api, args) {
+            const client = api.client;
+
+            if (typeof bmuxParseScript !== 'function') {
+                return 'Error: Script support is not loaded';
+            }
+
+            const action = (args[0] || 'status').toLowerCase();
+            const panelText = () => (client.ui && client.ui.scriptText ? client.ui.scriptText.value : '');
+
+            if (action === 'open') {
+                client.setScriptPanelOpen(true);
+                const parsed = bmuxParseScript(panelText());
+                return parsed.ok
+                    ? `Script panel open · ${parsed.commands.length} command(s) loaded`
+                    : 'Script panel open — paste commands, "script file" loads a .bmux, "script demo" loads the demo';
+            }
+
+            if (action === 'close') {
+                client.setScriptPanelOpen(false);
+                return 'Script panel closed (a running script keeps running — "script stop" ends it)';
+            }
+
+            if (action === 'status') {
+                return client.scriptStatus();
+            }
+
+            if (action === 'stop') {
+                return client.stopScript();
+            }
+
+            if (action === 'demo' || action === 'file' || action === 'run') {
+                if (client.scriptRun) {
+                    return 'Error: a script is already running — "script stop" first';
+                }
+            }
+
+            if (action === 'demo') {
+                return await client.scriptDemo(true);
+            }
+
+            if (action === 'file') {
+                const runNow = args.indexOf('--run') !== -1;
+                if (!client.scriptLoadFile(runNow)) {
+                    return 'Error: no script panel in this frame';
+                }
+                return runNow
+                    ? 'Pick a .bmux file — it loads into the panel and starts on load'
+                    : 'Pick a .bmux file — it loads into the panel; Run (or "script run") starts it';
+            }
+
+            if (action === 'run') {
+                const text = panelText();
+                if (!text.trim()) {
+                    return 'Error: the script panel is empty — paste commands, "script file" loads a .bmux, "script demo" loads the demo';
+                }
+
+                return await client.runScript(text, { name: client.scriptName });
+            }
+
+            return 'Error: Usage: script [run|file|demo|open|close|stop|status]';
+        }
+    },
+
     'save-layout': {
         scope: 'overlay',
         description: 'Save the current layout under a name; named layouts survive restarts',

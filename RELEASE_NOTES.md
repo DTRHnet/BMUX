@@ -1,3 +1,71 @@
+# BMUX Version 0.6.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.6.0
+**Release Date**: November 9, 2026
+**Status**: Scripting release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Script files | `.bmux`: one command per line, `#` comments, `sleep` to pace it — run with `script run`, `script file`, or `script demo` |
+| Pacing | `sleep <seconds>` (`2`, `0.5`, `2s`, `250ms`), awaitable and cancellable: Stop never waits out a pause |
+| The panel | Run / Stop / File / ×, `Ctrl+Enter`, and a progress line naming the command in flight (`7/73 · select-layout main-vertical`) |
+| A run is a transcript | Every line echoed as `[7/73] …` with its result; a failing line does not stop the rest; the summary counts the errors |
+| One runner | Second runs refused, nested runs refused, so `script stop` always means something |
+| Shipped examples | `examples/demo.bmux` (site-agnostic; what `script demo` runs) and `examples/dtrh-tour.bmux` (the dtrh.net tour used for the screenshot and the recording) |
+| Not code | No variables, loops or branches by design: every line is something you could have typed |
+
+## The shape of it
+
+`content/scripts.js` holds the format — `bmuxParseScript()` (comments, blank lines,
+pasted `>` prompts, per-line limits), `bmuxParseSleepArg()`, and the built-in demo
+text. `BMUXClient.runScript()` walks the parsed lines through `runCommand()`, the
+same dispatcher the console uses, awaiting each one; `sleep` is a command whose
+promise lives in `client.sleepState`, so `script stop` resolves it early and the
+loop breaks before the next line. The panel is part of the injected overlay; the
+File button uses a real `<input type=file accept=".bmux">`, so nothing is read from
+disk without the user picking it.
+
+## What a script cannot do
+
+It cannot click (prompts wait for a human, or 15 s), survive a reload or a new tab
+(the runner dies with the page, so the persistence round trip stays manual), read
+files or the network, loop or branch, or run in the background. All four are
+documented rather than worked around — a script stays a list of commands.
+
+## Docs
+
+New **[docs/SCRIPTS.md](docs/SCRIPTS.md)**: the format, the `sleep` reference, the
+limits, what a script cannot do, how to write a demo (with the pacing table taken
+from the shipped script), and how to record one. README, QUICKSTART, COMMAND_USAGE
+(new section 12), ADDING_COMMANDS (script-friendly commands) and IMPLEMENTATION
+(section 20, the engine) all cover the feature, and the README gained a fifth
+screenshot: the tour mid-run on dtrh.net.
+
+## Verification
+
+- **859 jsdom checks** — 48 new: the format (comments, pasted prompts, `sleep`
+  forms, limits, per-line errors), the runner (ordering, real pacing, stopping
+  mid-sleep, nested-run refusal, panel state, summary wording), the two commands,
+  and both examples (they parse, every command they use exists,
+  `examples/demo.bmux` is byte-identical to what `script demo` runs, and the site
+  tour loads real pages and names its panes).
+- **133 Chromium checks** — a `.bmux` uploaded through the real file input and run
+  from the panel (`finished · 6/6`, panes and titles changed), then a `sleep 30`
+  script stopped from the button, with the following command proven not to run.
+- **The demos themselves**, end to end in Chromium on dtrh.net: `script demo`
+  finished `73/73` with zero error lines, and `examples/dtrh-tour.bmux` finished
+  `63/63` with the panes it built (home, `/changelog`, `/tools`) — a 45-second
+  recording of the tour was captured frame by frame while it ran.
+
+---
+
 # BMUX Version 0.5.0 - Release Summary
 
 ## Release Information
