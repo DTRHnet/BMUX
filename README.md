@@ -34,6 +34,38 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 
 ---
 
+## 📸 Screenshots
+
+Real captures: Chromium 150 running the unpacked extension against
+[dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders.
+
+**Activated: three panes on dtrh.net.** The frost palette, Control Mode's quiet
+inset ring and its `CONTROL MODE` chip, and per-pane footers with the title,
+`[number id]` badge and the console / detach / maximize buttons.
+
+![BMUX activated on dtrh.net with three panes](docs/images/01-activation.png)
+
+**`filter links` on the changelog pane.** Every match is boxed with a numbered tab;
+the hovered one is named in the pane's status line
+(`FILTER: links - A.shrink-0.font-mono.text-sm "dtrh.net" · 1/13`), and the refine
+card offers to narrow the result down.
+
+![filter boxing the links on dtrh.net, with a hovered match named and the refine card](docs/images/02-filter.png)
+
+**A detached console.** `log detach` moves that pane's console — scrollback
+included — into its own window: drag the header to move it, the corner to resize,
+`⧉ dock` to put it back. The panes keep running underneath.
+
+![A pane console detached into its own floating window](docs/images/03-console.png)
+
+**The classic palette.** `theme classic` on the same layout (with the debug window
+and the docked pane console open) — the original black/green terminal is one
+command away, and `theme frost` brings the ice palette back.
+
+![The classic black and green palette on the same three-pane layout](docs/images/04-theme-classic.png)
+
+---
+
 ## 🚀 Quick Start
 
 ### Installation
@@ -47,7 +79,8 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 ### Basic Usage
 
 1. **Activate BMUX**: Press `Alt+Shift+B` or click the extension icon — either one
-   turns it on (overlay + Control Mode, blue border). Press it again to turn it off.
+   turns it on (overlay + Control Mode, with a quiet blue ring). Press it again to
+   turn it off.
 2. **Split Horizontally**: Press `%` (Control Mode) or click `Split H`
 3. **Split Vertically**: Press `"` (Shift+') or click `Split V`
 4. **Resize**: drag the boundary between panes with the mouse, or press
@@ -217,7 +250,7 @@ The console under each pane's input is a scrollback, not a flash message:
 - It **stays open** — the five-second auto-collapse is gone.
 - A toggle button in the footer (`▸` / `▾`), the `l` key, or `log toggle` opens
   and closes it whenever you like.
-- **Drag its top edge** to make it taller (up to 70% of the pane; double-click to
+- **Drag its top edge** to make it taller (up to 90% of the pane; double-click to
   reset; `log size 240` works too). The height and open state survive splits,
   layout changes and zoom.
 - `clear` empties the scrollback.
@@ -546,6 +579,7 @@ BMUX/
 │   ├── commands.js        # Command registry + key bindings (source of truth)
 │   └── styles.css         # Glassmorphism UI, split handles, drag shield
 └── docs/                  # Documentation
+    ├── images/              # Screenshots used by this README
     ├── ADDING_COMMANDS.md
     ├── COMMAND_USAGE.md
     ├── CROSS_ORIGIN.md
@@ -628,7 +662,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.1.0)
+### Current Version (0.5.0)
 - ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console

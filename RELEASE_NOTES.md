@@ -53,6 +53,15 @@ input and in-page JavaScript state cannot be carried across a reload. Prompts,
 filter boxes, focus history and console scrollback are not persisted either (the
 console's open state and height are).
 
+## Docs
+
+README leads with four real screenshots captured against
+[dtrh.net](https://www.dtrh.net/) with the unpacked extension: activation and a
+three-pane frost layout, `filter links` with boxes, a hovered match and the refine
+card, a detached console, and the classic palette for comparison
+(`docs/images/`). Every command is documented in both the README tables and the
+command guide.
+
 ## Verification
 
 - 644 jsdom checks — with the real `background/main.js` running as a second window

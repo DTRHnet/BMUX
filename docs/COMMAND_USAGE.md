@@ -30,9 +30,21 @@ result in the debug console:
 | `Zoom` | `resize-pane -Z` |
 | `Layout` | `next-layout` |
 
+### Pane footer buttons
+Each pane footer carries three small buttons, all of which run the equivalent
+command:
+
+| Button | Runs |
+|--------|------|
+| `▸` / `▾` | `log toggle` — open or close that pane's console |
+| `⧉` | `log detach` / `log attach` — float that console in its own window, or dock it |
+| `⤢` / `⤡` | `resize-pane -Z` — maximize that pane, or restore the layout |
+
 ### Debug console (floating window, `$` prompt)
 Runs any command against the **active pane** (blue border) and keeps a scrollback
-of every line and result. Drag it by its header.
+of every line and result. Drag it by its header, resize it from its corner or bottom
+edge — and note it is **hidden by default** now (`debug on|off`), with `verbose on`
+mirroring its output into the focused pane instead.
 
 ```
 $ list-panes

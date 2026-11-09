@@ -154,6 +154,17 @@ Persistence finally exists, is validated, and can be switched off.
 - On a browser without `storage.session`, the tab layer falls back to
   `storage.local` with a 6 hour expiry.
 
+### Docs
+
+- README leads with four real screenshots captured against
+  [dtrh.net](https://www.dtrh.net/) — activation and a three-pane frost layout,
+  `filter links` with boxes, a hovered match and the refine card, a detached
+  console, and the classic palette for comparison. `docs/images/` holds them.
+- README, QUICKSTART, COMMAND_USAGE, ADDING_COMMANDS and IMPLEMENTATION were
+  re-checked against the code: every one of the 41 commands is documented in both
+  the README tables and the command guide, and the stale "thick blue border",
+  "70% console" and popup wording is gone.
+
 ### Verification
 
 - `node --check` clean; all files kept CRLF; `manifest.json` parses.

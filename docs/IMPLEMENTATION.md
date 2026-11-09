@@ -20,7 +20,8 @@ Located in the browser extension icon menu, you can:
 Activation is one state: clicking the toolbar icon (`chrome.action.onClicked`) or
 pressing `Alt+Shift+B` shows the overlay *and* enters Control Mode; doing it again
 hides the overlay and leaves Control Mode. There is no popup. When activated:
-- Thick blue border appears around the overlay
+- A quiet one-pixel inset ring around the overlay (`.bmux-control-active`) and a
+  tinted `CONTROL MODE` chip in the status bar — not a thick blue frame
 - Status bar shows `[CONTROL MODE]` with blue background
 - All keyboard input is captured by BMUX, except while a console or pane input
   has focus (typing always wins)
@@ -147,7 +148,7 @@ default):
   `data-console-height`, so they survive splits, layout changes, zoom and
   swapping (panes are never recreated).
 - The panel's top edge is a grip: `startConsoleResize` converts the vertical drag
-  into a height clamped to 40px … 70% of the pane, and double-click resets it.
+  into a height clamped to 40px … 90% of the pane, and double-click resets it.
 - `log toggle|on|off|clear|size <px>` and the `l` key are the command-line and
   keyboard equivalents; `clear` empties the scrollback.
 - There is no auto-collapse: a command opens the console and leaves it open.
@@ -419,7 +420,7 @@ to `content/commands.js` only.
 4. Verify content script loaded: Look for "BMUX Client Loading..." in console
 
 ### "Keyboard shortcuts don't work"
-1. Check if Control Mode is active (blue border, `[CONTROL MODE]` in the status bar)
+1. Check if Control Mode is active (inset ring, `CONTROL MODE` chip in the status bar)
 2. Click the page body once: while a console or pane input has focus, typing goes
    there on purpose
 3. Verify hotkey isn't conflicting: `chrome://extensions/shortcuts`

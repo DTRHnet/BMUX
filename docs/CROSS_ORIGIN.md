@@ -90,7 +90,8 @@ For operations that can work around cross-origin:
 | Command | Description | Behavior |
 |---------|-------------|----------|
 | `source` | Show HTML source | Returns error with URL info |
-| `filter <selector>` | Find elements | Returns error with URL info |
+| `filter <selector>` | Find and box elements | Returns error with URL info; nothing is boxed |
+| `capture-pane` | Print the pane's text | Returns error with URL info |
 
 ## What Users See
 
@@ -139,7 +140,7 @@ Split horizontal: Cloned https://mysite.com/page
 ### Cross-Origin
 ```
 Cross-origin: Using src attribute (https://external.com/...)
-Split horizontal: Cloned https://external.com/page
+Split horizontal: 50/50
 ```
 
 ## Browser Console Debugging
@@ -147,9 +148,13 @@ Split horizontal: Cloned https://external.com/page
 BMUX logs cross-origin events to help developers:
 
 ```javascript
-console.log("[BMUX client] Cross-origin: Using src attribute");
-console.log("[BMUX client] Split horizontal: Cloned https://...");
+console.log("[BMUX client] > split-window -h");
+console.log("[BMUX client] Split horizontal: 50/50");
 ```
+
+`verbose on` mirrors those lines into the focused pane console, and `info` prints
+the current layout and pane URLs, so cross-origin decisions can be followed without
+the debug window open.
 
 ## Permissions
 

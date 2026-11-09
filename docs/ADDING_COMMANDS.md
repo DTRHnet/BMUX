@@ -169,6 +169,10 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `clearFilter(pane)` / `clearAllFilters()` | Remove the boxes and the status line |
 | `hasActiveFilters()` | Whether any pane is currently boxed |
 | `setPaneStatus(pane, text, mode)` | Write the pane's status segment (`'filtering'`/`'hovering'`) |
+| `setTheme('frost'\|'classic')` / `setVerbose(on)` / `setDebugOpen(open)` | UI preferences, saved with the layout |
+| `infoReport(section)` | Which the `info` command prints: `layout`, `panes`, `keys`, `state` |
+| `setPaneConsoleFloating(pane, on)` / `togglePaneConsoleFloating(pane)` | Detach a pane console into its own window, or dock it |
+| `paneConsole(pane)` | The console panel wherever it lives (footer or floating window) |
 | `collectFilterMatches(pane, selector, test)` | Query a pane (plus an optional predicate) without drawing; `{ ok, doc, elements }` |
 | `requestFilterConfirm(pane, selector, opts)` | Ask for a yes/no answer before drawing |
 | `resolveFilterConfirm(accept)` | Answer that prompt (what `yes` / `no` call) |
@@ -380,6 +384,8 @@ Pane scope:
 | `restore` | Return from console view to browser view |
 | `filter <selector\|preset> [-n max] [-y]` / `filter -l` / `filter -c` / `filter --presets` | Box matches in the pane, name them on hover, list only, clear, or list the preset vocabulary |
 | `yes` / `no` (`y` / `n` hidden) | Answer a filter confirmation prompt |
+| `debug [on\|off\|toggle]` / `verbose [on\|off\|status]` | Debug window and verbose mirroring |
+| `info [section]` / `theme [frost\|classic]` / `keys` | Diagnostics and palette |
 | `persist [on\|off\|status]` | Per-tab auto-restore switch |
 | `save-layout [name]` / `restore-layout <name>` / `list-layouts` / `delete-layout <name\|--all>` | Named layouts |
 | `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
