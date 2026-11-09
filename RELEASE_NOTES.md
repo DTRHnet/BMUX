@@ -23,6 +23,9 @@
 | Activation | The toolbar icon (or `Alt+Shift+B`) turns BMUX straight on — overlay plus Control Mode — and off again; the popup is gone |
 | Key resilience | `%`/`Shift+5`/`5` and `"`/`Shift+'`/`'` all split; `Ctrl+b` works inside Control Mode; `keys` prints what the keyboard actually sent |
 | Console size | The pane console drags to 90% of the pane from a visible grip (with a drag shield); the floating console gained a bottom grip |
+| Palette | Frost theme by default (cold blues, ice text, ice-cyan accents as CSS variables); Control Mode is a quiet inset ring, not a 5px frame; `theme classic` restores black/green |
+| Debug output | The debug window is optional and hidden by default; `verbose` mirrors its output into the focused pane; `info` prints layout/panes/keys/state |
+| Detachable console | `log detach` / `log attach` / the `⧉` footer button float a pane's console in its own draggable window, scrollback intact, restored with the layout |
 
 ## The shape of it
 

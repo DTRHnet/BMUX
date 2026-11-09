@@ -28,6 +28,32 @@ Persistence finally exists, is validated, and can be switched off.
     `delete-layout <name|--all>`;
   - they survive browser restarts, and at most 30 are kept per origin (oldest
     dropped first).
+- **A calmer frost palette.** Every terminal surface (pane console, floating
+  console, debug window, prompt cards, toolbar, status bar) now uses cold blues and
+  ice text with one ice-cyan accent, defined as CSS variables at the top of
+  `content/styles.css`. Control Mode is no longer a five-pixel frame around the
+  page: it is a one-pixel inset ring plus a tinted `CONTROL MODE` chip in the
+  status bar. `theme classic` restores the old black/green terminal look and
+  `theme frost` brings the palette back; the choice is saved with the layout.
+- **The debug window is optional.** It starts **hidden**; `debug on|off|toggle`
+  (and the preference, saved per tab) shows it. With it hidden, `verbose on`
+  mirrors debug output into the focused pane's console instead, so nothing is
+  invisible.
+- **`info [all|layout|panes|keys|state]`** prints verbose diagnostics — the layout
+  tree, every pane with its size/console/zoom state, the recent key log, and the
+  runtime state (theme, verbose, debug window, auto-restore, filters, prompts,
+  history). This is the command-line answer to "where do I see what BMUX is
+  doing", now that the debug window is not always on screen.
+- **Detachable pane console.** Any pane's console can be pulled out into its own
+  window and put back:
+  - `log detach` / `log attach`, or the `⧉` button in the pane footer;
+  - the window moves by dragging its header and resizes from its corner or bottom
+    edge (same drag shield as everything else), and its `⧉ dock` button puts it
+    back in the pane;
+  - the *same* panel is moved, so the scrollback, history and input listeners
+    survive the trip;
+  - the detached state and window rectangle are saved with the layout, so a reload
+    brings the floating console back.
 - **Activation is one state.** Clicking the extension icon (or pressing
   `Alt+Shift+B`) now turns BMUX *on*: the overlay appears with Control Mode
   already active, so the blue border and the keys are live immediately. Pressing
@@ -97,6 +123,10 @@ Persistence finally exists, is validated, and can be switched off.
 
 ### Fixed
 
+- A keydown aimed at a text field was swallowed when that field was not the
+  document's `activeElement` (a hidden debug window, a synthetic event): the
+  Control Mode handler now also looks at the event target, so typing in any BMUX
+  input is never intercepted.
 - A pane console given a height taller than its pane could not actually grow that
   far: the iframe flex item refused to shrink (`min-height: auto`), so the panel was
   squeezed back. The iframe now has `min-height: 0` and the panel `flex: 0 0 auto`.

@@ -71,6 +71,23 @@ yes / no                                  - Type the answer instead
 Esc                                       - Cancel the prompt
 ```
 
+## Palette and debug output
+```
+> theme frost        - Default: cold blues, ice text
+> theme classic      - The old black/green terminal look
+> debug on|off       - Show/hide the floating debug window (hidden by default)
+> verbose on         - Mirror debug output into the focused pane console
+> info               - Layout tree, panes, recent keys, runtime state
+```
+
+## Detaching a pane console
+```
+⧉ button in the footer / > log detach   - Pull the console into its own window
+Drag its header                        - Move it
+Drag its corner or bottom edge         - Resize it
+⧉ dock button / > log attach           - Put it back in the pane
+```
+
 ## If a shortcut does not fire
 ```
 > keys          - Last 12 key events: raw key, code, modifiers, and what they ran

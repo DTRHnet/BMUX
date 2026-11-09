@@ -219,6 +219,37 @@ explicit cases.
 Restoring **recreates the panes**, so each page loads fresh: scroll position, form
 input and in-page JavaScript state cannot be carried over.
 
+### `debug [on|off|toggle]`
+The floating debug window is optional and starts hidden. `debug on` shows it (drag
+its header to move, its corner to resize); `debug off` hides it. The preference is
+saved with the layout.
+
+### `verbose [on|off|status]`
+Mirrors everything BMUX logs — command traces, key handling, filter steps — into
+the **focused pane's console**, so you can watch BMUX work without the debug window
+on screen. `verbose status` reports the current mode.
+
+### `info [all|layout|panes|keys|state]`
+Prints verbose diagnostics: the layout tree with its ratios, every pane with its
+size and console/zoom state, the recent key log, and the runtime state (theme,
+verbose, debug window, auto-restore and where the layout came from, filters,
+prompts, history length).
+
+```
+> info layout
+== layout ==
+split row ratio 0.30
+  leaf %1 https://example.com/docs
+  split column ratio 0.55
+    leaf %2 https://example.com/
+    leaf %3 https://example.com/blog
+```
+
+### `theme [frost|classic]`
+`frost` (default) uses cold blues and ice text; `classic` is the original black
+background with green text. Bare `theme` reports the active palette. The choice is
+stored with the layout.
+
 ### `keys`
 Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the
 mode they were read in, and the command each resolved to. Use it when a shortcut
@@ -437,7 +468,7 @@ What `Esc` runs. It clears filter highlights if any are on screen, otherwise it
 leaves Control Mode. It exists as a command so a key pressed inside a pane frame —
 which cannot see the top frame's filter state — resolves to the same behaviour.
 
-### `log [toggle|on|off|clear|size <px>]`
+### `log [toggle|on|off|clear|size <px>|detach|attach]`
 Opens, closes, resizes or empties the active pane's console (the scrollback under
 its input). `l` in Control Mode is the same as `log toggle`.
 
@@ -448,7 +479,13 @@ Console height 240px
 Console closed
 ```
 
-Heights are clamped to 40px and to 70% of the pane.
+Heights are clamped to 40px and to 90% of the pane.
+
+`log detach` pulls that pane's console out into its own movables window (drag the
+header, resize from the corner or bottom edge); `log attach` — or the `⧉ dock`
+button on the window, or the `⧉` button in the pane footer — puts it back. The same
+panel is moved, so the scrollback and history come with it, and the detached state
+is saved with the layout.
 
 ### `help`
 Lists every command, grouped into overlay commands and pane commands, with each

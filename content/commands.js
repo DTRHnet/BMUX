@@ -400,6 +400,80 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'debug': {
+        scope: 'overlay',
+        description: 'Show, hide or toggle the floating debug window (hidden by default)',
+        usage: 'debug [on|off|toggle]',
+        execute: function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'toggle').toLowerCase();
+
+            if (action !== 'on' && action !== 'off' && action !== 'toggle') {
+                return 'Error: Usage: debug [on|off|toggle]';
+            }
+
+            const open = client.setDebugOpen(action === 'toggle' ? !client.debugOpen : action === 'on');
+            return open
+                ? 'Debug window shown (move it by its header, resize from its corner)'
+                : 'Debug window hidden; use `verbose on` to see debug output in the focused pane instead';
+        }
+    },
+
+    'verbose': {
+        scope: 'overlay',
+        description: 'Mirror debug output into the focused pane console',
+        usage: 'verbose [on|off|status]',
+        execute: function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `Verbose logging: ${client.verbose ? 'on' : 'off'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: verbose [on|off|status]';
+            }
+
+            const on = client.setVerbose(action === 'on');
+            return on
+                ? 'Verbose on: debug output is mirrored into the focused pane console'
+                : 'Verbose off';
+        }
+    },
+
+    'info': {
+        scope: 'overlay',
+        description: 'Print verbose diagnostics: layout, panes, keys and state',
+        usage: 'info [all|layout|panes|keys|state]',
+        execute: function (api, args) {
+            const section = (args[0] || 'all').toLowerCase();
+            const known = ['all', 'layout', 'panes', 'keys', 'state'];
+            if (known.indexOf(section) === -1) {
+                return `Error: Usage: info [${known.join('|')}]`;
+            }
+            return api.client.infoReport(section);
+        }
+    },
+
+    'theme': {
+        scope: 'overlay',
+        description: 'Switch the palette: frost (default) or classic black/green',
+        usage: 'theme [frost|classic]',
+        execute: function (api, args) {
+            const client = api.client;
+            const name = (args[0] || '').toLowerCase();
+
+            if (!name) return `Theme: ${client.theme} (usage: theme frost|classic)`;
+            if (name !== 'frost' && name !== 'classic') {
+                return 'Error: Usage: theme [frost|classic]';
+            }
+
+            client.setTheme(name);
+            return `Theme: ${name}`;
+        }
+    },
+
     'help': {
         scope: 'overlay',
         description: 'List every command, grouped by scope',
@@ -1494,8 +1568,8 @@ const BMUX_COMMANDS = {
 
     'log': {
         scope: 'pane',
-        description: 'Open, close, resize or clear this pane console (the scrollback under its input)',
-        usage: 'log [toggle|on|off|clear|size <px>]',
+        description: 'Open, close, resize, clear or detach this pane console',
+        usage: 'log [toggle|on|off|clear|size <px>|detach|attach]',
         execute: function (api, args) {
             const client = api.client;
             const pane = api.pane;
@@ -1531,7 +1605,18 @@ const BMUX_COMMANDS = {
                 return `Console height ${applied}px`;
             }
 
-            return 'Error: Usage: log [toggle|on|off|clear|size <px>]';
+            if (action === 'detach' || action === 'float') {
+                client.setPaneConsoleFloating(pane, true);
+                return 'Console detached: drag its header to move it, its corner to resize; ' +
+                    '`log attach` or the dock button puts it back';
+            }
+
+            if (action === 'attach' || action === 'dock') {
+                client.setPaneConsoleFloating(pane, false);
+                return 'Console docked back into the pane';
+            }
+
+            return 'Error: Usage: log [toggle|on|off|clear|size <px>|detach|attach]';
         }
     },
 

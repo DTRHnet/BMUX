@@ -275,7 +275,30 @@ mode, resolved command; the last 20 are kept), an unbound key logs
 `Unbound key: ...`, and the `keys` command prints that log — which is how a shortcut
 that silently does nothing can be identified.
 
-### 19. **Modern UI Design**
+### 19. **Palette, optional debug window and detached consoles**
+- The palette lives in CSS custom properties on `#bmux-overlay` (`--bmux-bg*`,
+  `--bmux-text*`, `--bmux-accent*`), with a `[data-theme="classic"]` block
+  restoring the black/green look. `setTheme()` sets the attribute; Control Mode is
+  `.bmux-control-active` (a one-pixel inset ring) plus `.bmux-status-active` on the
+  status chip — no inline border.
+- The debug window carries `.bmux-debug-hidden` unless `debugOpen`; `debug` toggles
+  it. `verbose` makes `log()` mirror into the focused pane's console, which is what
+  makes the window genuinely optional. `info` renders `infoReport()`, built from the
+  same primitives (`getPanes`, `getPaneSizeLabel`, `recentKeys`, prefs).
+- `setPaneConsoleFloating(pane, true)` moves the pane's `.bmux-pane-output` element
+  into a `.bmux-floating-console` in `#bmux-floating` (header with a dock button,
+  corner and bottom-edge grips); docking moves the same element back into the
+  footer. Because it is the same node the scrollback, listeners and history
+  survive. `pane._bmuxFloat` holds the wrapper, so killing the pane removes it.
+  `paneConsole(pane)` is the single lookup used by every console method, so `log`,
+  `clear` and output appends work whether the panel is docked or floating.
+- The snapshot grew `prefs { theme, debugOpen, verbose }` and, per console,
+  `floating` + `floatRect`, all restored by `applySnapshot`.
+- `isTypingTarget(event)` now checks the event target as well as
+  `document.activeElement`, so a keydown aimed at a BMUX input is never swallowed by
+  Control Mode (this is what made a hidden debug input unusable).
+
+### 20. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command

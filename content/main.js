@@ -496,6 +496,10 @@ class BMUXClient {
         this.commandHistory = [];     // shared shell-style history for every input
         this.keyLog = [];             // recent key events, for the `keys` command
 
+        this.theme = 'frost';         // 'frost' (default) or 'classic'
+        this.debugOpen = false;       // the floating debug window is optional
+        this.verbose = false;         // mirror debug output into the focused pane
+
         this.persistEnabled = true;   // auto-restore switch (from the background)
         this.restoring = false;       // true while a snapshot is being applied
         this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
@@ -524,18 +528,57 @@ class BMUXClient {
 
     log(msg) {
         console.log("[BMUX client]", msg);
+
         if (this.ui && this.ui.debug) {
             const line = document.createElement('div');
             line.textContent = `> ${msg}`;
             this.ui.debug.appendChild(line);
             this.ui.debug.scrollTop = this.ui.debug.scrollHeight;
         }
+
+        // With the debug window hidden there would be nowhere to read this, so
+        // verbose mode mirrors it into the focused pane's console instead.
+        if (this.verbose && this.ui) {
+            const pane = this.getActivePane();
+            if (pane) this.appendPaneOutput(pane, String(msg), 'result');
+        }
     }
 
-    isTypingTarget() {
-        const element = document.activeElement;
-        if (!element) return false;
-        return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
+    /** Show or hide the floating debug window. */
+    setDebugOpen(open) {
+        this.debugOpen = !!open;
+        if (this.ui && this.ui.debugContainer) {
+            this.ui.debugContainer.classList.toggle('bmux-debug-hidden', !this.debugOpen);
+        }
+        this.scheduleSave();
+        return this.debugOpen;
+    }
+
+    /** Mirror debug output into the focused pane console, or stop doing that. */
+    setVerbose(on) {
+        this.verbose = !!on;
+        if (this.verbose) {
+            this.log('Verbose on: debug output is mirrored into the focused pane console');
+        }
+        this.scheduleSave();
+        return this.verbose;
+    }
+
+    /** 'frost' palette (default) or the original 'classic' black/green. */
+    setTheme(name) {
+        this.theme = String(name || '').toLowerCase() === 'classic' ? 'classic' : 'frost';
+        if (this.ui) this.ui.overlay.dataset.theme = this.theme;
+        this.log(`Theme: ${this.theme}`);
+        this.scheduleSave();
+        return this.theme;
+    }
+
+    isTypingTarget(event) {
+        const isField = (element) => !!element &&
+            (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA');
+
+        if (isField(document.activeElement)) return true;
+        return isField(event && event.target);
     }
 
     /**
@@ -549,17 +592,12 @@ class BMUXClient {
         this.isControlMode = next;
 
         if (this.ui) {
-            if (next) {
-                this.ui.overlay.style.border = "5px solid #00aaff"; // Modern Blue
-                this.ui.statusLeft.textContent = " [CONTROL MODE] ";
-                this.ui.statusLeft.style.backgroundColor = "#00aaff";
-                this.ui.statusLeft.style.color = "#000";
-            } else {
-                this.ui.overlay.style.border = "none";
-                this.ui.statusLeft.textContent = " [NORMAL] ";
-                this.ui.statusLeft.style.backgroundColor = "transparent";
-                this.ui.statusLeft.style.color = "#fff";
-            }
+            // A quiet inset ring and a tinted status chip, not a five-pixel
+            // frame around the whole page.
+            this.ui.overlay.style.border = 'none';
+            this.ui.overlay.classList.toggle('bmux-control-active', next);
+            this.ui.statusLeft.classList.toggle('bmux-status-active', next);
+            this.ui.statusLeft.textContent = next ? 'CONTROL MODE' : 'NORMAL';
         }
 
         if (changed) {
@@ -600,6 +638,9 @@ class BMUXClient {
             <div id="bmux-handles"></div>
           </div>
 
+          <!-- Detached pane consoles float here -->
+          <div id="bmux-floating"></div>
+
           <!-- Draggable Debug Console -->
           <div id="bmux-debug-overlay">
              <div id="bmux-debug-header">Debug Console</div>
@@ -625,12 +666,15 @@ class BMUXClient {
           </div>
         `;
 
+        overlay.dataset.theme = this.theme;
+
         document.body.appendChild(overlay);
 
         // Cache Elements
         this.ui = {
             overlay: overlay,
             panes: overlay.querySelector('#bmux-panes'),
+            floating: overlay.querySelector('#bmux-floating'),
             handles: overlay.querySelector('#bmux-handles'),
             statusBar: overlay.querySelector('#bmux-status-bar'),
             statusLeft: overlay.querySelector('#bmux-status-left'),
@@ -683,6 +727,10 @@ class BMUXClient {
         this.bindCommandInput(this.ui.commandInput, {
             report: (text) => this.log(text)
         });
+
+        // The debug window is optional (`debug on|off|toggle`); it starts hidden
+        // and verbose mode sends its output to the focused pane instead.
+        this.ui.debugContainer.classList.toggle('bmux-debug-hidden', !this.debugOpen);
 
         // Make Debug Draggable, and resizable from its bottom-right corner
         this.makeDraggable(this.ui.debugContainer, this.ui.debugHeader);
@@ -889,10 +937,22 @@ class BMUXClient {
         const consoles = {};
 
         this.getPanes().forEach((pane) => {
-            consoles[this.getPaneId(pane)] = {
+            const meta = {
                 open: this.isPaneConsoleOpen(pane),
                 height: this.getPaneConsoleHeight(pane)
             };
+
+            if (this.isPaneConsoleFloating(pane) && pane._bmuxFloat) {
+                meta.floating = true;
+                meta.floatRect = {
+                    left: pane._bmuxFloat.offsetLeft,
+                    top: pane._bmuxFloat.offsetTop,
+                    width: pane._bmuxFloat.offsetWidth,
+                    height: pane._bmuxFloat.offsetHeight
+                };
+            }
+
+            consoles[this.getPaneId(pane)] = meta;
         });
 
         const serializeNode = (node) => {
@@ -928,6 +988,11 @@ class BMUXClient {
             activeId: active ? this.getPaneId(active) : null,
             zoomedId: this.zoomedPane ? this.getPaneId(this.zoomedPane) : null,
             nextPaneId: this.nextPaneId,
+            prefs: {
+                theme: this.theme,
+                debugOpen: this.debugOpen,
+                verbose: this.verbose
+            },
             consoles: consoles,
             layout: serializeNode(this.layout)
         };
@@ -993,12 +1058,28 @@ class BMUXClient {
 
             this.layout = tree;
 
+            const prefs = snapshot.prefs || {};
+            if (prefs.theme) this.setTheme(prefs.theme);
+            if (prefs.verbose !== undefined) this.setVerbose(prefs.verbose);
+            if (prefs.debugOpen !== undefined) this.setDebugOpen(prefs.debugOpen);
+
             const consoles = snapshot.consoles || {};
             this.getPanes().forEach((pane) => {
                 const saved = consoles[this.getPaneId(pane)];
                 if (!saved) return;
                 if (saved.height) pane.dataset.consoleHeight = String(saved.height);
                 if (saved.open) this.setPaneConsoleOpen(pane, true);
+
+                if (saved.floating) {
+                    this.setPaneConsoleFloating(pane, true);
+                    const rect = saved.floatRect;
+                    if (rect && pane._bmuxFloat) {
+                        pane._bmuxFloat.style.left = `${Math.round(rect.left)}px`;
+                        pane._bmuxFloat.style.top = `${Math.round(rect.top)}px`;
+                        pane._bmuxFloat.style.width = `${Math.round(rect.width)}px`;
+                        pane._bmuxFloat.style.height = `${Math.round(rect.height)}px`;
+                    }
+                }
             });
 
             const highestId = this.getPanes().reduce((max, pane) => {
@@ -1199,7 +1280,7 @@ class BMUXClient {
         // primary one, y / n answer a yes/no prompt, Escape cancels. Typing in a
         // text field (the prompt's own input, the console, a pane input) is never
         // intercepted.
-        if (this.hasOpenPrompt() && !this.isTypingTarget()) {
+        if (this.hasOpenPrompt() && !this.isTypingTarget(e)) {
             if (this.handlePromptKey(e)) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -1209,7 +1290,7 @@ class BMUXClient {
 
         // display-panes picker: while the numbers are on screen, a digit selects
         // that pane and Escape cancels.
-        if (this.paneIndexPrompt && !this.isTypingTarget()) {
+        if (this.paneIndexPrompt && !this.isTypingTarget(e)) {
             if (/^[1-9]$/.test(e.key)) {
                 e.preventDefault(); e.stopPropagation();
                 const panes = this.getPanes();
@@ -1276,7 +1357,7 @@ class BMUXClient {
         // CONTROL MODE LOGIC
         if (this.isControlMode) {
             // Typing in the console or a pane input keeps working in Control Mode
-            if (this.isTypingTarget()) {
+            if (this.isTypingTarget(e)) {
                 return;
             }
 
@@ -1815,14 +1896,24 @@ class BMUXClient {
     /** Keep the per-pane maximize glyph in step with the zoom state. */
     refreshPaneControls() {
         this.getPanes().forEach((pane) => {
-            const button = pane.querySelector('.bmux-pane-max-btn');
-            if (!button) return;
-            const zoomed = this.isZoomed(pane);
-            button.textContent = zoomed ? '\u2921' : '\u2922';
-            button.title = zoomed
-                ? 'Restore the layout (Shift+z)'
-                : 'Maximize this pane (Shift+z)';
-            button.classList.toggle('bmux-pane-max-btn-active', zoomed);
+            const maxButton = pane.querySelector('.bmux-pane-max-btn');
+            if (maxButton) {
+                const zoomed = this.isZoomed(pane);
+                maxButton.textContent = zoomed ? '\u2921' : '\u2922';
+                maxButton.title = zoomed
+                    ? 'Restore the layout (Shift+z)'
+                    : 'Maximize this pane (Shift+z)';
+                maxButton.classList.toggle('bmux-pane-max-btn-active', zoomed);
+            }
+
+            const detachButton = pane.querySelector('.bmux-pane-detach-btn');
+            if (detachButton) {
+                const floating = this.isPaneConsoleFloating(pane);
+                detachButton.title = floating
+                    ? 'Dock this console back into the pane (log attach)'
+                    : 'Detach this console into its own window (log detach)';
+                detachButton.classList.toggle('bmux-pane-detach-btn-active', floating);
+            }
         });
     }
 
@@ -3049,6 +3140,183 @@ class BMUXClient {
         return cleared;
     }
 
+    // --- detached (floating) pane console ---
+
+    isPaneConsoleFloating(pane) {
+        return !!(pane && pane.dataset && pane.dataset.consoleFloating === '1');
+    }
+
+    /**
+     * Move a pane's console out into its own movable window, or dock it back into
+     * the pane footer. The same DOM panel is moved, so the scrollback, the history
+     * and the input listeners survive the trip.
+     */
+    setPaneConsoleFloating(pane, floating) {
+        if (!this.ui || !this.ui.floating || !pane) return false;
+
+        const wantFloat = !!floating;
+        if (wantFloat === this.isPaneConsoleFloating(pane)) return wantFloat;
+
+        const output = this.paneConsole(pane);
+        if (!output) return false;
+
+        if (!wantFloat) {
+            const footer = pane.querySelector('.bmux-pane-footer');
+            if (footer && output.parentNode !== footer) footer.appendChild(output);
+
+            if (pane._bmuxFloat && pane._bmuxFloat.parentNode) {
+                pane._bmuxFloat.parentNode.removeChild(pane._bmuxFloat);
+            }
+            delete pane._bmuxFloat;
+            delete pane.dataset.consoleFloating;
+
+            this.refreshPaneControls();
+            this.scheduleSave();
+            return false;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'bmux-floating-console';
+
+        const header = document.createElement('div');
+        header.className = 'bmux-floating-header';
+
+        const title = document.createElement('span');
+        title.className = 'bmux-floating-title';
+        title.textContent = `console · pane ${this.getPaneNumber(pane)} ${this.getPaneId(pane)}`;
+
+        const dock = document.createElement('button');
+        dock.type = 'button';
+        dock.className = 'bmux-floating-close';
+        dock.textContent = '\u29C9 dock';
+        dock.title = 'Dock this console back into its pane (log attach)';
+
+        header.appendChild(title);
+        header.appendChild(dock);
+        wrapper.appendChild(header);
+        wrapper.appendChild(output);
+
+        const grip = document.createElement('div');
+        grip.className = 'bmux-floating-grip';
+        grip.title = 'Drag to resize this console';
+        wrapper.appendChild(grip);
+
+        const bottom = document.createElement('div');
+        bottom.className = 'bmux-floating-bottom';
+        wrapper.appendChild(bottom);
+
+        this.ui.floating.appendChild(wrapper);
+        pane._bmuxFloat = wrapper;
+        pane.dataset.consoleFloating = '1';
+
+        this.setPaneConsoleOpen(pane, true);
+
+        const paneRect = pane.getBoundingClientRect();
+        const cascade = Math.max(0, this.ui.floating.childElementCount - 1) * 22;
+        wrapper.style.left = `${Math.round(bmuxClamp(paneRect.left + 28 + cascade, 0, Math.max(0, window.innerWidth - 470)))}px`;
+        wrapper.style.top = `${Math.round(bmuxClamp(paneRect.top + 44 + cascade, 0, Math.max(0, window.innerHeight - 300)))}px`;
+
+        dock.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.setPaneConsoleFloating(pane, false);
+        });
+        header.addEventListener('mousedown', (event) => this.startFloatingDrag(event, wrapper));
+        this.makeResizable(wrapper, grip);
+        this.makeResizable(wrapper, bottom, { axis: 'y' });
+
+        this.refreshPaneControls();
+        this.scheduleSave();
+        return true;
+    }
+
+    togglePaneConsoleFloating(pane) {
+        return this.setPaneConsoleFloating(pane, !this.isPaneConsoleFloating(pane));
+    }
+
+    /** Drag a floating console around by its header. */
+    startFloatingDrag(event, wrapper) {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (event.target && event.target.classList && event.target.classList.contains('bmux-floating-close')) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startLeft = wrapper.offsetLeft;
+        const startTop = wrapper.offsetTop;
+
+        const shield = this.ui ? this.ui.dragShield : null;
+        if (shield) shield.className = 'active';
+
+        const move = (moveEvent) => {
+            wrapper.style.left = `${Math.round(bmuxClamp(startLeft + (moveEvent.clientX - startX), 0, Math.max(0, window.innerWidth - 80)))}px`;
+            wrapper.style.top = `${Math.round(bmuxClamp(startTop + (moveEvent.clientY - startY), 0, Math.max(0, window.innerHeight - 40)))}px`;
+        };
+
+        const up = () => {
+            document.removeEventListener('mousemove', move, true);
+            document.removeEventListener('mouseup', up, true);
+            if (shield) shield.className = '';
+            this.scheduleSave();
+        };
+
+        document.addEventListener('mousemove', move, true);
+        document.addEventListener('mouseup', up, true);
+    }
+
+    /** Verbose diagnostics for the `info` command. */
+    infoReport(section) {
+        const wanted = String(section || 'all').toLowerCase();
+        const lines = [];
+
+        if (wanted === 'all' || wanted === 'layout') {
+            const describe = (node, depth) => {
+                if (!node) return '(no layout)';
+                const indent = '  '.repeat(depth);
+                if (node.kind === 'leaf') {
+                    return `${indent}leaf ${this.getPaneId(node.pane)} ${this.getPaneUrl(node.pane)}`;
+                }
+                return [
+                    `${indent}split ${node.direction} ratio ${Number(node.ratio).toFixed(2)}`,
+                    describe(node.first, depth + 1),
+                    describe(node.second, depth + 1)
+                ].join('\n');
+            };
+            lines.push('== layout ==', describe(this.layout, 0));
+        }
+
+        if (wanted === 'all' || wanted === 'panes') {
+            lines.push('== panes ==');
+            this.getPanes().forEach((pane) => {
+                lines.push(`${this.getPaneNumber(pane)} ${this.getPaneId(pane)} · ${this.getPaneSizeLabel(pane)}` +
+                    `${this.isZoomed(pane) ? ' · zoomed' : ''}` +
+                    `${this.isPaneConsoleFloating(pane) ? ' · console floating' :
+                        (this.isPaneConsoleOpen(pane) ? ' · console open' : '')}` +
+                    ` · ${this.getPaneTitle(pane)}`);
+            });
+        }
+
+        if (wanted === 'all' || wanted === 'keys') {
+            lines.push('== keys ==', ...this.recentKeys(10));
+        }
+
+        if (wanted === 'all' || wanted === 'state') {
+            lines.push('== state ==', ...[
+                `theme: ${this.theme}`,
+                `verbose: ${this.verbose ? 'on' : 'off'}`,
+                `debug window: ${this.debugOpen ? 'open' : 'hidden'}`,
+                `auto-restore: ${this.persistEnabled ? 'on' : 'off'} (layout from ${this.restoredFrom})`,
+                `control mode: ${this.isControlMode ? 'on' : 'off'} · active: ${this.isActive ? 'yes' : 'no'}`,
+                `panes: ${this.getPanes().length} · zoomed: ${this.zoomedPane ? this.getPaneId(this.zoomedPane) : 'no'}`,
+                `filters: ${this.filters.size} · prompts: ${this.prompts.size} · history: ${this.commandHistory.length}`
+            ]);
+        }
+
+        return lines.join('\n');
+    }
+
     // --- display-panes ---
 
     displayPanes() {
@@ -3166,6 +3434,10 @@ class BMUXClient {
         this.clearPaneIndexes();
         this.clearFilter(target);
         this.cancelPrompt(target, 'its pane was killed');
+        if (target._bmuxFloat && target._bmuxFloat.parentNode) {
+            target._bmuxFloat.parentNode.removeChild(target._bmuxFloat);
+        }
+        delete target._bmuxFloat;
         if (this.zoomedPane === target) this.zoomedPane = null;
         if (this.lastActivePane === target) this.lastActivePane = null;
 
@@ -3200,6 +3472,7 @@ class BMUXClient {
         this.clearPaneIndexes();
         this.clearAllFilters();
         this.cancelPrompts();
+        if (this.ui && this.ui.floating) this.ui.floating.textContent = '';
         this.zoomedPane = null;
         this.layoutName = null;
         this.lastActivePane = null;
@@ -3263,6 +3536,13 @@ class BMUXClient {
         consoleButton.textContent = '\u25B8';
         consoleButton.title = "Show this pane's console (log toggle)";
 
+        // Detach the console into its own movable window, or dock it again.
+        const detachButton = document.createElement('button');
+        detachButton.className = 'bmux-pane-detach-btn';
+        detachButton.type = 'button';
+        detachButton.textContent = '\u29C9';
+        detachButton.title = 'Detach this console into its own window (log detach)';
+
         // Per-pane maximize/restore: the on-screen form of Ctrl+b, Shift+z.
         const maxButton = document.createElement('button');
         maxButton.className = 'bmux-pane-max-btn';
@@ -3279,6 +3559,7 @@ class BMUXClient {
         cmdContainer.appendChild(title);
         cmdContainer.appendChild(status);
         cmdContainer.appendChild(consoleButton);
+        cmdContainer.appendChild(detachButton);
         cmdContainer.appendChild(maxButton);
         cmdContainer.appendChild(badge);
 
@@ -3312,6 +3593,12 @@ class BMUXClient {
             this.runCommand('resize-pane -Z', { pane: pane }).then((result) => {
                 if (result) this.log(result);
             });
+        });
+
+        detachButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.togglePaneConsoleFloating(pane);
         });
 
         grip.addEventListener('mousedown', (event) => this.startConsoleResize(event, pane));
@@ -3362,12 +3649,22 @@ class BMUXClient {
 
     // --- pane console (the scrollback under each pane's input) ---
 
+    /** The pane's console panel, wherever it currently lives (footer or float). */
+    paneConsole(pane) {
+        if (!pane || !pane.querySelector) return null;
+
+        const inline = pane.querySelector('.bmux-pane-output');
+        if (inline) return inline;
+
+        return pane._bmuxFloat ? pane._bmuxFloat.querySelector('.bmux-pane-output') : null;
+    }
+
     isPaneConsoleOpen(pane) {
         return !!(pane && pane.dataset && pane.dataset.consoleOpen === '1');
     }
 
     setPaneConsoleOpen(pane, open) {
-        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        const output = this.paneConsole(pane);
         if (!output) return false;
 
         pane.dataset.consoleOpen = open ? '1' : '0';
@@ -3403,8 +3700,15 @@ class BMUXClient {
 
     /** Set the console height in px, clamped to the pane. Returns the applied px. */
     setPaneConsoleHeight(pane, px) {
-        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        const output = this.paneConsole(pane);
         if (!output) return 0;
+
+        // While detached the window owns the size, not the panel.
+        if (this.isPaneConsoleFloating(pane) && pane._bmuxFloat) {
+            const applied = Math.round(bmuxClamp(Number(px) || BMUX_CONSOLE_HEIGHT, 80, window.innerHeight - 80));
+            pane._bmuxFloat.style.height = `${applied}px`;
+            return applied;
+        }
 
         const paneHeight = pane.getBoundingClientRect ? (pane.getBoundingClientRect().height || 0) : 0;
         const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_SHARE) : 600;
@@ -3418,7 +3722,8 @@ class BMUXClient {
 
     /** Append one block to a pane's scrollback, keeping the newest in view. */
     appendPaneOutput(pane, text, kind) {
-        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        const output = this.paneConsole(pane);
+        const log = output ? output.querySelector('.bmux-pane-output-log') : null;
         if (!log) return false;
 
         const block = document.createElement('div');
@@ -3437,7 +3742,8 @@ class BMUXClient {
     }
 
     clearPaneConsole(pane) {
-        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        const output = this.paneConsole(pane);
+        const log = output ? output.querySelector('.bmux-pane-output-log') : null;
         if (!log) return false;
         log.textContent = '';
         return true;

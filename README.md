@@ -162,6 +162,18 @@ or a key binding:
 - `\;` is a literal semicolon; a `;` inside quotes or `[] () {}` does not split,
   so `filter a[href="x;y"]` stays one command.
 
+### 🔧 Debugging without a permanent window
+The floating debug window is **optional and hidden by default** — the pane console
+is the terminal now. When you want BMUX's own trace, either show the window or
+mirror it into the pane you are looking at:
+
+```
+> debug on            # show the floating debug window (debug off / toggle)
+> verbose on          # mirror debug output into the focused pane console
+> info                # layout tree, panes, recent keys, runtime state
+> info layout|panes|keys|state
+```
+
 ### ❓ Prompts you can click
 When a command needs an answer, a card appears above the pane's footer:
 
@@ -184,6 +196,19 @@ form of `Ctrl+b`, `Shift+z`), click `⤡` to restore. Clicking another pane's `�
 moves the maximize there. Keyboard (`z`, `Shift+z`), the toolbar `Zoom` button and
 the pane buttons share one state.
 
+### 🧊 A frost palette, and a calmer Control Mode
+Every terminal surface uses cold blues, ice text and one ice-cyan accent — defined
+as CSS variables at the top of `content/styles.css`, so it is one place to tune.
+Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather
+than a five-pixel blue frame around the page. `theme classic` restores the old
+black/green terminal look:
+
+```
+> theme classic      # black background, green text
+> theme frost        # back to the default palette
+> theme              # what is active now
+```
+
 ### 💻 Per-pane console you can actually read
 The console under each pane's input is a scrollback, not a flash message:
 
@@ -196,6 +221,10 @@ The console under each pane's input is a scrollback, not a flash message:
   reset; `log size 240` works too). The height and open state survive splits,
   layout changes and zoom.
 - `clear` empties the scrollback.
+- **Detachable**: `log detach` (or the `⧉` button in the footer) pulls the console
+  out into its own window — drag the header to move it, the corner to resize,
+  `⧉ dock` or `log attach` to put it back. The scrollback comes with it, and the
+  detached console is saved with the layout.
 - **Drag its top edge** (the two-line grip) to make it as tall as 90% of the pane;
   double-click the grip to reset it to 140px, or type `log size 320`.
 
@@ -359,6 +388,10 @@ These act on the whole overlay.
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
 | `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
 | `keys` | Print the last key events and what they resolved to (shortcut diagnostics) | `> keys` |
+| `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
+| `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
+| `verbose [on\|off\|status]` | Mirror debug output into the focused pane console | `> verbose on` |
+| `theme [frost\|classic]` | Switch the palette | `> theme classic` |
 | `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
 | `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
 | `list-layouts` | Saved layouts for this site | `> list-layouts` |
@@ -383,7 +416,7 @@ for the console and `:` line.
 | `rename-pane <title\|->` | Title shown in the pane footer; `-` clears it | `> rename-pane Docs` |
 | `url [new-url]` | Show or change pane URL | `> url github.com` |
 | `reload` | Reload the pane | `> reload` |
-| `log [toggle\|on\|off\|clear\|size px]` | Show, hide, resize or clear this pane's console | `> log size 240` |
+| `log [toggle\|on\|off\|clear\|size px\|detach\|attach]` | Show, hide, resize, clear, or float this pane's console | `> log detach` |
 | `clear` | Empty the pane console scrollback | `> clear` |
 
 Bad input never throws: an unknown command, an unknown pane, a missing argument,
@@ -458,6 +491,8 @@ a command line, so keys are not a second code path.
 | Drag a pane console's top edge | Resize that console (double-click resets it) |
 | Drag the debug console's corner | Resize the floating console |
 | Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
+| Click a pane's `⧉` button | Detach that console into its own window (or dock it) |
+| Drag a detached console's header | Move that window |
 
 ---
 

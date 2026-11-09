@@ -1,26 +1,74 @@
-/* BMUX Container Injection */
-/* BMUX Container Injection */
+/* BMUX styles.
+ *
+ * Palette: a "frost" theme - cold blues, ice text, one ice-cyan accent - applied
+ * to every terminal-ish surface (console, floating console, prompt cards, status
+ * bar, toolbar). `data-theme="classic"` on the overlay restores the old
+ * black/green terminal look; the `theme` command switches between them.
+ */
+
 #bmux-overlay {
+  /* Frost (default) */
+  --bmux-bg-deep: #08111c;
+  --bmux-bg: #0e1a27;
+  --bmux-bg-raised: #132434;
+  --bmux-bg-sunken: #0a1520;
+  --bmux-line: #1e364b;
+  --bmux-line-soft: rgba(127, 208, 240, 0.16);
+  --bmux-text: #dbe9f5;
+  --bmux-text-dim: #86a3ba;
+  --bmux-accent: #7fd0f0;
+  --bmux-accent-strong: #b3e7ff;
+  --bmux-accent-soft: rgba(127, 208, 240, 0.16);
+  --bmux-accent-line: rgba(127, 208, 240, 0.45);
+  --bmux-ok: #9fe8c8;
+  --bmux-warn: #ffd98a;
+  --bmux-backdrop: rgba(5, 12, 20, 0.78);
+
   position: fixed;
   top: 0;
   left: 0;
   width: 100vw;
   height: 100vh;
-  background-color: rgba(0, 0, 0, 0.85);
+  background-color: var(--bmux-backdrop);
   /* Darker, sleek backdrop */
   z-index: 2147483647;
   display: flex !important;
   flex-direction: column;
-  color: #e0e0e0;
+  color: var(--bmux-text);
   font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   /* Modern Font */
   box-sizing: border-box;
-  backdrop-filter: blur(5px);
+  backdrop-filter: blur(6px) saturate(115%);
   /* Glassmorphism */
+}
+
+/* Classic palette: the original black terminal with green text. */
+#bmux-overlay[data-theme="classic"] {
+  --bmux-bg-deep: #0b0b0b;
+  --bmux-bg: #141414;
+  --bmux-bg-raised: #2a2a2a;
+  --bmux-bg-sunken: #0a0a0a;
+  --bmux-line: #333333;
+  --bmux-line-soft: rgba(0, 170, 255, 0.25);
+  --bmux-text: #33ff77;
+  --bmux-text-dim: #88998a;
+  --bmux-accent: #00aaff;
+  --bmux-accent-strong: #7fd9ff;
+  --bmux-accent-soft: rgba(0, 170, 255, 0.18);
+  --bmux-accent-line: rgba(0, 170, 255, 0.6);
+  --bmux-ok: #00ff88;
+  --bmux-warn: #ffd600;
+  --bmux-backdrop: rgba(0, 0, 0, 0.85);
 }
 
 #bmux-overlay.hidden {
   display: none !important;
+}
+
+/* Control Mode is a quiet inset ring, not a five-pixel frame around the page. */
+#bmux-overlay.bmux-control-active {
+  box-shadow: inset 0 0 0 1px var(--bmux-accent-line),
+    inset 0 14px 24px -22px var(--bmux-accent);
 }
 
 /* Panes Container */
@@ -40,17 +88,17 @@
   border-radius: 8px;
   /* Soft corners */
   overflow: hidden;
-  background: white;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+  background: #ffffff;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.35);
   display: flex;
   flex-direction: column;
-  border: 1px solid #333;
+  border: 1px solid var(--bmux-line);
 }
 
 .bmux-pane.active {
-  border: 2px solid #00aaff;
-  /* Modern Blue focus */
-  box-shadow: 0 0 15px rgba(0, 170, 255, 0.4);
+  border: 2px solid var(--bmux-accent);
+  /* Frost focus ring */
+  box-shadow: 0 0 14px var(--bmux-accent-soft);
 }
 
 .bmux-pane iframe {
@@ -66,23 +114,23 @@
 .bmux-pane-footer {
   height: auto;
   min-height: 28px;
-  background: #1e1e1e;
-  border-top: 1px solid #333;
+  background: var(--bmux-bg);
+  border-top: 1px solid var(--bmux-line);
   display: flex;
   flex-direction: column;
   font-size: 12px;
-  color: #888;
+  color: var(--bmux-text-dim);
 }
 
 .bmux-pane-cmd-container {
   display: flex;
   align-items: center;
   padding: 4px 8px;
-  background: #2a2a2a;
+  background: var(--bmux-bg-raised);
 }
 
 .bmux-pane-cmd-prompt {
-  color: #00ff00;
+  color: var(--bmux-accent);
   margin-right: 5px;
   font-family: 'Consolas', monospace;
 }
@@ -91,7 +139,7 @@
   flex: 1;
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--bmux-text);
   font-family: 'Consolas', monospace;
   font-size: 11px;
   outline: none;
@@ -107,8 +155,8 @@
   flex-direction: column;
   height: 140px;
   min-height: 40px;
-  background: #141414;
-  border-top: 1px solid #333;
+  background: var(--bmux-bg-sunken);
+  border-top: 1px solid var(--bmux-line);
 }
 
 .bmux-pane-output.open {
@@ -136,21 +184,21 @@
   height: 3px;
   margin-left: -22px;
   border-radius: 2px;
-  background: #4a5a6a;
-  box-shadow: 0 -4px 0 #4a5a6a;
+  background: var(--bmux-line);
+  box-shadow: 0 -4px 0 var(--bmux-line);
 }
 
 .bmux-pane-output-grip:hover::after,
 .bmux-pane-output-grip:active::after {
-  background: #00aaff;
-  box-shadow: 0 -4px 0 #00aaff;
+  background: var(--bmux-accent);
+  box-shadow: 0 -4px 0 var(--bmux-accent);
 }
 
 .bmux-pane-output-log {
   flex: 1;
   overflow-y: auto;
   padding: 5px 8px;
-  color: #0f0;
+  color: var(--bmux-text);
   font-family: 'Consolas', monospace;
   font-size: 10px;
   white-space: pre-wrap;
@@ -166,16 +214,17 @@
 }
 
 .bmux-pane-output-command {
-  color: #00aaff;
+  color: var(--bmux-accent);
 }
 
-/* Console toggle in the pane footer */
+/* Footer controls: console toggle, detach, maximize */
 .bmux-pane-console-btn,
+.bmux-pane-detach-btn,
 .bmux-pane-max-btn {
   background: transparent;
-  border: 1px solid #444;
+  border: 1px solid var(--bmux-line);
   border-radius: 4px;
-  color: #9fb4c7;
+  color: var(--bmux-text-dim);
   font-size: 10px;
   line-height: 1;
   padding: 2px 5px;
@@ -184,16 +233,24 @@
 }
 
 .bmux-pane-console-btn:hover,
+.bmux-pane-detach-btn:hover,
 .bmux-pane-max-btn:hover {
-  border-color: #00aaff;
-  color: #ffffff;
+  border-color: var(--bmux-accent);
+  color: var(--bmux-text);
 }
 
 /* Maximized pane: the button shows the contract glyph and stays lit. */
 .bmux-pane-max-btn-active {
-  border-color: #00aaff;
-  color: #ffffff;
-  background: rgba(0, 170, 255, 0.22);
+  border-color: var(--bmux-accent);
+  color: var(--bmux-bg-deep);
+  background: var(--bmux-accent);
+}
+
+/* Detached pane console */
+.bmux-pane-detach-btn-active {
+  border-color: var(--bmux-accent);
+  color: var(--bmux-bg-deep);
+  background: var(--bmux-accent);
 }
 
 /* Prompt card: questions raised by a command, answered by click or by key. */
@@ -203,11 +260,11 @@
   max-width: 560px;
   padding: 10px 12px;
   box-sizing: border-box;
-  background: rgba(18, 22, 28, 0.97);
-  border: 1px solid #00aaff;
+  background: var(--bmux-bg);
+  border: 1px solid var(--bmux-accent-line);
   border-radius: 8px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
-  color: #e8eef5;
+  color: var(--bmux-text);
   font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
   font-size: 12px;
 }
@@ -219,7 +276,7 @@
 
 .bmux-prompt-details {
   margin-bottom: 8px;
-  color: #8fa3b8;
+  color: var(--bmux-text-dim);
   font-family: 'Consolas', monospace;
   font-size: 11px;
 }
@@ -234,23 +291,22 @@
   display: inline-flex;
   align-items: center;
   background: transparent;
-  border: 1px solid #444;
+  border: 1px solid var(--bmux-line);
   border-radius: 6px;
-  color: #dfe8f2;
+  color: var(--bmux-text);
   font-size: 11px;
   padding: 5px 9px;
   cursor: pointer;
 }
 
 .bmux-prompt-btn:hover {
-  border-color: #00aaff;
-  color: #ffffff;
+  border-color: var(--bmux-accent);
 }
 
 .bmux-prompt-btn.primary {
-  background: #00aaff;
-  border-color: #00aaff;
-  color: #01131c;
+  background: var(--bmux-accent);
+  border-color: var(--bmux-accent);
+  color: var(--bmux-bg-deep);
   font-weight: 600;
 }
 
@@ -273,27 +329,29 @@
   flex: 1;
   min-width: 0;
   padding: 4px 6px;
-  background: #0d1218;
-  border: 1px solid #345;
+  background: var(--bmux-bg-sunken);
+  border: 1px solid var(--bmux-line);
   border-radius: 4px;
-  color: #ffffff;
+  color: var(--bmux-text);
   font-family: 'Consolas', monospace;
   font-size: 11px;
 }
 
-/* Resize grip for the floating debug console */
-.bmux-debug-grip {
+/* Resize grips for the floating panels */
+.bmux-debug-grip,
+.bmux-floating-grip {
   position: absolute;
   right: 0;
   bottom: 0;
   width: 18px;
   height: 18px;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, #6a7a8a 50%);
+  background: linear-gradient(135deg, transparent 50%, var(--bmux-line) 50%);
   border-bottom-right-radius: 8px;
 }
 
-.bmux-debug-bottom {
+.bmux-debug-bottom,
+.bmux-floating-bottom {
   position: absolute;
   left: 10px;
   right: 18px;
@@ -302,38 +360,101 @@
   cursor: ns-resize;
 }
 
-.bmux-debug-bottom:hover {
-  background: rgba(0, 170, 255, 0.3);
+.bmux-debug-bottom:hover,
+.bmux-floating-bottom:hover {
+  background: var(--bmux-accent-soft);
 }
 
+/* Floating (detached) pane console: a movable, resizable terminal window. */
+.bmux-floating-console {
+  position: absolute;
+  z-index: 7;
+  display: flex;
+  flex-direction: column;
+  width: 440px;
+  height: 260px;
+  box-sizing: border-box;
+  background: var(--bmux-bg-sunken);
+  border: 1px solid var(--bmux-line);
+  border-radius: 8px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
 
-/* Toolbar (Modern Header) */
+.bmux-floating-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 24px;
+  padding: 0 8px;
+  background: var(--bmux-bg-raised);
+  border-bottom: 1px solid var(--bmux-line);
+  color: var(--bmux-text-dim);
+  font-size: 11px;
+  cursor: move;
+  user-select: none;
+}
+
+.bmux-floating-title {
+  font-family: 'Consolas', monospace;
+}
+
+.bmux-floating-close {
+  background: transparent;
+  border: 1px solid var(--bmux-line);
+  border-radius: 4px;
+  color: var(--bmux-text-dim);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  cursor: pointer;
+}
+
+.bmux-floating-close:hover {
+  border-color: var(--bmux-accent);
+  color: var(--bmux-text);
+}
+
+/* The panel keeps its own log element; inside a float it fills the window. */
+.bmux-floating-console .bmux-pane-output {
+  display: flex;
+  flex: 1;
+  height: auto;
+  border-top: none;
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+}
+
+.bmux-floating-console .bmux-pane-output-grip {
+  display: none;
+}
+
+/* Toolbar */
 #bmux-toolbar {
   height: 40px;
-  background: rgba(30, 30, 30, 0.9);
+  background: var(--bmux-bg);
   display: flex;
   align-items: center;
   padding: 0 16px;
-  border-bottom: 1px solid #333;
-  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--bmux-line);
 }
 
 .bmux-btn {
   background: transparent;
-  color: #ddd;
-  border: 1px solid #444;
+  color: var(--bmux-text);
+  border: 1px solid var(--bmux-line);
   border-radius: 6px;
   margin-right: 8px;
   padding: 6px 12px;
   cursor: pointer;
   font-size: 12px;
-  transition: all 0.2s;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
 
 .bmux-btn:hover {
-  background: #00aaff;
-  color: white;
-  border-color: #00aaff;
+  background: var(--bmux-accent-soft);
+  color: var(--bmux-accent-strong);
+  border-color: var(--bmux-accent);
 }
 
 /* Directional focus buttons (focus-pane up|down|left|right), pushed to the
@@ -355,27 +476,59 @@
   white-space: nowrap;
   font-family: 'Consolas', monospace;
   font-size: 10px;
-  color: #8fd4ff;
-  background: #101820;
-  border: 1px solid #345;
+  color: var(--bmux-text-dim);
+  background: var(--bmux-bg-sunken);
+  border: 1px solid var(--bmux-line);
   border-radius: 4px;
 }
 
 .bmux-pane.active .bmux-pane-badge {
-  color: #ffffff;
-  background: #00aaff;
-  border-color: #00aaff;
+  color: var(--bmux-bg-deep);
+  background: var(--bmux-accent);
+  border-color: var(--bmux-accent);
 }
 
-/* Draggable Debug Console */
+/* Per-pane status segment: names the hovered filter match, e.g.
+   "FILTER: .card - DIV.card "Product" · 3/12". */
+.bmux-pane-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 40%;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: var(--bmux-accent);
+}
+
+.bmux-pane-status.bmux-pane-status-hovering {
+  color: var(--bmux-ok);
+}
+
+/* Pane title in the footer: auto from the page, or set with rename-pane */
+.bmux-pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 32%;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bmux-text-dim);
+  font-size: 10px;
+}
+
+/* Draggable, resizable debug console */
 #bmux-debug-overlay {
   position: fixed;
   top: 60px;
   right: 20px;
   width: 320px;
   height: 300px;
-  background: rgba(20, 20, 20, 0.95);
-  border: 1px solid #444;
+  background: var(--bmux-bg);
+  border: 1px solid var(--bmux-line);
   border-radius: 8px;
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.5);
   display: flex;
@@ -385,16 +538,21 @@
   z-index: 2147483648;
 }
 
+/* The debug window is optional: `debug on|off|toggle`. */
+#bmux-debug-overlay.bmux-debug-hidden {
+  display: none;
+}
+
 #bmux-debug-header {
   height: 24px;
-  background: #333;
+  background: var(--bmux-bg-raised);
   cursor: move;
   /* Draggable handle */
   display: flex;
   align-items: center;
   padding: 0 8px;
   font-weight: bold;
-  color: #aaa;
+  color: var(--bmux-text-dim);
   border-top-left-radius: 8px;
   border-top-right-radius: 8px;
   user-select: none;
@@ -404,13 +562,13 @@
   flex: 1;
   overflow-y: auto;
   padding: 8px;
-  color: #0f0;
+  color: var(--bmux-text);
 }
 
 #bmux-debug-input-container {
   padding: 5px;
-  border-top: 1px solid #333;
-  background: #111;
+  border-top: 1px solid var(--bmux-line);
+  background: var(--bmux-bg-sunken);
   display: flex;
 }
 
@@ -418,22 +576,36 @@
   width: 100%;
   background: transparent;
   border: none;
-  color: white;
+  color: var(--bmux-text);
   font-family: inherit;
   outline: none;
 }
 
-/* Status Bar (Minimal Footer) */
+/* Status bar (Minimal Footer) */
 #bmux-status-bar {
   height: 24px;
-  background-color: #007acc;
-  /* VS Code Blue or similar */
-  color: white;
+  background-color: var(--bmux-bg-raised);
+  color: var(--bmux-text-dim);
   display: flex;
   align-items: center;
   padding: 0 10px;
   font-size: 11px;
   justify-content: space-between;
+  border-top: 1px solid var(--bmux-line);
+}
+
+#bmux-status-left {
+  padding: 1px 8px;
+  border: 1px solid var(--bmux-line);
+  border-radius: 999px;
+  color: var(--bmux-text-dim);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+
+#bmux-status-left.bmux-status-active {
+  color: var(--bmux-accent-strong);
+  border-color: var(--bmux-accent-line);
+  background: var(--bmux-accent-soft);
 }
 
 #bmux-command-line {
@@ -442,25 +614,25 @@
   left: 0;
   width: 100%;
   height: 24px;
-  background-color: #222;
-  color: #fff;
+  background-color: var(--bmux-bg-raised);
+  color: var(--bmux-text);
   display: none;
   /* Hidden by default */
   align-items: center;
   padding: 0 5px;
+  border-top: 1px solid var(--bmux-line);
 }
 
 #bmux-command-input {
   background: transparent;
   border: none;
-  color: #fff;
+  color: var(--bmux-text);
   width: 100%;
   font-family: inherit;
   outline: none;
 }
-/* --------------------------------------------------------------------------
-   Layout: split handles, pane titles, display-panes numbers
-   -------------------------------------------------------------------------- */
+
+/* Layout: split handles, pane titles, display-panes numbers */
 
 /* The layer that carries the draggable split boundaries. It sits above the
    panes so a boundary can be grabbed even over an iframe, but the layer itself
@@ -484,13 +656,13 @@
 .bmux-split-handle::after {
   content: '';
   position: absolute;
-  background: rgba(0, 170, 255, 0.35);
+  background: var(--bmux-accent-soft);
   border-radius: 2px;
 }
 
 .bmux-split-handle:hover,
 .bmux-split-handle:active {
-  background: rgba(0, 170, 255, 0.25);
+  background: var(--bmux-accent-soft);
 }
 
 .bmux-split-handle.bmux-handle-column {
@@ -515,58 +687,9 @@
   height: 2px;
 }
 
-/* Per-pane status segment: names the hovered filter match, e.g.
-   "FILTER: .card - DIV.card "Product" · 3/12". */
-.bmux-pane-status {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 42%;
-  margin-left: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: 'Consolas', monospace;
-  font-size: 10px;
-  color: #ffd600;
-}
-
-.bmux-pane-status.bmux-pane-status-hovering {
-  color: #00ff88;
-}
-
-/* Pane title in the footer: auto from the page, or set with rename-pane */
-.bmux-pane-title {
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 45%;
-  margin-left: 8px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: #9fb4c7;
-  font-size: 10px;
-}
-
-/* display-panes: big numbers over each pane, pick one with the keyboard */
-.bmux-pane-index {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-  color: #fff;
-  font-family: 'Consolas', monospace;
-  font-size: 64px;
-  font-weight: bold;
-  text-shadow: 0 0 12px rgba(0, 170, 255, 0.9);
-  pointer-events: none;
-  z-index: 4;
-}
-
-/* Full-overlay shield shown only while a split boundary is being dragged: it
-   keeps the pointer off the pane iframes, which would otherwise swallow the
-   mousemove/mouseup events that drive the drag. */
+/* Full-overlay shield shown only while a split boundary (or a console edge) is
+   being dragged: it keeps the pointer off the pane iframes, which would
+   otherwise swallow the mousemove/mouseup events that drive the drag. */
 #bmux-drag-shield {
   position: fixed;
   inset: 0;
@@ -585,4 +708,21 @@
 
 #bmux-drag-shield.active.row {
   cursor: row-resize;
+}
+
+/* display-panes: big numbers over each pane, pick one with the keyboard */
+.bmux-pane-index {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(4, 10, 18, 0.62);
+  color: var(--bmux-accent-strong);
+  font-family: 'Consolas', monospace;
+  font-size: 64px;
+  font-weight: bold;
+  text-shadow: 0 0 14px var(--bmux-accent-soft);
+  pointer-events: none;
+  z-index: 4;
 }
