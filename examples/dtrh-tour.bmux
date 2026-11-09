@@ -1,0 +1,87 @@
+#!/usr/bin/env bmux
+# dtrh-tour.bmux - the demo used for the README screenshot and the recording.
+#
+# It is the same idea as examples/demo.bmux (run with `script demo`), except that
+# it points its panes at real pages of one site, so the panes show different
+# content instead of the same page three times. Run it on https://www.dtrh.net/:
+#
+#   activate BMUX (Alt+Shift+B), then   :  script file   -> pick this file -> Run
+#   or, to start immediately:           :  script file --run
+#
+# Change the two `url` lines and the titles to tour your own site.
+
+sleep 1
+new-window
+sleep 0.8
+
+# 1 . three panes, three different pages of the site, built without reloads
+split-window -h -l 62%
+sleep 0.6
+url https://www.dtrh.net/changelog
+rename-pane changelog
+sleep 2.6
+split-window -v -l 45%
+sleep 0.6
+url https://www.dtrh.net/tools
+rename-pane tools
+sleep 2.6
+focus-pane 1
+rename-pane home
+sleep 1.4
+
+# 2 . rearranging keeps every page exactly where it was
+select-layout main-vertical
+sleep 1.6
+swap-pane 1 3
+sleep 1.2
+rotate-window
+sleep 1.2
+select-layout tiled
+sleep 1.6
+focus-pane 2
+resize-pane -Z
+sleep 1.6
+resize-pane -Z
+sleep 1
+
+# 3 . visual filters on the home pane: box, narrow, clear
+focus-pane 1
+filter links -y
+sleep 2.4
+filter --text dtrh --visible
+sleep 2
+filter -c
+sleep 1
+escape
+sleep 0.8
+
+# 4 . persistence for this site
+save-layout tour
+sleep 1.2
+list-layouts
+sleep 2
+persist status
+sleep 1.4
+
+# 5 . the pane console, detached, and the palette
+log on
+sleep 1
+verbose on
+sleep 0.4
+info layout
+sleep 2.2
+verbose off
+log detach
+sleep 2.2
+log attach
+sleep 1
+theme classic
+sleep 2.4
+theme frost
+sleep 1.2
+
+# 6 . a stable final frame
+select-layout main-vertical
+sleep 1.6
+focus-pane 1
+sleep 0.6

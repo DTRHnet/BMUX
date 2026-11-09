@@ -1,5 +1,9 @@
 # BMUX - Adding Commands
 
+**Version 0.6.0** — commands live in `content/commands.js`, the `.bmux` format
+in `content/scripts.js`; a command written to these rules is usable from the
+console, the keys *and* a script without extra work.
+
 ## Overview
 
 Every BMUX command is defined once, in `content/commands.js`, in the
@@ -180,7 +184,7 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `appendPaneOutput(pane, text, kind)` | Append a block to a pane console (`'command'` or `'result'`) |
 | `setPaneConsoleOpen(pane, open)` / `togglePaneConsole(pane)` | Open, close or toggle the pane console |
 | `clearPaneConsole(pane)` | Empty the pane console scrollback |
-| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 70% of the pane) |
+| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 90% of the pane) |
 | `describeElement(element)` | `TAG#id.class "snippet"` for a matched element |
 | `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
 | `newWindow()` | Reset to a single pane |
@@ -341,6 +345,27 @@ handed another tab's (newest) snapshot when inheritance is on (`inherit off` to
 disable); the same root-pane substitution applies, so never assume the restored
 panes are the ones the snapshot recorded.
 
+## Making a command script-friendly
+
+`.bmux` scripts run every line through the same dispatcher as the console, so a
+command that works when typed works in a script — nothing to add. Three rules keep
+it that way:
+
+- **Return a string** for the result (the runner logs it after the `[7/73]` echo),
+  and `Error: …` for a failure so the summary can count it.
+- **Be `async` when you wait.** The runner awaits each line, so an `await` inside
+  `execute` holds the script until it resolves — that is how a prompt or a network
+  fetch is sequenced.
+- **Be cancellable if you block for long.** A new long wait should hang off
+  `client.sleepState`/`cancelSleep()` the way `sleep` does, or `script stop` cannot
+  interrupt it.
+
+Reusable pieces live in `content/scripts.js`: `bmuxParseScript(text)` (the whole
+file, with line numbers), `bmuxParseSleepArg(arg)` (`{ ok, seconds }` or
+`{ ok:false, error }`), and `BMUX_DEMO_SCRIPT`. The built-in demo and
+`examples/demo.bmux` are asserted byte-identical by the verification harness, so
+edit both when you change the demo.
+
 ## Adding a key binding
 
 Keys are data, not code. Add an entry to `BMUX_KEYBINDINGS` in
@@ -399,6 +424,8 @@ Pane scope:
 | `info [section]` / `theme [frost\|classic]` / `keys` | Diagnostics and palette |
 | `persist [on\|off\|status]` | Per-tab auto-restore switch |
 | `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout |
+| `sleep <seconds>` | Awaitable, cancellable pause (`2`, `0.5`, `250ms`) |
+| `script [run\|file\|demo\|open\|close\|stop\|status]` | Run a `.bmux` script file |
 | `save-layout [name]` / `restore-layout <name>` / `list-layouts` / `delete-layout <name\|--all>` | Named layouts |
 | `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
 | `capture-pane [-n lines]` | Print the pane's visible text |

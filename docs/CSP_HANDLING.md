@@ -1,5 +1,8 @@
 # BMUX CSP (Content Security Policy) Handling
 
+**Version 0.6.0** — the rules in `rules.json` and the `declarativeNetRequest`
+permission as shipped.
+
 ## The Problem
 
 Many websites (GitHub, Google, Facebook, Twitter, etc.) use HTTP headers to prevent their content from being embedded in iframes:
@@ -190,7 +193,9 @@ A: No. declarativeNetRequest is very efficient and processed natively by Chrome.
 A: Yes. Open DevTools → Network tab → Click any iframe request → Headers tab → "Response Headers"
 
 **Q: Does this work in Firefox?**  
-A: The manifest needs minor adjustments for Firefox, but the approach is similar.
+A: Untested. The manifest is Manifest V3 written for Chromium (`service_worker`,
+`declarativeNetRequest`); Firefox would need `background.scripts`/event pages and a
+check of its `declarativeNetRequest` support. No Firefox run is recorded.
 
 **Q: Why not ask permission per-site?**  
 A: Chrome's API doesn't support per-site prompts for header removal. It's all-or-nothing.

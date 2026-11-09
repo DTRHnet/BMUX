@@ -1,0 +1,96 @@
+#!/usr/bin/env bmux
+# demo.bmux — the BMUX show-off. One step every couple of seconds.
+#
+# Run it:  activate BMUX (Alt+Shift+B), then  :  script file   -> pick this file -> Run
+# Or:      : script demo     (runs the built-in copy of this script)
+#
+# A script cannot click, so prompts are skipped with -y. Run "filter links" by
+# hand to see the clickable confirmation card. Reload, a new tab and named-layout
+# restore across a restart have to be done by hand too — a script does not survive
+# the navigation it would need.
+
+sleep 1
+new-window
+sleep 1.2
+
+# 1 . a useful three-pane layout, built without reloading anything
+split-window -h -l 62%
+sleep 0.8
+focus-pane 2
+split-window -v -l 45%
+sleep 1.2
+focus-pane 1
+rename-pane main
+sleep 0.4
+focus-pane 2
+rename-pane docs
+sleep 0.4
+focus-pane 3
+rename-pane tools
+sleep 1.6
+
+# 2 . rearranging: presets, swap, rotate, zoom — pages keep their state
+select-layout main-vertical
+sleep 1.6
+swap-pane 1 2
+sleep 1.2
+rotate-window
+sleep 1.2
+select-layout tiled
+sleep 1.6
+focus-pane 1
+resize-pane -Z
+sleep 1.6
+resize-pane -Z
+sleep 1
+
+# 3 . visual filters: boxes, hover names, then narrow in rounds
+focus-pane 2
+filter links -y
+sleep 2.4
+filter --text http --visible
+sleep 2
+filter -c
+sleep 1
+filter img -y; filter a -y
+sleep 2.4
+escape
+sleep 1.2
+
+# 4 . persistence: named layouts for this site
+save-layout demo
+sleep 1.2
+list-layouts
+sleep 2
+restore-layout demo
+sleep 1.2
+persist status
+sleep 1.6
+
+# 5 . the pane console, detached, and the palette
+focus-pane 1
+verbose on
+sleep 0.6
+log on
+sleep 1
+log size 240
+sleep 1.4
+log detach
+sleep 2.4
+log attach
+sleep 1.2
+theme classic
+sleep 2.4
+theme frost
+sleep 1.4
+
+# 6 . polish
+display-panes
+sleep 2
+info layout
+sleep 2.6
+verbose off
+help
+sleep 3
+focus-pane 1
+theme frost

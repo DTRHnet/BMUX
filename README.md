@@ -1,12 +1,18 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.5.0**
+**Version 0.6.0**
 
-A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
+A Chrome extension (Manifest V3) inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.5.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.6.0:** commands can live in a file. A `.bmux` script runs a list of
+> commands with `sleep` between them — `script demo` runs a 73-command tour of the
+> whole extension in under a minute, `script file` loads your own, and `sleep 2`
+> paces it (`sleep 250ms` works too). One panel, one Run button, one Stop button;
+> the current command is always on screen.
+>
 > **New in 0.5.0:** your layout survives a reload. Splits, ratios, URLs, titles,
 > focus, zoom and console state are saved per tab and restored on load, named
 > layouts can be saved with `save-layout` / `restore-layout`, and `persist off`
@@ -64,6 +70,14 @@ and the docked pane console open) — the original black/green terminal is one
 command away, and `theme frost` brings the ice palette back.
 
 ![The classic black and green palette on the same three-pane layout](docs/images/04-theme-classic.png)
+
+**A `.bmux` script, at its last step.** `examples/dtrh-tour.bmux` built its own three
+panes — the home page on the left, `/changelog` on the right, `/tools` underneath —
+then worked through layouts, filters, persistence and the palette, without
+reloading anything. The panel at the bottom-left holds the script, its line count
+and `finished · 63/63`; the pane footer shows the titles the script set.
+
+![The script panel running the dtrh tour, with three panes building themselves](docs/images/05-script-panel.png)
 
 ---
 
@@ -207,6 +221,54 @@ or a key binding:
 - A failing segment does not stop the chain, and each gets its own echo.
 - `\;` is a literal semicolon; a `;` inside quotes or `[] () {}` does not split,
   so `filter a[href="x;y"]` stays one command.
+
+### 🎬 Scripted demos: `.bmux` files
+A `.bmux` file is a list of commands, run in order with `sleep` between them — for
+recording a demo, sharing a layout, or turning a sequence you keep typing into one
+word:
+
+```bmux
+# examples/demo.bmux, in miniature
+sleep 1
+new-window
+split-window -h -l 62%
+rename-pane main
+sleep 1.5
+filter links -y
+sleep 2
+log detach
+sleep 1.5
+theme classic
+```
+
+```
+> script demo            # run the built-in 73-command tour (about a minute)
+> script file            # load a .bmux from disk into the panel
+> script file --run      # load it and start at once
+> script run             # run what is in the panel
+> script stop            # stop after this command, or cut a sleep short
+> script status          # panel state, line count, what the runner is doing
+> sleep 2.5               # an ordinary command too: sleep 2.5; list-panes
+```
+
+- **The panel is the runner**: `Run`, `Stop`, `File` and `×`, `Ctrl+Enter` to run,
+  and a progress line that always names the command being run
+  (`7/73 · select-layout main-vertical`), tinted while a script runs.
+- **Every step is echoed** into the debug console with its index and its result, so
+  the transcript of a run is the transcript you would get typing it all yourself.
+- **A failing line does not stop the rest** (`;`-chain semantics), and the run ends
+  with `ran 73/73` or a count of the errors.
+- **`sleep` is cancellable**: `script stop` ends a pending pause immediately and the
+  next line never runs.
+- **Not a programming language** by design — no variables, loops or branches, so
+  every line is something you could type. A script also cannot click a prompt
+  (use `-y`) or survive a reload: a navigation destroys the runner, so update
+  steps like the persistence round trip stay manual.
+
+Two examples ship: `examples/demo.bmux` (site-agnostic — what `script demo` runs)
+and `examples/dtrh-tour.bmux` (the three-page dtrh.net tour in the screenshot
+above). The format, the limits and a step-by-step walkthrough are in
+**[docs/SCRIPTS.md](docs/SCRIPTS.md)**.
 
 ### 🔧 Debugging without a permanent window
 The floating debug window is **optional and hidden by default** — the pane console
@@ -434,6 +496,8 @@ These act on the whole overlay.
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
 | `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
 | `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout (default on) | `> inherit off` |
+| `script [run\|file\|demo\|open\|close\|stop\|status]` | Run a `.bmux` script: the panel, a file, or the built-in demo | `> script demo` |
+| `sleep <seconds>` | Pause (`2`, `0.5`, `250ms`); paces scripts, works in chains | `> sleep 2; list-panes` |
 | `keys` | Print the last key events and what they resolved to (shortcut diagnostics) | `> keys` |
 | `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
 | `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
@@ -509,7 +573,7 @@ scripting:
 | `l` | `log toggle` (open/close this pane's console) |
 | `Space` | `next-layout` |
 | `:` | `command-prompt` |
-| `Esc` | Exit Control Mode (or cancel `display-panes`) |
+| `Esc` | `escape`: clear filter highlights if any, else leave Control Mode |
 
 `%`, `Shift+5` and `5` all split horizontally (`"`, `Shift+'` and `'` vertically) —
 the tables carry layout-independent aliases, because keyboards disagree about which
@@ -570,6 +634,7 @@ a command line, so keys are not a second code path.
 - **[Implementation Overview](docs/IMPLEMENTATION.md)** - Architecture, layout engine, message flow
 
 ### Developer Guides
+- **[Scripts](docs/SCRIPTS.md)** - The `.bmux` format: `sleep`, the panel, recording a demo
 - **[Adding Commands](docs/ADDING_COMMANDS.md)** - How to create custom commands
 - **[Cross-Origin Handling](docs/CROSS_ORIGIN.md)** - Understanding browser restrictions
 - **[CSP Handling](docs/CSP_HANDLING.md)** - How iframe blocking is bypassed
@@ -584,18 +649,22 @@ a command line, so keys are not a second code path.
 
 ```
 BMUX/
-├── manifest.json           # Extension configuration (v0.1.0)
+├── manifest.json           # Extension configuration (v0.6.0)
 ├── rules.json              # CSP header removal rules
 ├── background/
 │   └── main.js            # Service worker (state, message relay)
 ├── content/
-│   ├── main.js            # Overlay DOM, layout engine, focus, dispatcher
+│   ├── main.js            # Overlay DOM, layout engine, focus, dispatcher, script runner
 │   ├── commands.js        # Command registry + key bindings (source of truth)
-│   └── styles.css         # Glassmorphism UI, split handles, drag shield
+│   ├── scripts.js         # .bmux format: parser, sleep arguments, built-in demo
+│   └── styles.css         # Frost palette, split handles, panels, drag shield
+├── examples/
+│   └── demo.bmux          # The shipped demo script (script demo runs this)
 └── docs/                  # Documentation
     ├── images/              # Screenshots used by this README
     ├── ADDING_COMMANDS.md
     ├── COMMAND_USAGE.md
+    ├── SCRIPTS.md           # The .bmux format, limits and demo walkthrough
     ├── CROSS_ORIGIN.md
     ├── CSP_HANDLING.md
     ├── DESIGN.md
@@ -676,7 +745,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.5.0)
+### Current Version (0.6.0)
 - ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console
@@ -687,6 +756,10 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   lost (named layouts remain)
 - ⏳ **`Alt+Shift+B` can be taken** by the window manager or another extension;
   rebind it at `chrome://extensions/shortcuts` and use `keys` to see what arrived
+- ⏳ **A `.bmux` script cannot click or survive navigation** - prompts need `-y`,
+  and a reload/new tab ends the run (those steps stay manual)
+- ⏳ **Scripts have no variables, loops or branches** by design — a script is a
+  list of commands you could have typed, not code
 - ⏳ **No multiple windows / layout tabs** - `new-window` resets the overlay
 - ⏳ **No floating panes** - every pane takes layout space
 - ⏳ **No `break-pane` / `join-pane`**
@@ -750,6 +823,14 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Background owns persistence, tab-close cleanup and startup pruning
 
 ### Version 0.6.0
+- [x] `.bmux` script files: `script run` / `script file` / `script demo`, one command per line
+- [x] `sleep <seconds>` (`0.5`, `250ms`) — awaited, cancellable pacing for demos
+- [x] The script panel: Run / Stop / File / `Ctrl+Enter`, live `7/73 · command` progress
+- [x] Scripts echo every step with its index; a failing line does not stop the run
+- [x] `script stop` cuts a pending `sleep` short; nested runs refused
+- [x] Shipped demo (`examples/demo.bmux`), byte-identical to what `script demo` runs
+
+### Version 0.7.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
@@ -800,4 +881,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.5.0 | Last Updated: November 2026
+Version 0.6.0 | Last Updated: November 2026

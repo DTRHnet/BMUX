@@ -509,6 +509,13 @@ class BMUXClient {
         this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
         this.saveTimer = null;
 
+        this.scriptRun = null;        // the .bmux script being run, if any
+        this.scriptName = 'script';   // label of the script in the panel
+        this.scriptPanelOpen = false;
+        this.scriptProgress = '';
+        this.scriptRunOnLoad = false; // `script file --run` starts it on load
+        this.sleepState = null;       // the pending `sleep`, so `script stop` can cut it
+
         this.ui = null;
         this.handles = [];
 
@@ -655,6 +662,20 @@ class BMUXClient {
              </div>
           </div>
 
+          <!-- .bmux script panel: paste commands, load a file, run it paced -->
+          <div id="bmux-script-panel" class="bmux-script-hidden">
+             <div id="bmux-script-header">
+                <span id="bmux-script-title">SCRIPT</span>
+                <span id="bmux-script-progress">ready</span>
+                <button class="bmux-script-btn" id="bmux-script-run-btn" title="Run the script (Ctrl+Enter)">Run</button>
+                <button class="bmux-script-btn" id="bmux-script-stop-btn" title="Stop after the current command">Stop</button>
+                <button class="bmux-script-btn" id="bmux-script-file-btn" title="Load a .bmux file from disk">File</button>
+                <button class="bmux-script-btn" id="bmux-script-close-btn" title="Close this panel">&#215;</button>
+             </div>
+             <textarea id="bmux-script-text" spellcheck="false" placeholder="# .bmux script - one command per line; sleep 2 pauses between steps"></textarea>
+             <input id="bmux-script-file-input" type="file" accept=".bmux,text/plain" style="display:none" />
+          </div>
+
           <div id="bmux-command-line">
             <span>:</span>
             <input id="bmux-command-input" type="text" />
@@ -687,6 +708,16 @@ class BMUXClient {
             commandInput: overlay.querySelector('#bmux-command-input'),
 
             dragShield: overlay.querySelector('#bmux-drag-shield'),
+
+            scriptPanel: overlay.querySelector('#bmux-script-panel'),
+            scriptName: overlay.querySelector('#bmux-script-title'),
+            scriptProgress: overlay.querySelector('#bmux-script-progress'),
+            scriptText: overlay.querySelector('#bmux-script-text'),
+            scriptRunButton: overlay.querySelector('#bmux-script-run-btn'),
+            scriptStopButton: overlay.querySelector('#bmux-script-stop-btn'),
+            scriptFileButton: overlay.querySelector('#bmux-script-file-btn'),
+            scriptCloseButton: overlay.querySelector('#bmux-script-close-btn'),
+            scriptFileChoice: overlay.querySelector('#bmux-script-file-input'),
 
             debug: overlay.querySelector('#bmux-debug-content'),
             debugHeader: overlay.querySelector('#bmux-debug-header'),
@@ -731,6 +762,35 @@ class BMUXClient {
         this.bindCommandInput(this.ui.commandInput, {
             report: (text) => this.log(text)
         });
+
+        // The script panel runs `.bmux` text: Run / Stop / File, plus Ctrl+Enter.
+        if (this.ui.scriptRunButton) {
+            this.ui.scriptRunButton.onclick = () => {
+                this.runScript(this.ui.scriptText ? this.ui.scriptText.value : '', { name: this.scriptName })
+                    .then((summary) => { if (summary) this.log(summary); });
+            };
+        }
+        if (this.ui.scriptStopButton) {
+            this.ui.scriptStopButton.onclick = () => this.stopScript();
+        }
+        if (this.ui.scriptFileButton) {
+            this.ui.scriptFileButton.onclick = () => this.scriptLoadFile(false);
+        }
+        if (this.ui.scriptCloseButton) {
+            this.ui.scriptCloseButton.onclick = () => this.setScriptPanelOpen(false);
+        }
+        if (this.ui.scriptText) {
+            this.ui.scriptText.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    this.runScript(this.ui.scriptText.value, { name: this.scriptName });
+                }
+            });
+        }
+        if (this.ui.scriptFileChoice) {
+            this.ui.scriptFileChoice.addEventListener('change', (event) => this.handleScriptFile(event));
+        }
 
         // The debug window is optional (`debug on|off|toggle`); it starts hidden
         // and verbose mode sends its output to the focused pane instead.
@@ -1546,6 +1606,257 @@ class BMUXClient {
         return result;
     }
 
+    // --- .bmux scripts: load a file, run it paced, stop it ---
+
+    /** Show or hide the script panel. `focus` (default) moves the caret into it. */
+    setScriptPanelOpen(open, focus) {
+        const next = !!open;
+        this.scriptPanelOpen = next;
+
+        if (this.ui && this.ui.scriptPanel) {
+            this.ui.scriptPanel.classList.toggle('bmux-script-hidden', !next);
+        }
+        if (next && focus !== false && this.ui && this.ui.scriptText) {
+            this.ui.scriptText.focus();
+        }
+
+        if (!next) this.scriptRunOnLoad = false;
+        return next;
+    }
+
+    /** Put text in the panel, show it, and remember the name used in log lines. */
+    scriptSetText(text, name) {
+        const body = text == null ? '' : String(text);
+        this.scriptName = name || 'script';
+
+        if (this.ui) {
+            if (this.ui.scriptText) this.ui.scriptText.value = body;
+            if (this.ui.scriptName) this.ui.scriptName.textContent = String(this.scriptName).toUpperCase();
+        }
+
+        this.setScriptPanelOpen(true);
+        return body;
+    }
+
+    /** The one line under the panel title: what is running, or why it stopped. */
+    setScriptProgress(text) {
+        this.scriptProgress = text == null ? '' : String(text);
+
+        if (this.ui && this.ui.scriptProgress) {
+            this.ui.scriptProgress.textContent = this.scriptProgress || 'ready';
+        }
+        if (this.ui && this.ui.scriptPanel) {
+            this.ui.scriptPanel.classList.toggle('bmux-script-running', !!this.scriptRun);
+        }
+    }
+
+    /** `script status`: panel, running script, line count. */
+    scriptStatus() {
+        const lines = this.ui && this.ui.scriptText
+            ? bmuxParseScript(this.ui.scriptText.value)
+            : { ok: false, error: 'the panel is not built' };
+
+        const loaded = lines.ok
+            ? `${lines.commands.length} command(s)`
+            : `not runnable (${lines.error})`;
+        const running = this.scriptRun
+            ? `running "${this.scriptRun.name}" at ${this.scriptRun.index}/${this.scriptRun.total}`
+            : 'no script running';
+
+        return [
+            `Script panel: ${this.scriptPanelOpen ? 'open' : 'closed'} · ${loaded}`,
+            `Runner: ${running}`
+        ].join('\n');
+    }
+
+    /** Open the file picker for a `.bmux` file; `runNow` starts it on load. */
+    scriptLoadFile(runNow) {
+        if (!this.ui || !this.ui.scriptFileChoice) return false;
+
+        this.scriptRunOnLoad = !!runNow;
+        this.ui.scriptFileChoice.value = '';
+        this.ui.scriptFileChoice.click();
+        return true;
+    }
+
+    /** Read a chosen file into the panel, then run it if `--run` asked for that. */
+    async handleScriptFile(event) {
+        const input = event && event.target;
+        const file = input && input.files && input.files[0];
+        if (!file) return '';
+
+        const runNow = !!this.scriptRunOnLoad;
+        this.scriptRunOnLoad = false;
+        let text = '';
+        try {
+            text = await this.readFileText(file);
+        } catch (error) {
+            const message = error && error.message ? error.message : String(error);
+            this.log(`Script file "${file.name}": Error: ${message}`);
+            return `Error: ${message}`;
+        }
+
+        this.scriptSetText(text, file.name);
+        const parsed = bmuxParseScript(text);
+
+        if (!parsed.ok) {
+            this.setScriptProgress(`parse error · ${file.name}`);
+            this.log(`Script file "${file.name}": Error: ${parsed.error}`);
+            return `Error: ${parsed.error}`;
+        }
+
+        this.setScriptProgress(`${parsed.commands.length} command(s) loaded`);
+        return runNow
+            ? this.runScript(text, { name: file.name })
+            : `${parsed.commands.length} command(s) loaded from ${file.name} — Run starts it`;
+    }
+
+    /** FileReader for a picked file (falls back to Blob.text where available). */
+    readFileText(file) {
+        return new Promise((resolve, reject) => {
+            if (typeof FileReader === 'undefined' || !file) {
+                if (file && typeof file.text === 'function') {
+                    file.text().then(resolve, reject);
+                    return;
+                }
+                reject(new Error('Cannot read files here'));
+                return;
+            }
+
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result == null ? '' : reader.result));
+            reader.onerror = () => reject(reader.error || new Error('Could not read the file'));
+            reader.readAsText(file);
+        });
+    }
+
+    /** Load the built-in demo into the panel; `runNow` (default) starts it. */
+    scriptDemo(runNow) {
+        if (typeof BMUX_DEMO_SCRIPT === 'undefined') return 'Error: Script support is not loaded';
+
+        this.scriptSetText(BMUX_DEMO_SCRIPT, 'demo.bmux');
+        if (runNow === false) {
+            const parsed = bmuxParseScript(BMUX_DEMO_SCRIPT);
+            return `Demo loaded into the script panel (${parsed.ok ? parsed.commands.length : 0} commands) — Run starts it`;
+        }
+        return this.runScript(BMUX_DEMO_SCRIPT, { name: 'demo.bmux' });
+    }
+
+    /**
+     * Run a `.bmux` script: one command per line, in order, each awaited. A line
+     * that fails is logged and the script carries on (shell `;` semantics, same as
+     * a chain); `sleep` lines pace the run. Only one script runs at a time, and a
+     * script cannot start another — that would make `script stop` a lie.
+     */
+    async runScript(source, options) {
+        const opts = options || {};
+
+        if (typeof bmuxParseScript === 'undefined') return 'Error: Script support is not loaded';
+        if (this.scriptRun) {
+            return 'Error: a script is already running — "script stop" first';
+        }
+
+        const parsed = bmuxParseScript(source);
+        if (!parsed.ok) return `Error: ${parsed.error}`;
+
+        const run = {
+            name: opts.name || this.scriptName || 'script',
+            total: parsed.commands.length,
+            index: 0,
+            stopped: false
+        };
+        this.scriptRun = run;
+        this.scriptName = run.name;
+
+        if (this.ui && this.ui.scriptName) {
+            this.ui.scriptName.textContent = String(run.name).toUpperCase();
+        }
+        this.log(`Script "${run.name}": ${run.total} command(s)`);
+        this.setScriptPanelOpen(true, false);   // visible progress, without stealing focus
+        this.setScriptProgress(`starting · ${run.total} command(s)`);
+
+        let ran = 0;
+        let failures = 0;
+        let stopped = false;
+
+        try {
+            for (let i = 0; i < parsed.commands.length; i++) {
+                const entry = parsed.commands[i];
+                if (run.stopped) break;
+
+                run.index = entry.index;
+                const label = `[${entry.index}/${run.total}]`;
+                this.setScriptProgress(`${entry.index}/${run.total} · ${entry.text}`);
+                this.log(`${label} ${entry.text}`);
+
+                const result = await this.runCommand(entry.text);
+                ran++;
+                if (/^Error:/.test(result || '')) failures++;
+                if (result) this.log(result);
+            }
+        } finally {
+            stopped = run.stopped;
+            this.scriptRun = null;
+            this.cancelSleep();
+        }
+
+        const ratio = `${ran}/${run.total}`;
+        const problems = failures ? `, ${failures} command(s) reported an error (see the log)` : '';
+        const summary = stopped
+            ? `Script "${run.name}": stopped after ${ratio}${problems}`
+            : `Script "${run.name}": ran ${ratio} command(s)${problems}`;
+
+        this.setScriptProgress(stopped ? `stopped · ${ratio}` : `finished · ${ratio}`);
+        return summary;
+    }
+
+    /** Ask the running script to stop after the current command, and cut a sleep short. */
+    stopScript() {
+        if (!this.scriptRun) {
+            const sleeping = !!this.sleepState;
+            this.cancelSleep();
+            return sleeping ? 'Sleep cancelled' : 'No script is running';
+        }
+
+        this.scriptRun.stopped = true;
+        this.cancelSleep();
+        this.log('Script: stop requested');
+        return 'Stopping after the current command';
+    }
+
+    /**
+     * An awaited, cancellable pause. `stopScript()` ends it early, so `script stop`
+     * never has to wait out a `sleep 30`.
+     */
+    sleepSeconds(seconds) {
+        const ms = Math.max(0, Number(seconds) * 1000);
+        if (!(ms > 0)) return Promise.resolve(true);
+
+        return new Promise((resolve) => {
+            const state = {};
+
+            state.finish = (completed) => {
+                if (state.done) return;
+                state.done = true;
+                clearTimeout(state.timer);
+                if (this.sleepState === state) this.sleepState = null;
+                resolve(!!completed);
+            };
+
+            state.timer = setTimeout(() => state.finish(true), ms);
+            this.sleepState = state;
+        });
+    }
+
+    /** End a pending `sleep` immediately (used by `script stop`). */
+    cancelSleep() {
+        if (this.sleepState) {
+            this.sleepState.finish(false);
+            return true;
+        }
+        return false;
+    }
+
     // --- command line editing: shared history and Tab completion ---
 
     /** Remember a command in the shared history (consecutive duplicates collapse). */
@@ -1682,7 +1993,10 @@ class BMUXClient {
             case 'control-mode':
                 return ['on', 'off', 'toggle'];
             case 'persist':
+            case 'inherit':
                 return ['on', 'off', 'status'];
+            case 'script':
+                return ['run', 'file', 'demo', 'open', 'close', 'stop', 'status'];
             case 'cycle-pane':
                 return ['next', 'prev'];
             case 'split-window':

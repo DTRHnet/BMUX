@@ -1,10 +1,10 @@
 # BMUX Quick Reference
 
-**Version 0.5.0**
+**Version 0.6.0**
 
 ## Activation
 ```
-Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, blue border); again to turn it off
+Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, inset ring); again to turn it off
 Extension Icon - The same: one click activates, another hides
 ```
 
@@ -57,6 +57,23 @@ brand-new tab inherits the newest layout (`inherit`), with its own page in the r
 pane. Restoring recreates the panes, so the pages load fresh (scroll position is not
 kept). `persist off` stops saving this tab and `inherit off` stops a tab offering
 its layout to new ones; nothing is ever synced.
+
+## Scripts (.bmux files)
+```
+script demo         - Run the built-in demo (about a minute)
+script file         - Pick a .bmux file; it loads into the panel
+script file --run   - Pick one and start it immediately
+script run          - Run what is in the panel (Ctrl+Enter in the panel too)
+script stop         - Stop after this command, or cut a sleep short
+script status       - Panel state, line count, what is running
+sleep 2.5           - Wait (2, 0.5, 250ms); a plain command, works in chains
+```
+A `.bmux` file is one command per line, `#` for comments, `sleep` to pace it;
+`;` chaining works inside a line. The panel shows `7/26 · select-layout
+main-vertical` while it runs, and every step is echoed into the console with its
+result. Two examples ship in `examples/`: `demo.bmux` (site-agnostic, what
+`script demo` runs) and `dtrh-tour.bmux` (a three-page tour of dtrh.net).
+Full reference: `docs/SCRIPTS.md`.
 
 ## Chaining commands
 ```
@@ -137,7 +154,7 @@ Layout              - Cycle layout presets
 
 ## Mouse
 ```
-Click a pane / its iframe   - Focus it (blue border)
+Click a pane / its iframe   - Focus it (ice-cyan ring)
 Drag a boundary             - Resize the split
 Double-click a boundary     - Reset that split to 50/50
 Hover a boxed match         - Names it in that pane's status line
@@ -175,7 +192,7 @@ status line and turns that box green. Same-origin panes only.
 
 ## Focusing Panes
 ```
-Click a pane           - Makes it active (blue border)
+Click a pane           - Makes it active (ice-cyan ring)
 Up/Down/Left/Right     - Toolbar buttons, or arrow keys in Control Mode
 q then a digit         - display-panes: numbers over the panes
 > focus-pane right     - Same thing from any command input
@@ -255,12 +272,12 @@ Changing layout never reloads the pages in the panes.
 ```
 $ help              - Same commands as pane input
 $ list-panes        - Every pane, numbered and identified
-$ source            - Affects active pane (blue border)
+$ source            - Affects active pane (ringed)
 [Drag the header to move console]
 ```
 
 ## Tips
-- **Click a pane** to make it active (blue border)
+- **Click a pane** to make it active (ice-cyan ring)
 - **The status bar** shows the focused pane and its size, e.g.
   `pane 2 %2 · 30%x100%`, plus `· ZOOM` while zoomed
 - **Each move logs its result** in the debug console, e.g.

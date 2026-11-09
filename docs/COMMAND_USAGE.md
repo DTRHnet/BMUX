@@ -1,5 +1,9 @@
 # BMUX Command Usage Guide
 
+**Version 0.6.0** — 44 commands. Every command below is what the shipped
+`content/commands.js` defines; the `.bmux` script format has its own guide
+([SCRIPTS.md](SCRIPTS.md)).
+
 Every command in BMUX is defined once, in `content/commands.js`. The toolbar, the
 debug console, the `:` line, each pane's input and the key bindings all run those
 same commands through one dispatcher, so a command behaves identically wherever
@@ -41,7 +45,7 @@ command:
 | `⤢` / `⤡` | `resize-pane -Z` — maximize that pane, or restore the layout |
 
 ### Debug console (floating window, `$` prompt)
-Runs any command against the **active pane** (blue border) and keeps a scrollback
+Runs any command against the **active pane** (the ice-cyan focus ring) and keeps a scrollback
 of every line and result. Drag it by its header, resize it from its corner or bottom
 edge — and note it is **hidden by default** now (`debug on|off`), with `verbose on`
 mirroring its output into the focused pane instead.
@@ -91,12 +95,18 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
 | `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
 | `l` | `log toggle` (this pane's console) | same |
-| `keys` | *(command)* list the last key events and their resolution | same |
 | `q` | `display-panes` | same |
 | `o` | `cycle-pane next` | same |
 | `;` | `last-pane` | same |
 | `Space` | `next-layout` | same |
-| `Esc` | `control-mode off` | — |
+| `Esc` | `escape` — clear filter highlights, else leave Control Mode | — |
+
+Both tables also carry the alias forms, because keyboards disagree about what
+Shift+5 and Shift+' report: `%`, `Shift+Digit5`, `Digit5` and `5` all split
+horizontally; `"`, `Shift+Quote`, `Quote` and `'` all split vertically. `z` and
+`Shift+z` both zoom. `keys` prints the last twelve events with the raw `key`,
+`code`, modifiers and the command each resolved to, so a shortcut that does not
+fire can be diagnosed rather than guessed at.
 
 Keys pressed while the focus is inside a pane's iframe are resolved in that frame
 and relayed to the top frame as a command line (`relay-line` → `execute-line`).
@@ -122,7 +132,7 @@ line) share one editor:
   console. It lives in the page (not persisted across reloads).
 - **Completion** is command-aware: layout names for `select-layout`, flags for
   `resize-pane` and `split-window`, actions for `log`, `persist`, `inherit`,
-  `control-mode` and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
+  `script`, `control-mode` and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
   their variants for `filter`, `--all` for `delete-layout`, and so on.
 - Completion works on the segment under the caret, so
   `list-panes; list-p<Tab>` completes the second command.
@@ -152,6 +162,8 @@ console, the `:` line, a pane input, and key bindings:
 - **Filters accumulate across segments**: `filter img; filter a` boxes both sets.
   `--replace` starts a clean set; `filter -c` clears.
 - `&&` (stop on error) is not implemented yet; a chain is always “run all”.
+- A `.bmux` script line is run through the same dispatcher, so `;` chaining works
+  inside a script line exactly as it does here — see [12. Scripts](#12-scripts-bmux-files).
 
 ---
 
@@ -202,7 +214,7 @@ Rules:
 | Drag the boundary between two panes | Resize that split |
 | Double-click a boundary | Reset that split to 50/50 |
 | Hover a boxed match (after `filter`) | Names it in that pane's status line |
-| Drag a pane console's top edge | Resize that console (minimum 40px, max 70% of the pane) |
+| Drag a pane console's top edge | Resize that console (minimum 40px, max 90% of the pane) |
 | Double-click a pane console's edge | Reset its height to 140px |
 | Drag the floating console's corner | Resize the floating console |
 | Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
@@ -382,7 +394,7 @@ $ list-panes -j
 ```
 
 ### `focus-pane <number|%id|up|down|left|right>`
-Focuses a pane, and that pane gets the blue border and the `[ACTIVE]` marker.
+Focuses a pane, and that pane gets the focus ring and the `[ACTIVE]` marker.
 
 ```
 $ focus-pane 2        # by number
@@ -517,6 +529,53 @@ header, resize from the corner or bottom edge); `log attach` — or the `⧉ doc
 button on the window, or the `⧉` button in the pane footer — puts it back. The same
 panel is moved, so the scrollback and history come with it, and the detached state
 is saved with the layout.
+
+### `sleep <seconds>`
+Waits, without freezing anything: the overlay stays live, panes keep loading and
+prompts still answer while it waits. Mostly used to pace a `.bmux` script, but it
+is an ordinary command, so it chains too.
+
+```
+> sleep 2
+Slept 2s
+> sleep 250ms; list-panes
+Slept 250ms
+Panes: …
+> sleep soon
+Error: Sleep takes seconds: "2", "0.5", "250ms" (got "soon")
+```
+
+Accepts `2`, `0.5`, `2s`, `250ms`, and no argument means one second. Capped at
+3600 s. `script stop` ends a pending pause immediately.
+
+### `script [run|file|demo|open|close|stop|status]`
+Runs a `.bmux` script — a list of command lines with `sleep` between them.
+
+| Action | What it does |
+|--------|--------------|
+| `script run` | run what is in the script panel |
+| `script file` | pick a `.bmux` from disk and load it into the panel |
+| `script file --run` | load it and start it immediately |
+| `script demo` | load the built-in demo and run it |
+| `script open` / `script close` | show or hide the panel |
+| `script stop` | stop after the current command, or cut a `sleep` short |
+| `script status` | panel state, line count, and what the runner is doing |
+
+```
+> script demo
+Script "demo.bmux": ran 73 command(s)
+> script status
+Script panel: open · 73 command(s)
+Runner: no script running
+> script run
+Script "demo.bmux": stopped after 12/73
+```
+
+Every line is echoed into the debug console as `[7/73] select-layout main-vertical`
+with its result, so a run leaves the same transcript as typing it. One script runs
+at a time, a script cannot start another, and a failing line does not stop the rest
+(the run ends with a count of the errors). The format, limits and a walkthrough of
+the shipped demo are in [SCRIPTS.md](SCRIPTS.md).
 
 ### `help`
 Lists every command, grouped into overlay commands and pane commands, with each
@@ -908,7 +967,49 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 12. Where commands live
+## 12. Scripts (`.bmux` files)
+
+A `.bmux` file is commands, one per line, run in order. `sleep` paces it. Nothing
+about it is special-cased: every line goes through `runLine`, so arguments, `;`
+chaining, prompts and errors behave exactly as they do when you type the same line.
+
+```bmux
+#!/usr/bin/env bmux
+# comments start with # or //
+sleep 1
+new-window
+split-window -h -l 62%
+filter img; filter a          # chaining works inside a line
+sleep 2.5
+```
+
+| Run it with | Effect |
+|-------------|--------|
+| `script demo` | the built-in demo (`examples/demo.bmux`), about a minute |
+| `script file` | pick a file; it loads into the panel for review |
+| `script file --run` | pick a file and start it at once |
+| `script run` | run the panel's contents (paste a script and go) |
+| the panel's **Run** button / `Ctrl+Enter` | same as `script run` |
+| `script stop` / **Stop** | stop after the current line, or cut a `sleep` short |
+
+- **Pacing**: `sleep` accepts `1`, `0.5`, `2s`, `250ms`; no argument is one
+  second; anything above 3600 s is refused. A pause is cancellable, so Stop is
+  always immediate.
+- **One at a time**: a second `script run` while one is running is refused, and a
+  script cannot start another (that would make Stop a lie).
+- **Limits** — 500 commands, 2000 characters per line, 64 KB per file. A script
+  that breaks one is refused whole, with the line number.
+- **Errors**: a failing line is logged and the run continues; the summary counts
+  them (`ran 40/73, 2 command(s) reported an error`).
+- **Not possible**: clicking a prompt (pass `-y` instead), surviving a reload or
+  navigation, variables/loops/branches, background execution.
+
+The format reference, the limits, how to write a demo and how to record it are in
+**[SCRIPTS.md](SCRIPTS.md)**.
+
+---
+
+## 13. Where commands live
 
 | File | Responsibility |
 |------|----------------|
