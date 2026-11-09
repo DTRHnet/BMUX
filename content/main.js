@@ -69,6 +69,12 @@ const BMUX_PROMPT_MAX_KEYS = 9;
 // Shell-style line editing: how many commands the shared history keeps.
 const BMUX_HISTORY_LIMIT = 200;
 
+// How many key events the `keys` diagnostic remembers.
+const BMUX_KEY_LOG = 20;
+
+// How tall a pane console may get, as a share of its pane.
+const BMUX_CONSOLE_MAX_SHARE = 0.9;
+
 // Layout persistence: debounce for saves, and how long to wait for the saved
 // layout before rendering a fresh one anyway.
 const BMUX_SAVE_DEBOUNCE = 400;
@@ -78,7 +84,6 @@ const SNAPSHOT_VERSION = 1;
 // Pane console: height when first opened, the drag limits, and scrollback cap.
 const BMUX_CONSOLE_HEIGHT = 140;
 const BMUX_CONSOLE_MIN_HEIGHT = 40;
-const BMUX_CONSOLE_MAX_RATIO = 0.7;
 const BMUX_CONSOLE_MAX_BLOCKS = 100;
 
 // Debounce for re-drawing boxes when the filtered page changes underneath them.
@@ -267,25 +272,55 @@ function bmuxHasOwn(object, key) {
 }
 
 /**
- * The key a binding table is looked up with. Alt combinations are written as
- * "Alt+ArrowLeft" so keyboard and mouse resizing can share one table.
+ * Every name a binding table could use for this event, most specific first.
+ *
+ * `event.key` is layout-dependent and not always the symbol the user pressed:
+ * with Shift held, some platforms report `5` where others report `%`, and the
+ * same goes for `'` and `\"`. `event.code` is layout-independent, so the tables
+ * can carry a `Shift+Digit5` / `Shift+Quote` alias next to `%` / `\"` and both
+ * produce the same command.
  */
-function bmuxBindingKey(event) {
+function bmuxBindingKeys(event) {
+    const keys = [];
+    const add = (candidate) => {
+        if (!candidate) return;
+        if (keys.indexOf(candidate) === -1) keys.push(candidate);
+    };
+
     // The space bar reports " ", which is unreadable in a binding table.
     const key = event.key === ' ' ? 'Space' : event.key;
-    if (event.altKey && !event.ctrlKey && !event.metaKey) return `Alt+${key}`;
-    return key;
+    const code = event.code || '';
+    const plain = !event.altKey && !event.ctrlKey && !event.metaKey;
+
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        add(`Alt+${key}`);
+        add(code ? `Alt+${code}` : '');
+    } else if (plain) {
+        add(key);
+    }
+
+    if (event.shiftKey && code) add(`Shift+${code}`);
+    if (code) add(code);
+    if (event.shiftKey && key.length === 1) add(`Shift+${key}`);
+    if (key.length === 1) add(key.toLowerCase());
+
+    return keys;
 }
 
 /**
- * Resolve a key to the command line it runs, or null.
+ * Resolve a key event to the command line it runs, or null.
  * `mode` is 'control' or 'prefix'; the tables live in commands.js.
  */
-function bmuxKeyBinding(mode, key) {
+function bmuxKeyBinding(mode, event) {
     if (typeof BMUX_KEYBINDINGS === 'undefined') return null;
     const table = BMUX_KEYBINDINGS[mode];
     if (!table) return null;
-    return bmuxHasOwn(table, key) ? table[key] : null;
+
+    const keys = bmuxBindingKeys(event);
+    for (let i = 0; i < keys.length; i++) {
+        if (bmuxHasOwn(table, keys[i])) return table[keys[i]];
+    }
+    return null;
 }
 
 /**
@@ -459,6 +494,7 @@ class BMUXClient {
         this.prompts = new Map();  // pane -> open prompt card
 
         this.commandHistory = [];     // shared shell-style history for every input
+        this.keyLog = [];             // recent key events, for the `keys` command
 
         this.persistEnabled = true;   // auto-restore switch (from the background)
         this.restoring = false;       // true while a snapshot is being applied
@@ -657,12 +693,21 @@ class BMUXClient {
         this.ui.debugContainer.appendChild(debugGrip);
         this.makeResizable(this.ui.debugContainer, debugGrip);
 
+        const debugBottom = document.createElement('div');
+        debugBottom.className = 'bmux-debug-bottom';
+        debugBottom.title = 'Drag to change the console height';
+        this.ui.debugContainer.appendChild(debugBottom);
+        this.makeResizable(this.ui.debugContainer, debugBottom, { axis: 'y' });
+
         // The first render happens in loadPersistedLayout(), after the saved
         // layout has been read, so a restore never flashes an empty overlay.
     }
 
-    /** Resize a fixed-position panel by dragging a corner grip. */
-    makeResizable(element, grip) {
+    /** Resize a fixed-position panel by dragging a grip (corner, or height only). */
+    makeResizable(element, grip, options) {
+        const opts = options || {};
+        const verticalOnly = opts.axis === 'y';
+
         grip.addEventListener('mousedown', (event) => {
             if (event.button !== undefined && event.button !== 0) return;
             event.preventDefault();
@@ -673,10 +718,15 @@ class BMUXClient {
             const startWidth = element.offsetWidth;
             const startHeight = element.offsetHeight;
             const previousCursor = document.body.style.cursor;
-            document.body.style.cursor = 'nwse-resize';
+            document.body.style.cursor = verticalOnly ? 'ns-resize' : 'nwse-resize';
+
+            const shield = this.ui ? this.ui.dragShield : null;
+            if (shield) shield.className = verticalOnly ? 'active row' : 'active';
 
             const move = (moveEvent) => {
-                element.style.width = `${bmuxClamp(startWidth + (moveEvent.clientX - startX), 220, window.innerWidth - 40)}px`;
+                if (!verticalOnly) {
+                    element.style.width = `${bmuxClamp(startWidth + (moveEvent.clientX - startX), 220, window.innerWidth - 40)}px`;
+                }
                 element.style.height = `${bmuxClamp(startHeight + (moveEvent.clientY - startY), 140, window.innerHeight - 80)}px`;
             };
 
@@ -684,6 +734,7 @@ class BMUXClient {
                 document.removeEventListener('mousemove', move, true);
                 document.removeEventListener('mouseup', up, true);
                 document.body.style.cursor = previousCursor;
+                if (shield) shield.className = '';
             };
 
             document.addEventListener('mousemove', move, true);
@@ -1049,22 +1100,32 @@ class BMUXClient {
             .then((reply) => reply || { ok: false, reason: 'no answer from the background' });
     }
 
+    /**
+     * Activation is one state, not two: showing BMUX also turns Control Mode on
+     * (the blue border), and hiding it turns Control Mode off. That is what the
+     * extension icon and Alt+Shift+B do; `detach` toggles the same thing.
+     */
     toggle() {
-        if (!this.isTop) return;
+        if (!this.isTop || !this.ui) return;
+
         this.isActive = !this.isActive;
         this.log(`Toggle: ${this.isActive}`);
+
         if (this.isActive) {
             this.ui.overlay.classList.remove('hidden');
             // Do not steal focus: keys must reach Control Mode, not a text field.
             if (document.activeElement && document.activeElement.blur) {
                 document.activeElement.blur();
             }
+            this.setControlMode(true);
             this.renderLayout();
-        } else {
-            this.clearPaneIndexes();
-            this.cancelPrompts();
-            this.ui.overlay.classList.add('hidden');
+            return;
         }
+
+        this.clearPaneIndexes();
+        this.cancelPrompts();
+        this.setControlMode(false);
+        this.ui.overlay.classList.add('hidden');
     }
 
     syncActivePaneFromFocus() {
@@ -1077,6 +1138,46 @@ class BMUXClient {
         if (pane && this.ui.panes.contains(pane)) {
             this.setActivePane(pane);
         }
+    }
+
+    /** Remember what the last keys looked like (the `keys` command prints these). */
+    recordKey(event, mode) {
+        const entry = {
+            at: Date.now(),
+            key: String(event.key),
+            code: String(event.code || ''),
+            shift: !!event.shiftKey,
+            ctrl: !!event.ctrlKey,
+            alt: !!event.altKey,
+            meta: !!event.metaKey,
+            mode: mode || '',
+            binding: ''
+        };
+
+        this.keyLog.push(entry);
+        while (this.keyLog.length > BMUX_KEY_LOG) this.keyLog.shift();
+        return entry;
+    }
+
+    /** Recent key events, formatted for the `keys` command. */
+    recentKeys(limit) {
+        const entries = this.keyLog.slice(-(limit || BMUX_KEY_LOG));
+        if (!entries.length) return ['No keys seen yet.'];
+
+        return entries.map((entry, index) => {
+            const mods = [
+                entry.ctrl ? 'Ctrl' : '',
+                entry.shift ? 'Shift' : '',
+                entry.alt ? 'Alt' : '',
+                entry.meta ? 'Meta' : ''
+            ].filter(Boolean).join('+');
+
+            const shape = `${mods ? mods + '+' : ''}${entry.key === ' ' ? 'Space' : entry.key}` +
+                (entry.code ? ` [code ${entry.code}]` : '') +
+                (entry.mode ? ` · ${entry.mode}` : '');
+
+            return `${index + 1}. ${shape} → ${entry.binding || '(swallowed, no binding)'}`;
+        });
     }
 
     handleKey(e) {
@@ -1135,30 +1236,18 @@ class BMUXClient {
             return;
         }
 
-        // CONTROL MODE LOGIC
-        if (this.isControlMode) {
-            // Typing in the console or a pane input keeps working in Control Mode
-            if (this.isTypingTarget()) {
-                return;
+        // LEGACY PREFIX (Ctrl+b) comes first: the prefix must work in every mode,
+        // including Control Mode, exactly like tmux.
+        if (e.ctrlKey && (e.key === 'b' || e.code === 'KeyB')) {
+            this.recordKey(e, 'prefix');
+            this.prefixPressed = true;
+            try {
+                chrome.runtime.sendMessage({ command: 'prefix-detected' });
+            } catch (error) {
+                // background asleep: the prefix still arms locally
             }
-
             e.preventDefault();
             e.stopPropagation();
-
-            this.log(`Control Key: ${e.key}`);
-
-            const line = bmuxKeyBinding('control', bmuxBindingKey(e));
-            if (line) {
-                this.dispatchLine(line);
-            }
-            return;
-        }
-
-        // LEGACY PREFIX LOGIC (Ctrl+b)
-        if (e.ctrlKey && e.key === 'b') {
-            this.prefixPressed = true;
-            chrome.runtime.sendMessage({ command: 'prefix-detected' });
-            e.preventDefault(); e.stopPropagation();
             clearTimeout(this.prefixTimeout);
             this.prefixTimeout = setTimeout(() => {
                 this.prefixPressed = false;
@@ -1171,10 +1260,42 @@ class BMUXClient {
             e.stopPropagation();
             this.prefixPressed = false;
 
-            const line = bmuxKeyBinding('prefix', bmuxBindingKey(e));
-            if (line) {
-                this.dispatchLine(line);
+            const command = bmuxKeyBinding('prefix', e);
+            const entry = this.recordKey(e, 'prefix');
+            if (command) {
+                entry.binding = command;
+                this.dispatchLine(command);
+            } else {
+                this.log(`Unbound key after Ctrl+b: ${e.key}` +
+                    (e.code ? ` (code ${e.code})` : '') +
+                    (e.shiftKey ? ' with Shift' : ''));
             }
+            return;
+        }
+
+        // CONTROL MODE LOGIC
+        if (this.isControlMode) {
+            // Typing in the console or a pane input keeps working in Control Mode
+            if (this.isTypingTarget()) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            this.log(`Control Key: ${e.key}`);
+
+            const command = bmuxKeyBinding('control', e);
+            const entry = this.recordKey(e, 'control');
+            if (command) {
+                entry.binding = command;
+                this.dispatchLine(command);
+            } else {
+                this.log(`Unbound key: ${e.key}` +
+                    (e.code ? ` (code ${e.code})` : '') +
+                    (e.shiftKey ? ' with Shift' : ''));
+            }
+            return;
         }
     }
 
@@ -3286,7 +3407,7 @@ class BMUXClient {
         if (!output) return 0;
 
         const paneHeight = pane.getBoundingClientRect ? (pane.getBoundingClientRect().height || 0) : 0;
-        const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_RATIO) : 600;
+        const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_SHARE) : 600;
         const applied = Math.round(bmuxClamp(Number(px) || BMUX_CONSOLE_HEIGHT, BMUX_CONSOLE_MIN_HEIGHT, max));
 
         pane.dataset.consoleHeight = String(applied);
@@ -3336,6 +3457,9 @@ class BMUXClient {
         const previousCursor = document.body.style.cursor;
         document.body.style.cursor = 'row-resize';
 
+        const shield = this.ui ? this.ui.dragShield : null;
+        if (shield) shield.className = 'active row';
+
         const move = (moveEvent) => {
             this.setPaneConsoleHeight(pane, startHeight + (startY - moveEvent.clientY));
         };
@@ -3344,6 +3468,7 @@ class BMUXClient {
             document.removeEventListener('mousemove', move, true);
             document.removeEventListener('mouseup', up, true);
             document.body.style.cursor = previousCursor;
+            if (shield) shield.className = '';
             this.log(`Console height: ${this.getPaneConsoleHeight(pane)}px`);
         };
 

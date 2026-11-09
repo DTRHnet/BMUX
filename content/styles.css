@@ -54,7 +54,10 @@
 }
 
 .bmux-pane iframe {
-  flex: 1;
+  flex: 1 1 auto;
+  /* Without min-height: 0 a flex item refuses to shrink below its content, which
+     stopped the console panel from growing to the height it was given. */
+  min-height: 0;
   width: 100%;
   border: none;
 }
@@ -100,6 +103,7 @@
 .bmux-pane-output {
   position: relative;
   display: none;
+  flex: 0 0 auto;
   flex-direction: column;
   height: 140px;
   min-height: 40px;
@@ -111,18 +115,35 @@
   display: flex;
 }
 
+/* Drag handle on the console's top edge: a wide hit area with a visible grip,
+   so it reads as "pull me up to see more" rather than a hidden edge. */
 .bmux-pane-output-grip {
   position: absolute;
-  top: -3px;
+  top: -6px;
   left: 0;
   right: 0;
-  height: 7px;
+  height: 12px;
   cursor: row-resize;
   z-index: 2;
 }
 
-.bmux-pane-output-grip:hover {
-  background: rgba(0, 170, 255, 0.35);
+.bmux-pane-output-grip::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 44px;
+  height: 3px;
+  margin-left: -22px;
+  border-radius: 2px;
+  background: #4a5a6a;
+  box-shadow: 0 -4px 0 #4a5a6a;
+}
+
+.bmux-pane-output-grip:hover::after,
+.bmux-pane-output-grip:active::after {
+  background: #00aaff;
+  box-shadow: 0 -4px 0 #00aaff;
 }
 
 .bmux-pane-output-log {
@@ -265,11 +286,24 @@
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   cursor: nwse-resize;
-  background: linear-gradient(135deg, transparent 50%, #555 50%);
+  background: linear-gradient(135deg, transparent 50%, #6a7a8a 50%);
   border-bottom-right-radius: 8px;
+}
+
+.bmux-debug-bottom {
+  position: absolute;
+  left: 10px;
+  right: 18px;
+  bottom: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.bmux-debug-bottom:hover {
+  background: rgba(0, 170, 255, 0.3);
 }
 
 

@@ -17,7 +17,9 @@ Located in the browser extension icon menu, you can:
 - Works across all tabs and iframes
 
 ### 3. **Control Mode**
-When activated (via `Alt+Shift+B` or popup button):
+Activation is one state: clicking the toolbar icon (`chrome.action.onClicked`) or
+pressing `Alt+Shift+B` shows the overlay *and* enters Control Mode; doing it again
+hides the overlay and leaves Control Mode. There is no popup. When activated:
 - Thick blue border appears around the overlay
 - Status bar shows `[CONTROL MODE]` with blue background
 - All keyboard input is captured by BMUX, except while a console or pane input
@@ -259,7 +261,21 @@ reported as "no snapshot", never partly applied.
 prune session keys for tabs that no longer exist; where `storage.session` is
 missing the tab layer falls back to `local` with a 6 hour expiry.
 
-### 18. **Modern UI Design**
+### 18. **Key resolution and diagnostics**
+`bmuxBindingKeys(event)` returns every name a table could use for one keystroke,
+most specific first: `Alt+<key>`/`Alt+<code>` when Alt is held, otherwise `<key>`,
+then `Shift+<code>`, `<code>`, `Shift+<key>` and the lowercase character.
+`bmuxKeyBinding(mode, event)` walks that list against `BMUX_KEYBINDINGS[mode]`, so a
+keyboard that reports `5` (or `%`) for Shift+5 hits the same command; both tables
+carry explicit `Shift+Digit5`/`Digit5`/`5` and `Shift+Quote`/`Quote`/`'` aliases.
+
+`handleKey` checks the `Ctrl+b` prefix **before** Control Mode, so the prefix works in
+every mode. Each handled key is recorded by `recordKey` (raw key, code, modifiers,
+mode, resolved command; the last 20 are kept), an unbound key logs
+`Unbound key: ...`, and the `keys` command prints that log — which is how a shortcut
+that silently does nothing can be identified.
+
+### 19. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -279,14 +295,14 @@ missing the tab layer falls back to `local` with a 6 hour expiry.
 2. Navigate to the BMUX folder and select it
 
 ### Basic Workflow
-1. **Activate BMUX**: `Alt+Shift+B`, the toolbar, or the popup
+1. **Activate BMUX**: `Alt+Shift+B` or the toolbar icon
 2. **Split**: `%` / `"`, the `Split H`/`Split V` buttons, or
    `split-window -h -l 30%`
 3. **Resize**: drag a boundary, or `Alt+arrow` / `resize-pane -R 5`
 4. **Arrange**: `select-layout main-vertical`, `swap-pane 1 2`, `rotate-window`
 5. **Focus**: click, arrows, `q` + digit, `focus-pane %2`, `o` / `;`
 6. **Zoom**: `z`
-7. **Exit**: `d`, `Detach`, or the popup
+7. **Exit**: `d`, `Detach`, or the toolbar icon again
 
 ## Architecture
 
@@ -300,9 +316,7 @@ BMUX/
 │   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher
 │   ├── commands.js       # Command registry + key bindings (source of truth)
 │   └── styles.css        # UI, split handles, drag shield
-└── popup/
-    ├── index.html        # Extension icon popup
-    └── script.js         # Popup button handlers
+└── (no popup: the toolbar icon activates BMUX directly)
 ```
 
 `manifest.json` loads `content/commands.js` before `content/main.js`, so the
@@ -310,9 +324,10 @@ registry and key bindings exist before the client is constructed.
 
 ### Message Flow
 
-**Popup Button Click:**
-1. `popup/script.js` sends `toggle-bmux` or `toggle-control-mode` to the tab →
-2. `content/main.js` toggles the overlay or Control Mode
+**Toolbar icon:**
+1. `chrome.action.onClicked` in the background →
+2. `content/main.js` receives `toggle-bmux`: show the overlay and enter Control Mode,
+   or hide it and leave Control Mode
 
 **Global Hotkey:**
 1. Browser triggers `toggle-bmux-mode` →

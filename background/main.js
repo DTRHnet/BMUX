@@ -354,13 +354,24 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     clearTabLayout(tabId);
 });
 
+// Clicking the toolbar icon activates BMUX in the active tab: the overlay appears
+// with Control Mode on (the blue border). The popup is gone, so this fires.
+if (chrome.action && chrome.action.onClicked) {
+    chrome.action.onClicked.addListener((tab) => {
+        if (tab && tab.id !== undefined) {
+            chrome.tabs.sendMessage(tab.id, { command: 'toggle-bmux' });
+        }
+    });
+}
+
 // The browser-level hotkey: Alt+Shift+B toggles Control Mode in the active tab.
 chrome.commands.onCommand.addListener((command) => {
     if (command !== 'toggle-bmux-mode') return;
 
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
         if (tabs && tabs[0]) {
-            chrome.tabs.sendMessage(tabs[0].id, { command: 'toggle-control-mode' });
+            // One key, one state: show the overlay with Control Mode on, or hide it.
+            chrome.tabs.sendMessage(tabs[0].id, { command: 'toggle-bmux' });
         }
     });
 });

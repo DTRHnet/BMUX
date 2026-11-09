@@ -18,8 +18,7 @@
         "service_worker": "background/main.js"
     },
     "action": {
-        "default_popup": "popup/index.html",
-        "default_title": "BMUX"
+        "default_title": "Activate BMUX"
     },
     "content_scripts": [
         {
@@ -52,14 +51,14 @@
                 "default": "Ctrl+Shift+L",
                 "mac": "Command+Shift+L"
             },
-            "description": "Open BMUX Popup"
+            "description": "Activate BMUX (overlay + Control Mode)"
         },
         "toggle-bmux-mode": {
             "suggested_key": {
                 "default": "Alt+Shift+B",
                 "mac": "Alt+Shift+B"
             },
-            "description": "Toggle BMUX Control Mode"
+            "description": "Toggle BMUX on/off (overlay + Control Mode)"
         }
     }
 }

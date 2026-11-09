@@ -4,14 +4,14 @@
 
 ## Activation
 ```
-Alt+Shift+B    - Toggle Control Mode (recommended)
-Extension Icon - Manual toggle via popup
+Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, blue border); again to turn it off
+Extension Icon - The same: one click activates, another hides
 ```
 
 ## Control Mode Keys (after Alt+Shift+B)
 ```
-%            - Split horizontal
-"            - Split vertical (Shift+')
+%            - Split horizontal (also Shift+5, 5)
+"            - Split vertical (also Shift+', ')
 c            - New window
 d            - Detach (hide overlay)
 x            - Kill pane (last pane is refused)
@@ -71,6 +71,13 @@ yes / no                                  - Type the answer instead
 Esc                                       - Cancel the prompt
 ```
 
+## If a shortcut does not fire
+```
+> keys          - Last 12 key events: raw key, code, modifiers, and what they ran
+```
+`Ctrl+b` works in every mode, including inside Control Mode. `Alt+Shift+B` can be
+stolen by the window manager — rebind it at `chrome://extensions/shortcuts`.
+
 ## Command line editing (every input)
 ```
 Up / Down       - Recall previous commands (Down past the newest restores your draft)
@@ -79,6 +86,14 @@ Tab Tab         - List the candidates in the console
 ```
 Ctrl+b keys still apply: this is the input's own editing, in the pane console, the
 floating console and the `:` line, which all share one history.
+
+## Enlarging the console
+```
+Drag the two-line grip on the console's top edge - up to 90% of the pane
+Double-click the grip                          - Back to 140px
+> log size 320                                 - Set it exactly
+```
+The floating console resizes from its bottom-right corner or its bottom edge.
 
 ## Maximize a pane
 ```

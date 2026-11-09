@@ -324,6 +324,14 @@ const BMUX_KEYBINDINGS = {
     control: {
         '%': 'split-window -h',
         '"': 'split-window -v',
+        // Layout-independent aliases: some keyboards report the unshifted key
+        // while Shift is held, and plain digits/' work everywhere.
+        'Shift+Digit5': 'split-window -h',
+        'Digit5': 'split-window -h',
+        '5': 'split-window -h',
+        'Shift+Quote': 'split-window -v',
+        'Quote': 'split-window -v',
+        "'": 'split-window -v',
         'c': 'new-window',
         'x': 'kill-pane',
         'd': 'detach',
@@ -348,6 +356,14 @@ const BMUX_KEYBINDINGS = {
     prefix: {
         '%': 'split-window -h',
         '"': 'split-window -v',
+        // Layout-independent aliases: some keyboards report the unshifted key
+        // while Shift is held, and plain digits/' work everywhere.
+        'Shift+Digit5': 'split-window -h',
+        'Digit5': 'split-window -h',
+        '5': 'split-window -h',
+        'Shift+Quote': 'split-window -v',
+        'Quote': 'split-window -v',
+        "'": 'split-window -v',
         'c': 'new-window',
         'x': 'kill-pane',
         'd': 'detach',
@@ -373,6 +389,16 @@ const BMUX_KEYBINDINGS = {
 const BMUX_COMMANDS = {
 
     // --- Overlay commands (they manage the whole overlay) ---
+
+    'keys': {
+        scope: 'overlay',
+        description: 'Show the last key events and what they resolved to (diagnose shortcuts)',
+        usage: 'keys',
+        execute: function (api, args) {
+            const entries = api.client.recentKeys(12);
+            return ['Recent keys (newest last):', ...entries].join('\n');
+        }
+    },
 
     'help': {
         scope: 'overlay',

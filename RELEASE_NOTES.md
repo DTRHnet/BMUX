@@ -20,6 +20,9 @@
 | Housekeeping | Tab-close cleanup, startup pruning, 6 h fallback where `storage.session` is missing |
 | Cleanup | The dead session `STATE` machinery and the "State Fetched" stub are gone; `unlimitedStorage` dropped |
 | Line editing | `Up`/`Down` history and `Tab` completion in the pane console, the floating console and the `:` line — one shared history, command-aware arguments |
+| Activation | The toolbar icon (or `Alt+Shift+B`) turns BMUX straight on — overlay plus Control Mode — and off again; the popup is gone |
+| Key resilience | `%`/`Shift+5`/`5` and `"`/`Shift+'`/`'` all split; `Ctrl+b` works inside Control Mode; `keys` prints what the keyboard actually sent |
+| Console size | The pane console drags to 90% of the pane from a visible grip (with a drag shield); the floating console gained a bottom grip |
 
 ## The shape of it
 

@@ -28,6 +28,29 @@ Persistence finally exists, is validated, and can be switched off.
     `delete-layout <name|--all>`;
   - they survive browser restarts, and at most 30 are kept per origin (oldest
     dropped first).
+- **Activation is one state.** Clicking the extension icon (or pressing
+  `Alt+Shift+B`) now turns BMUX *on*: the overlay appears with Control Mode
+  already active, so the blue border and the keys are live immediately. Pressing
+  it again hides the overlay and leaves Control Mode. The popup is gone — the icon
+  is the button — and `detach` (`d`) toggles the same state.
+- **Keyboard shortcuts that survive layout differences.** `event.key` is not the
+  same on every keyboard: with Shift held, some report `%` and others report `5`
+  (likewise `''` / `"`). Key lookup now tries the character, the `Shift+<code>`
+  form, the bare `code`, and the lowercase character, and both key tables carry
+  `Shift+Digit5` / `Digit5` / `5` and `Shift+Quote` / `Quote` / `'` aliases. `%`,
+  `Shift+5`, `5`, `"` and `'` all split.
+- **`Ctrl+b` works in every mode**, including inside Control Mode (tmux behaviour)
+  — the prefix is checked before the Control Mode branch, so mixing the two can no
+  longer swallow the second key.
+- **`keys` command**, plus a log line for any key that resolves to nothing:
+  `Unbound key: … (code …) with Shift`. `keys` prints the last dozen events with
+  their raw `key`, `code`, modifiers, the mode they were read in, and the command
+  they resolved to — so a shortcut that does not fire can be diagnosed instead of
+  guessed at.
+- **The pane console resizes like a pane**: a visible two-line grip on its top edge
+  (12 px grab area, double-click resets), draggable to 90% of the pane, with a drag
+  shield so the pointer cannot slip onto the iframe mid-drag. The floating console
+  gained a bottom edge grip next to its corner grip.
 - **Command line editing in every input.** The pane console, the floating debug
   console and the `:` line now share one history and one completion engine:
   - `Up` / `Down` recall the previous commands (`Down` past the newest restores
@@ -61,7 +84,9 @@ Persistence finally exists, is validated, and can be switched off.
   `STATE` / `loadState` / `saveState` / `createSession` / `get-state` /
   `new-session` machinery — which was written once on install and read by nobody —
   is gone.
-- The popup's "New Session" button became **"Reset Layout"** (`new-window`).
+- The popup is removed: `action` no longer declares `default_popup`, so clicking the
+  icon runs `action.onClicked` and activates BMUX. `popup/` is deleted; the icon
+  and the hotkey are the two ways in.
 - `unlimitedStorage` was dropped from the manifest: snapshots are a few KB, so the
   default quota is ample. Fewer permissions, same behaviour.
 - Content scripts never touch `chrome.storage` directly: `chrome.storage.session`
@@ -72,6 +97,12 @@ Persistence finally exists, is validated, and can be switched off.
 
 ### Fixed
 
+- A pane console given a height taller than its pane could not actually grow that
+  far: the iframe flex item refused to shrink (`min-height: auto`), so the panel was
+  squeezed back. The iframe now has `min-height: 0` and the panel `flex: 0 0 auto`.
+- Dragging a console's resize grip stalled when the pointer crossed the pane's
+  iframe; console and floating-console resizing now use the same drag shield as the
+  split handles.
 - Reloading a page no longer destroys your layout.
 - A corrupt, unsupported or oversized stored layout can no longer break startup:
   it is ignored, logged, and a fresh single pane is rendered.

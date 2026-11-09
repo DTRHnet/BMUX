@@ -79,6 +79,7 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
 | `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
 | `l` | `log toggle` (this pane's console) | same |
+| `keys` | *(command)* list the last key events and their resolution | same |
 | `q` | `display-panes` | same |
 | `o` | `cycle-pane next` | same |
 | `;` | `last-pane` | same |
@@ -217,6 +218,19 @@ explicit cases.
 
 Restoring **recreates the panes**, so each page loads fresh: scroll position, form
 input and in-page JavaScript state cannot be carried over.
+
+### `keys`
+Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the
+mode they were read in, and the command each resolved to. Use it when a shortcut
+does not fire — an unbound key also logs `Unbound key: … (code …) with Shift`.
+
+```
+> keys
+Recent keys (newest last):
+1. Ctrl+b [code KeyB] · prefix → (swallowed, no binding)
+2. Shift+% [code Digit5] · prefix → split-window -h
+3. F9 [code F9] · control → (swallowed, no binding)
+```
 
 ### `persist [on|off|status]`
 `on` and `off` control the automatic per-tab saving. `off` also clears the current

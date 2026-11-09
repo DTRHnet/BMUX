@@ -46,7 +46,8 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 
 ### Basic Usage
 
-1. **Activate BMUX**: Press `Alt+Shift+B` or click the extension icon
+1. **Activate BMUX**: Press `Alt+Shift+B` or click the extension icon — either one
+   turns it on (overlay + Control Mode, blue border). Press it again to turn it off.
 2. **Split Horizontally**: Press `%` (Control Mode) or click `Split H`
 3. **Split Vertically**: Press `"` (Shift+') or click `Split V`
 4. **Resize**: drag the boundary between panes with the mouse, or press
@@ -195,6 +196,8 @@ The console under each pane's input is a scrollback, not a flash message:
   reset; `log size 240` works too). The height and open state survive splits,
   layout changes and zoom.
 - `clear` empties the scrollback.
+- **Drag its top edge** (the two-line grip) to make it as tall as 90% of the pane;
+  double-click the grip to reset it to 140px, or type `log size 320`.
 
 **Line editing works like a shell** — in the pane console, the floating console and
 the `:` line:
@@ -355,6 +358,7 @@ These act on the whole overlay.
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
 | `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
+| `keys` | Print the last key events and what they resolved to (shortcut diagnostics) | `> keys` |
 | `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
 | `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
 | `list-layouts` | Saved layouts for this site | `> list-layouts` |
@@ -426,6 +430,13 @@ scripting:
 | `Space` | `next-layout` |
 | `:` | `command-prompt` |
 | `Esc` | Exit Control Mode (or cancel `display-panes`) |
+
+`%`, `Shift+5` and `5` all split horizontally (`"`, `Shift+'` and `'` vertically) —
+the tables carry layout-independent aliases, because keyboards disagree about which
+character a shifted digit or quote reports. `Ctrl+b` also works *inside* Control
+Mode, so mixing the two is safe. If a shortcut does not fire, run `keys`: it lists
+the last dozen key events with their raw `key`, `code` and modifiers, and the command
+each one resolved to.
 
 **Legacy (Ctrl+b prefix)** — the same command set, after `Ctrl+b`:
 
@@ -499,9 +510,6 @@ BMUX/
 │   ├── main.js            # Overlay DOM, layout engine, focus, dispatcher
 │   ├── commands.js        # Command registry + key bindings (source of truth)
 │   └── styles.css         # Glassmorphism UI, split handles, drag shield
-├── popup/
-│   ├── index.html         # Extension icon popup
-│   └── script.js          # Popup controls
 └── docs/                  # Documentation
     ├── ADDING_COMMANDS.md
     ├── COMMAND_USAGE.md
@@ -561,6 +569,13 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - ❌ Inject ads or modify content
 - ❌ Access sites you don't explicitly load
 
+### Activation
+Clicking the toolbar icon or pressing `Alt+Shift+B` turns BMUX on — overlay plus
+Control Mode in one step — and the same action turns it off. There is no popup; the
+icon is the button. If your window manager or another extension has taken
+`Alt+Shift+B`, rebind it at `chrome://extensions/shortcuts`; `Ctrl+b` works
+regardless.
+
 ### Permissions Explained
 - **`declarativeNetRequest`** - Remove iframe-blocking headers
 - **`<all_urls>`** - Apply rules to any site you load
@@ -585,6 +600,8 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   scrollback (transient UI); console open/height is
 - ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
   lost (named layouts remain)
+- ⏳ **`Alt+Shift+B` can be taken** by the window manager or another extension;
+  rebind it at `chrome://extensions/shortcuts` and use `keys` to see what arrived
 - ⏳ **No multiple windows / layout tabs** - `new-window` resets the overlay
 - ⏳ **No floating panes** - every pane takes layout space
 - ⏳ **No `break-pane` / `join-pane`**
