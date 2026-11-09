@@ -5,6 +5,99 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-11-09
+
+Commands can be chained, commands can ask questions you can click, filters narrow
+down in rounds, and every pane has its own maximize button.
+
+### Added
+
+- **Chained commands.** `;` runs commands one after another, from every entry
+  point (debug console, `:` line, pane input, keys, relay):
+  - `filter img; filter a` boxes both sets; `split-window -h; list-panes` does both;
+  - a failing command does not stop the chain (shell `;` semantics), and each
+    segment gets its own echoed line and result;
+  - segments run awaited, so a prompt raised by one is answered before the next
+    starts;
+  - `\;` is a literal semicolon and `;` inside quotes or `[] () {}` does not split,
+    so `filter a[href="x;y"]` stays one command.
+- **Clickable prompts.** Commands can ask questions, and the answers are buttons
+  in a card anchored above the pane's footer:
+  - `api.ask({ question, details, choices })` and `api.askText({ question })` for
+    command authors — the command simply awaits the answer and carries on;
+  - a choice is picked by clicking, by its digit shortcut (`1`…`9`), by `Enter`
+    for the primary choice, by `y`/`n` on yes/no prompts, or with the `yes`/`no`
+    commands; `Esc` cancels;
+  - the card never steals focus from a text field, and keys pressed with the focus
+    inside the pane are caught too;
+  - an open prompt is cancelled (not left hanging) when its pane is killed,
+    navigates, or the overlay resets; yes/no prompts time out after 15s.
+- **Per-pane maximize button.** Every pane footer has a `⤢` button that maximizes
+  that pane and flips to `⤡` to restore it — the on-screen form of
+  `Ctrl+b`, `Shift+z`. Clicking another pane's `⤢` moves the maximize there, and
+  the glyphs stay in step with keyboard and toolbar zoom.
+- **Filter refinement.** `filter` now draws and labels first, then offers to
+  narrow the result in rounds:
+  - *Inside a container…*, *Exclude a container…*, *Text contains…*, *Visible
+    only*, *Unique targets*, *Keep these*, *Cancel* — each card is clickable;
+  - every step intersects the current set, re-labels the boxes and re-asks, up to
+    6 rounds;
+  - the same narrowing is available non-interactively: `--in <selector>`,
+    `--not-in <selector>`, `--text <word>`, `--visible`, `--unique [href|src|text]`;
+  - `filter -y …` skips the questions entirely.
+- **Filters accumulate.** A second filter on the same pane adds to the boxes
+  already drawn instead of replacing them (`filter img; filter a`), which is what
+  makes chained filters useful. `--replace` starts from a clean set and
+  `filter -c` clears everything.
+
+### Changed
+
+- 0.3.0 asked *before* drawing for presets and >25 matches, and answered with a
+  typed `yes`/`no`. Now it draws and labels first, then asks in a card — which is
+  the flow the "23 a[href] found and labelled" example describes.
+- `yes` / `no` answer whatever prompt is open (they map a missing choice onto the
+  card's primary button), instead of only the filter confirmation.
+- Filter state is a list of *parts* (`{ selector, test, uniqueBy }`) so an
+  accumulated filter can be re-queried correctly when the page mutates.
+- `filter`'s usage line and error text list the new flags.
+
+### Fixed
+
+- The pane console and debug console no longer accept a chain as one opaque
+  command: both split on `;` and echo/report each segment.
+- A prompt can no longer outlive its pane (kill, navigation, reset).
+- The filter's own in-pane `Escape` handler stands down while a prompt is open, so
+  `Esc` reaches the card first.
+
+### Notes
+
+- Refinement rounds narrow what is drawn; the mutation refresh re-queries the
+  selector parts, so a page change after refining re-broadens the boxes to the
+  full selector set (documented limitation).
+- "Visible only" means rendered by the browser (not `display:none`,
+  `visibility:hidden`, `opacity:0` or without boxes); it does not check the
+  viewport.
+- Chained filters keep appending until `filter -c` or `--replace`: a stray
+  `filter div` after `filter a` adds div boxes rather than replacing them.
+- Cross-origin panes still cannot be boxed, and cannot host a pane-scoped prompt
+  card's keys (the card itself is in the top frame).
+
+### Verification
+
+- `node --check` clean; all files kept CRLF; `manifest.json` parses.
+- jsdom: **559 checks** pass — tokenizer (quotes, brackets, `\;`, empty
+  segments), chain order and continuation after an error, prompt rendering,
+  clicking, digit/`Enter`/`Esc`/`yes`/`no` answers, text prompts, cancel-on-kill,
+  per-pane maximize button and zoom reassignment, every refinement flag, the
+  refinement round trip ending in *Keep these*, accumulation and `--replace`.
+- Chromium 150 with the extension unpacked: **78 checks** pass — a preset drawing
+  then asking, real clicks through Yes → Unique → No and Yes → Text → typed word →
+  *Keep these*, `filter -y img; filter -y a` boxing three elements with both
+  segments echoed, and the per-pane button maximizing and restoring with glyph
+  changes.
+- Not verified: touch input, cross-origin panes, the 15s prompt timeout in a real
+  browser, and the mutation-refresh-after-refinement path (jsdom only).
+
 ## [0.3.0] - 2026-11-09
 
 The pane console became usable (it opens, stays open, scrolls and resizes),
@@ -393,7 +486,7 @@ every entry point shares.
 
 ---
 
-## Planned for 0.4.0
+## Planned for 0.5.0
 
 - Floating panes (a pane that overlays the layout instead of taking space)
 - `break-pane` / `join-pane`

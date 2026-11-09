@@ -104,6 +104,43 @@ function bmuxImageIsLarge(element) {
     return (element.naturalWidth || 0) > 200;
 }
 
+/** Rendered at all (not display:none / visibility:hidden / no boxes). */
+function bmuxIsVisible(element, view) {
+    if (!element || !element.getClientRects) return true;
+
+    let rects;
+    try {
+        rects = element.getClientRects();
+    } catch (e) {
+        return true;
+    }
+    if (!rects || !rects.length) return false;
+
+    try {
+        const style = view && view.getComputedStyle ? view.getComputedStyle(element) : null;
+        if (style && (style.display === 'none' || style.visibility === 'hidden' || style.opacity === '0')) {
+            return false;
+        }
+    } catch (e) {
+        // getComputedStyle can throw for detached or opaque documents
+    }
+
+    return true;
+}
+
+/** `a && b` for two (element, doc, view) predicates. */
+function bmuxComposeTests(first, second) {
+    if (!first) return second || null;
+    if (!second) return first;
+    return (element, doc, view) => {
+        try {
+            return !!first(element, doc, view) && !!second(element, doc, view);
+        } catch (e) {
+            return false;
+        }
+    };
+}
+
 function bmuxImageIsBroken(element) {
     return !!element.complete && (element.naturalWidth || 0) === 0;
 }
@@ -773,25 +810,23 @@ const BMUX_COMMANDS = {
 
     'yes': {
         scope: 'overlay',
-        description: 'Confirm a pending filter prompt: box the matches',
+        description: 'Answer the open prompt affirmatively (refine, discard, confirm)',
         usage: 'yes  (alias: y)',
         execute: function (api, args) {
-            const result = api.client.resolveFilterConfirm(true);
+            const result = api.client.answerOpenPrompt('yes', api.pane);
             if (!result.ok) return `Error: ${result.message}`;
-
-            return `Boxed ${result.shown} of ${result.matched} match(es) for ${result.label}`;
+            return result.choice === 'yes' ? 'Confirmed' : `Answered: ${result.choice}`;
         }
     },
 
     'no': {
         scope: 'overlay',
-        description: 'Cancel a pending filter prompt',
+        description: 'Answer the open prompt negatively (keep, cancel)',
         usage: 'no  (alias: n)',
         execute: function (api, args) {
-            const result = api.client.resolveFilterConfirm(false);
+            const result = api.client.answerOpenPrompt('no', api.pane);
             if (!result.ok) return `Error: ${result.message}`;
-
-            return `Cancelled ${result.label}: nothing drawn`;
+            return result.choice === 'no' ? 'Declined' : `Answered: ${result.choice}`;
         }
     },
 
@@ -801,9 +836,9 @@ const BMUX_COMMANDS = {
         description: 'Alias of yes',
         usage: 'y',
         execute: function (api, args) {
-            const result = api.client.resolveFilterConfirm(true);
+            const result = api.client.answerOpenPrompt('yes', api.pane);
             if (!result.ok) return `Error: ${result.message}`;
-            return `Boxed ${result.shown} of ${result.matched} match(es) for ${result.label}`;
+            return result.choice === 'yes' ? 'Confirmed' : `Answered: ${result.choice}`;
         }
     },
 
@@ -813,9 +848,9 @@ const BMUX_COMMANDS = {
         description: 'Alias of no',
         usage: 'n',
         execute: function (api, args) {
-            const result = api.client.resolveFilterConfirm(false);
+            const result = api.client.answerOpenPrompt('no', api.pane);
             if (!result.ok) return `Error: ${result.message}`;
-            return `Cancelled ${result.label}: nothing drawn`;
+            return result.choice === 'no' ? 'Declined' : `Answered: ${result.choice}`;
         }
     },
 
@@ -905,9 +940,10 @@ const BMUX_COMMANDS = {
 
     'filter': {
         scope: 'pane',
-        description: 'Box every match in the pane, name each one on hover; understands preset words like "links internal"',
-        usage: 'filter <selector|preset> [-n <max>] [-y] | filter -l <target> | filter -c | filter --presets',
-        execute: function (api, args) {
+        description: 'Box every match in the pane, name each on hover, then optionally narrow it down',
+        usage: 'filter <selector|preset> [-n max] [-y] [--in s] [--not-in s] [--text w] [--visible] ' +
+            '[--unique] [--replace] | filter -l <target> | filter -c | filter --presets',
+        execute: async function (api, args) {
             const client = api.client;
             const pane = api.pane;
             if (!pane) return 'Error: No pane to filter';
@@ -915,8 +951,14 @@ const BMUX_COMMANDS = {
             let clear = false;
             let listOnly = false;
             let autoConfirm = false;
+            let replace = false;
             let showPresets = false;
             let max = null;
+            let insideSelector = '';
+            let outsideSelector = '';
+            let textNeedle = '';
+            let visibleOnly = false;
+            let uniqueBy = null;
             const words = [];
 
             for (let i = 0; i < args.length; i++) {
@@ -926,8 +968,10 @@ const BMUX_COMMANDS = {
                     clear = true;
                 } else if (arg === '-l' || arg === '--list') {
                     listOnly = true;
-                } else if (arg === '-y' || arg === '--yes') {
+                } else if (arg === '-y' || arg === '--yes' || arg === '--no-ask') {
                     autoConfirm = true;
+                } else if (arg === '--replace') {
+                    replace = true;
                 } else if (arg === '--presets' || arg === 'presets') {
                     showPresets = true;
                 } else if (arg === '-n' || arg === '--max') {
@@ -937,6 +981,25 @@ const BMUX_COMMANDS = {
                     }
                     max = parsed;
                     i++;
+                } else if (arg === '--in' || arg === '--not-in') {
+                    const selector = args[i + 1];
+                    if (!selector) return `Error: Usage: filter <target> ${arg} <selector>`;
+                    if (arg === '--in') insideSelector = selector;
+                    else outsideSelector = selector;
+                    i++;
+                } else if (arg === '--text') {
+                    const needle = args[i + 1];
+                    if (!needle) return 'Error: Usage: filter <target> --text <word>';
+                    textNeedle = needle;
+                    i++;
+                } else if (arg === '--visible') {
+                    visibleOnly = true;
+                } else if (arg === '--unique') {
+                    const next = args[i + 1];
+                    uniqueBy = next && ['href', 'src', 'text'].indexOf(next.toLowerCase()) !== -1
+                        ? next.toLowerCase()
+                        : 'href';
+                    if (next && uniqueBy === next.toLowerCase()) i++;
                 } else if (arg !== '') {
                     words.push(arg);
                 }
@@ -946,20 +1009,18 @@ const BMUX_COMMANDS = {
 
             if (clear) {
                 const cleared = client.clearFilters(pane);
-                return cleared
-                    ? `Cleared ${cleared} filter highlight(s)`
-                    : 'No filter highlights to clear';
+                return cleared ? `Cleared ${cleared} filter highlight(s)` : 'No filter highlights to clear';
             }
 
             const target = words.join(' ').trim();
             if (!target) {
-                return 'Error: Usage: filter <selector|preset> [-n <max>] [-y] | filter -l <target> | ' +
-                    'filter -c | filter --presets';
+                return 'Error: Usage: filter <selector|preset> [-n <max>] [-y] [--in s] [--not-in s] ' +
+                    '[--text w] [--visible] [--unique] [--replace] | filter -l <target> | filter -c | ' +
+                    'filter --presets';
             }
 
-            // Resolve a preset word (plus optional variant) into a selector + test.
+            // Preset word (+ optional variant) -> selector + predicate.
             let preset = null;
-            let variant = null;
             let selector = target;
             let test = null;
             let label = target;
@@ -972,7 +1033,7 @@ const BMUX_COMMANDS = {
                 const second = words[1] ? words[1].toLowerCase() : '';
                 if (second) {
                     if (preset.variants && Object.prototype.hasOwnProperty.call(preset.variants, second)) {
-                        variant = preset.variants[second];
+                        const variant = preset.variants[second];
                         if (variant.selector) selector = variant.selector;
                         if (variant.test) test = variant.test;
                     } else {
@@ -982,47 +1043,214 @@ const BMUX_COMMANDS = {
                     }
                 }
 
-                label = `${first}${variant && words[1] ? ' ' + words[1].toLowerCase() : ''}`;
+                label = `${first}${second ? ' ' + second : ''}`;
             }
+
+            // Inline constraint flags compose with the preset predicate.
+            if (insideSelector) {
+                const scope = insideSelector;
+                test = bmuxComposeTests(test, (element) => {
+                    try {
+                        return !!element.closest(scope);
+                    } catch (e) {
+                        return false;
+                    }
+                });
+                label += ` --in ${scope}`;
+            }
+
+            if (outsideSelector) {
+                const scope = outsideSelector;
+                test = bmuxComposeTests(test, (element) => {
+                    try {
+                        return !element.closest(scope);
+                    } catch (e) {
+                        return false;
+                    }
+                });
+                label += ` --not-in ${scope}`;
+            }
+
+            if (textNeedle) {
+                const needle = textNeedle.toLowerCase();
+                test = bmuxComposeTests(test, (element) => (element.textContent || '').toLowerCase().includes(needle));
+                label += ` --text ${textNeedle}`;
+            }
+
+            if (visibleOnly) {
+                test = bmuxComposeTests(test, (element, doc, view) => bmuxIsVisible(element, view));
+                label += ' --visible';
+            }
+
+            if (uniqueBy) label += ` --unique ${uniqueBy}`;
 
             const collected = client.collectFilterMatches(pane, selector, test);
             if (!collected.ok) return `Error: ${collected.message}`;
 
-            const elements = collected.elements;
-            if (!elements.length) {
+            let current = client.uniqueElements(collected.elements, uniqueBy);
+
+            if (!current.length) {
                 client.clearFilter(pane);
                 return `No elements match ${label} (${selector})`;
             }
 
-            const listed = elements.slice(0, 20).map((element, index) =>
-                `[${index + 1}] ${client.describeElement(element)}`);
-
-            let output = `=== ${elements.length} match(es): ${label} (${selector}) ===\n\n${listed.join('\n')}`;
-            if (elements.length > listed.length) {
-                output += `\n... ${elements.length - listed.length} more not listed`;
-            }
+            const renderList = (elements) => {
+                const listed = elements.slice(0, 20).map((element, index) =>
+                    `[${index + 1}] ${client.describeElement(element)}`);
+                let text = `=== ${elements.length} match(es): ${label} (${selector}) ===\n\n${listed.join('\n')}`;
+                if (elements.length > listed.length) {
+                    text += `\n... ${elements.length - listed.length} more not listed`;
+                }
+                return text;
+            };
 
             if (listOnly) {
-                return `${output}\n\nList only (-l): nothing drawn.`;
+                return `${renderList(current)}\n\nList only (-l): nothing drawn.`;
             }
 
-            // A preset, or a big result set, asks first.
-            const needsConfirm = !autoConfirm &&
-                (preset != null || elements.length > BMUX_FILTER_CONFIRM_THRESHOLD);
-
-            if (needsConfirm) {
-                const asked = client.requestFilterConfirm(pane, selector, { max: max, test: test, label: label });
-                if (!asked.ok) return `Error: ${asked.message || 'Cannot ask for confirmation'}`;
-
-                return `${output}\n\n${elements.length} match(es) for ${label}. ` +
-                    'Box them? Type "yes" / "no" (or press y / n; Esc cancels, "filter -y" skips this prompt).';
-            }
-
-            const applied = client.filterPane(pane, selector, { max: max, test: test, label: label });
+            // Draw first, label everything, then offer to narrow it down.
+            // `filter img; filter a` accumulates: the second call adds to the
+            // first instead of replacing it (use --replace for a clean slate).
+            let applied = client.filterPane(pane, selector, {
+                max: max,
+                test: test,
+                uniqueBy: uniqueBy,
+                label: label,
+                add: !replace
+            });
             if (!applied.ok) return `Error: ${applied.message}`;
 
-            return `${output}\n\nBoxed ${applied.shown} of ${applied.matched} match(es). ` +
-                'Hover one to name it in the pane status line; Esc or "filter -c" clears.';
+            let rounds = 0;
+            let lastStep = '';
+
+            // Only offer refinement for a preset or a big result set; a small
+            // explicit selector draws and stops.
+            const offerRefine = !autoConfirm &&
+                (preset != null || current.length > BMUX_FILTER_CONFIRM_THRESHOLD);
+
+            while (offerRefine && rounds < 6) {
+                const answer = await api.ask({
+                    question: `${current.length} ${label} found and labelled. Specify harder constraints?`,
+                    details: `${selector} · ${applied.shown} box(es) on screen` +
+                        (rounds ? ` · ${rounds} refinement(s)` : ''),
+                    choices: [
+                        { id: 'yes', label: 'Yes, refine', primary: true },
+                        { id: 'no', label: 'No, keep these' }
+                    ]
+                });
+
+                if (answer.cancelled || answer.choice !== 'yes') break;
+
+                const step = await api.ask({
+                    question: 'Narrow them down how?',
+                    details: `${current.length} match(es) now`,
+                    choices: [
+                        { id: 'in', label: 'Inside a container…' },
+                        { id: 'not-in', label: 'Exclude a container…' },
+                        { id: 'text', label: 'Text contains…' },
+                        { id: 'visible', label: 'Visible only' },
+                        { id: 'unique', label: 'Unique targets' },
+                        { id: 'done', label: 'Keep these', primary: true },
+                        { id: 'cancel', label: 'Cancel filter' }
+                    ]
+                });
+
+                if (step.cancelled || step.choice === 'done') break;
+
+                if (step.choice === 'cancel') {
+                    client.clearFilter(pane);
+                    return 'Filter cancelled: boxes cleared';
+                }
+
+                let nextTest = null;
+                let next = current;
+                let note = '';
+
+                if (step.choice === 'in' || step.choice === 'not-in') {
+                    const asked = await api.askText({
+                        question: step.choice === 'in'
+                            ? 'Keep only matches inside which selector?'
+                            : 'Drop matches inside which selector?',
+                        placeholder: 'main, .content, article'
+                    });
+                    if (asked.cancelled || !asked.text) continue;
+
+                    const scope = asked.text;
+                    let valid = true;
+                    try {
+                        collected.doc.querySelector(scope);
+                    } catch (e) {
+                        valid = false;
+                    }
+                    if (!valid) return `Error: Invalid selector "${scope}"`;
+
+                    nextTest = (element) => {
+                        let inside = false;
+                        try {
+                            inside = !!element.closest(scope);
+                        } catch (e) {
+                            inside = false;
+                        }
+                        return step.choice === 'in' ? inside : !inside;
+                    };
+                    note = `${step.choice} ${scope}`;
+                } else if (step.choice === 'text') {
+                    const asked = await api.askText({
+                        question: 'Keep only matches whose text contains…',
+                        placeholder: 'price'
+                    });
+                    if (asked.cancelled || !asked.text) continue;
+
+                    const needle = asked.text.toLowerCase();
+                    nextTest = (element) => (element.textContent || '').toLowerCase().includes(needle);
+                    note = `text "${asked.text}"`;
+                } else if (step.choice === 'visible') {
+                    nextTest = (element, doc, view) => bmuxIsVisible(element, view);
+                    note = 'visible only';
+                } else if (step.choice === 'unique') {
+                    uniqueBy = uniqueBy || 'href';
+                    next = client.uniqueElements(current, uniqueBy);
+                    note = `unique by ${uniqueBy}`;
+                } else {
+                    continue;
+                }
+
+                if (nextTest) next = client.filterElements(pane, current, nextTest);
+
+                rounds++;
+                lastStep = note;
+
+                if (!next.length) {
+                    client.clearFilter(pane);
+                    return `No matches left after ${note}: boxes cleared`;
+                }
+
+                if (nextTest) test = bmuxComposeTests(test, nextTest);
+
+                current = next;
+                applied = client.filterPane(pane, selector, {
+                    elements: current,
+                    parts: client.filters.has(pane) ? client.filters.get(pane).parts : null,
+                    max: max,
+                    test: test,
+                    uniqueBy: uniqueBy,
+                    label: label,
+                    add: false
+                });
+                if (!applied.ok) return `Error: ${applied.message}`;
+
+                api.log(`Refine ${rounds} (${note}): ${current.length} match(es), ${applied.shown} boxed`);
+            }
+
+            const refined = rounds
+                ? ` after ${rounds} refinement(s)${lastStep ? ` (last: ${lastStep})` : ''}`
+                : '';
+            const truncated = collected.truncated
+                ? `\n(stopped scanning at ${current.length > 0 ? 'the scan limit' : '0'}; the page has more matches)`
+                : '';
+
+            return `${renderList(current)}\n\nBoxed ${applied.shown} of ${applied.matched} match(es)${refined}. ` +
+                'Hover one to name it in the pane status line; Esc or "filter -c" clears.' + truncated;
         }
     },
 

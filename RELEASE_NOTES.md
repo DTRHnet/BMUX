@@ -1,3 +1,67 @@
+# BMUX Version 0.4.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.4.0
+**Release Date**: November 9, 2026
+**Status**: Chaining, clickable prompts, and filter refinement
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Chaining | `;` runs commands in sequence from every entry point, awaited, errors do not stop the chain |
+| Prompts | `api.ask` / `api.askText` render a clickable card (buttons, digits, `Enter`, `y`/`n`, `Esc`, `yes`/`no`) |
+| Maximize | Every pane footer has a `⤢` / `⤡` button, the on-screen form of `Ctrl+b`, `Shift+z` |
+| Filter refinement | Draw and label first, then *Inside a container*, *Exclude*, *Text contains*, *Visible only*, *Unique targets*, *Keep these*, *Cancel* |
+| Filter accumulation | `filter img; filter a` boxes both (`--replace` for a clean set) |
+
+## The workflow this enables
+
+```
+> filter links
+23 match(es) boxed and labelled
+[ Yes, refine ]  [ No, keep these ]
+> (click Yes)
+Narrow them down how?   [ Inside a container ] [ Text contains ] [ Visible only ] [ Unique targets ] [ Keep these ] [ Cancel ]
+> (click Inside a container) → type "main" → Enter
+7 match(es) boxed   →  [ Yes, refine ]  [ No, keep these ]
+> (click Keep these)
+```
+
+Every step is a real button, and every step also exists as a flag
+(`--in main --text price --visible --unique href`), so the interactive path and
+the scriptable path are the same implementation.
+
+## Notes and limits
+
+- Refinement narrows the drawn set; a page mutation re-queries the selectors, so
+  boxes can re-broaden after refining (documented).
+- "Visible only" means rendered, not "in the viewport".
+- Chained filters append until `filter -c` or `--replace`.
+- `&&` (stop on error) is not implemented; a chain always runs every segment.
+- Cross-origin panes cannot be boxed.
+
+## Verification
+
+- 559 jsdom checks and 78 checks in Chromium 150 with the extension unpacked,
+  including the tokenizer (quotes/brackets/`\;`), chain order and continuation,
+  clicking through Yes → Unique → No and Yes → Text → typed word → Keep these,
+  `filter -y img; filter -y a` boxing three elements, and the per-pane maximize
+  button flipping glyphs and restoring.
+- Not verified: touch input, cross-origin panes, the 15s prompt timeout in a real
+  browser, and refresh-after-refinement outside jsdom.
+
+## Breaking changes
+
+None. The filter question now comes *after* drawing instead of before, and
+`yes`/`no` answer whatever prompt is open.
+
+---
+
 # BMUX Version 0.3.0 - Release Summary
 
 ## Release Information

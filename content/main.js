@@ -57,8 +57,14 @@ const BMUX_LAYOUTS = ['even-horizontal', 'main-vertical', 'even-vertical', 'main
 const BMUX_FILTER_MAX = 200;
 const BMUX_FILTER_MAX_HARD = 1000;
 
-// How long a filter confirmation prompt stays open, in ms.
-const BMUX_CONFIRM_TIMEOUT = 15000;
+// How long a yes/no prompt stays open, in ms (text questions never time out).
+const BMUX_PROMPT_TIMEOUT = 15000;
+
+// How many matches `filter` will scan before it stops looking.
+const BMUX_FILTER_SCAN_MAX = 5000;
+
+// Digit-key shortcuts for prompt choices stop at 9.
+const BMUX_PROMPT_MAX_KEYS = 9;
 
 // Pane console: height when first opened, the drag limits, and scrollback cap.
 const BMUX_CONSOLE_HEIGHT = 140;
@@ -124,6 +130,70 @@ function bmuxClamp(value, low, high) {
     if (value < low) return low;
     if (value > high) return high;
     return value;
+}
+
+/**
+ * Split a command line on top-level semicolons.
+ *
+ * Rules:
+ *   - `;` separates commands, but only outside quotes and outside [] () {};
+ *   - `\;` is a literal semicolon (and `\\` a literal backslash);
+ *   - quotes are passed through untouched, because they belong to arguments
+ *     (selectors such as `a[href="x;y"]` need them).
+ *
+ * So `filter img; filter a` is two commands, and
+ * `filter a[href=\"x;y\"]` is one.
+ */
+function splitCommandLine(line) {
+    const text = line == null ? '' : String(line);
+    const segments = [];
+    let current = '';
+    let quote = null;
+    let depth = 0;
+    let escaped = false;
+
+    for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+
+        if (escaped) {
+            current += character;
+            escaped = false;
+            continue;
+        }
+
+        if (character === '\\') {
+            escaped = true;
+            continue;
+        }
+
+        if (quote) {
+            current += character;
+            if (character === quote) quote = null;
+            continue;
+        }
+
+        if (character === '"' || character === "'") {
+            quote = character;
+            current += character;
+            continue;
+        }
+
+        if (character === '[' || character === '(' || character === '{') depth++;
+        if ((character === ']' || character === ')' || character === '}') && depth > 0) depth--;
+
+        if (character === ';' && depth === 0) {
+            segments.push(current.trim());
+            current = '';
+            continue;
+        }
+
+        current += character;
+    }
+
+    if (escaped) current += '\\';
+    segments.push(current.trim());
+
+    return segments.filter((segment) => segment.length > 0);
 }
 
 /**
@@ -325,7 +395,7 @@ class BMUXClient {
         this.paneIndexTimer = null;
 
         this.filters = new Map();  // pane -> filter highlight state
-        this.pendingConfirm = null; // a filter prompt waiting for yes/no
+        this.prompts = new Map();  // pane -> open prompt card
 
         this.ui = null;
         this.handles = [];
@@ -503,7 +573,7 @@ class BMUXClient {
                 this.ui.debugInput.value = '';
 
                 if (cmd) {
-                    this.runCommandAndLog(cmd);
+                    this.runLine(cmd);
                 }
                 e.stopPropagation();
             }
@@ -593,7 +663,7 @@ class BMUXClient {
             // Command line relayed from the Background (a key pressed in a pane's
             // iframe, or in this frame when it is not the top frame)
             if (this.isTop && request.command === 'execute-line') {
-                this.runCommandAndLog(request.line);
+                this.runLine(request.line);
                 sendResponse({ status: 'ok' });
             }
 
@@ -641,6 +711,7 @@ class BMUXClient {
             this.renderLayout();
         } else {
             this.clearPaneIndexes();
+            this.cancelPrompts();
             this.ui.overlay.classList.add('hidden');
         }
     }
@@ -672,14 +743,16 @@ class BMUXClient {
             return;
         }
 
-        // A filter prompt is waiting: y / n / Escape answer it, from anywhere
-        // that is not a text field (the yes/no commands cover the rest).
-        if (this.pendingConfirm && !this.isTypingTarget() &&
-            (e.key === 'Escape' || /^[yn]$/i.test(e.key))) {
-            e.preventDefault();
-            e.stopPropagation();
-            this.resolveFilterConfirm(/^y$/i.test(e.key));
-            return;
+        // An open prompt owns the keyboard: digits pick a choice, Enter takes the
+        // primary one, y / n answer a yes/no prompt, Escape cancels. Typing in a
+        // text field (the prompt's own input, the console, a pane input) is never
+        // intercepted.
+        if (this.hasOpenPrompt() && !this.isTypingTarget()) {
+            if (this.handlePromptKey(e)) {
+                e.preventDefault();
+                e.stopPropagation();
+                return;
+            }
         }
 
         // display-panes picker: while the numbers are on screen, a digit selects
@@ -762,7 +835,7 @@ class BMUXClient {
     dispatchLine(line) {
         if (!line) return;
         if (this.isTop) {
-            this.runCommandAndLog(line);
+            this.runLine(line);
             return;
         }
         chrome.runtime.sendMessage({ command: 'relay-line', line: line });
@@ -774,7 +847,7 @@ class BMUXClient {
         this.ui.commandInput.value = '';
         this.hideCommandMode();
         if (value && value.trim()) {
-            this.runCommandAndLog(value);
+            this.runLine(value);
         }
     }
 
@@ -821,7 +894,9 @@ class BMUXClient {
         const api = {
             client: this,
             pane: pane,
-            log: (message) => this.log(message)
+            log: (message) => this.log(message),
+            ask: (prompt) => this.ask(pane, prompt),
+            askText: (prompt) => this.askText(pane, prompt)
         };
 
         try {
@@ -831,6 +906,28 @@ class BMUXClient {
             const message = error && error.message ? error.message : String(error);
             return `Error: ${message}`;
         }
+    }
+
+    /**
+     * Run one or more commands: `;` separates them, and they run one after
+     * another, each awaited, so a prompt raised by one is answered before the
+     * next starts. A failing command does not stop the chain.
+     */
+    async runLine(line) {
+        const segments = splitCommandLine(line);
+        if (!segments.length) return '';
+
+        if (segments.length === 1) {
+            return this.runCommandAndLog(segments[0]);
+        }
+
+        const results = [];
+        for (let i = 0; i < segments.length; i++) {
+            if (this.ui) this.log(`[${i + 1}/${segments.length}] ${segments[i]}`);
+            results.push(await this.runCommandAndLog(segments[i]));
+        }
+
+        return results.filter((result) => result).join('\n');
     }
 
     /**
@@ -1028,6 +1125,20 @@ class BMUXClient {
         });
     }
 
+    /** Keep the per-pane maximize glyph in step with the zoom state. */
+    refreshPaneControls() {
+        this.getPanes().forEach((pane) => {
+            const button = pane.querySelector('.bmux-pane-max-btn');
+            if (!button) return;
+            const zoomed = this.isZoomed(pane);
+            button.textContent = zoomed ? '\u2921' : '\u2922';
+            button.title = zoomed
+                ? 'Restore the layout (Shift+z)'
+                : 'Maximize this pane (Shift+z)';
+            button.classList.toggle('bmux-pane-max-btn-active', zoomed);
+        });
+    }
+
     refreshPaneTitles() {
         this.getPanes().forEach((pane) => {
             const title = pane.querySelector('.bmux-pane-title');
@@ -1207,7 +1318,9 @@ class BMUXClient {
 
         this.refreshPaneBadges();
         this.refreshPaneTitles();
+        this.refreshPaneControls();
         this.refreshStatus();
+        this.refreshPromptStack();
     }
 
     /** One draggable handle per split boundary, positioned from the last render. */
@@ -1491,6 +1604,29 @@ class BMUXClient {
         return bmuxDescribeElement(element);
     }
 
+    /** Filter an existing element list with a predicate bound to a pane document. */
+    filterElements(pane, elements, test) {
+        if (typeof test !== 'function') return (elements || []).slice();
+
+        let doc = null;
+        try {
+            const iframe = pane.querySelector('iframe');
+            doc = iframe ? (iframe.contentDocument || iframe.contentWindow.document) : null;
+        } catch (e) {
+            doc = null;
+        }
+        if (!doc) return [];
+
+        const view = doc.defaultView || window;
+        return (elements || []).filter((element) => {
+            try {
+                return !!test(element, doc, view);
+            } catch (e) {
+                return false;
+            }
+        });
+    }
+
     /** Footer status segment: "FILTER: <selector> - <element>". */
     setPaneStatus(pane, text, mode) {
         const element = pane && pane.querySelector ? pane.querySelector('.bmux-pane-status') : null;
@@ -1502,21 +1638,11 @@ class BMUXClient {
     }
 
     /**
-     * Box every element matching `selector` inside a same-origin pane, and follow
-     * the pointer with that pane's status line.
-     *
-     * The boxes live in the pane's own document, positioned in document
-     * coordinates, so they scroll with the page and cannot be disturbed by the
-     * overlay. They are removed by clearFilter (Esc, `filter -c`, navigation).
-     *
-     * Returns { ok, matched, shown } or { ok: false, message }.
-     */
-    /**
      * Query a same-origin pane for `selector`, then optionally narrow with a
      * `test(element, doc, view)` predicate (used by the filter presets, which
      * need real predicates for things like same-origin links).
      *
-     * Returns { ok, doc, iframe, elements } or { ok: false, message }.
+     * Returns { ok, doc, iframe, elements, truncated } or { ok: false, message }.
      */
     collectFilterMatches(pane, selector, test) {
         if (!this.ui || !pane) return { ok: false, message: 'No pane to filter' };
@@ -1545,6 +1671,9 @@ class BMUXClient {
             return { ok: false, message: `Invalid selector "${selector}"` };
         }
 
+        const truncated = elements.length > BMUX_FILTER_SCAN_MAX;
+        if (truncated) elements = elements.slice(0, BMUX_FILTER_SCAN_MAX);
+
         if (typeof test === 'function') {
             const view = doc.defaultView || window;
             elements = elements.filter((element) => {
@@ -1556,29 +1685,76 @@ class BMUXClient {
             });
         }
 
-        return { ok: true, doc: doc, iframe: iframe, elements: elements };
+        return { ok: true, doc: doc, iframe: iframe, elements: elements, truncated: truncated };
     }
 
     /**
      * Box every element matching `selector` inside a same-origin pane, and follow
      * the pointer with that pane's status line.
      *
+     * A filter is a list of parts (`{ selector, test, uniqueBy }`). With
+     * options.add the new part is appended to the parts already on that pane, so
+     * `filter img; filter a` boxes both. options.elements draws an explicit set
+     * (a refinement round) while keeping the parts for the mutation refresh.
+     *
      * The boxes live in the pane's own document, positioned in document
      * coordinates, so they scroll with the page and cannot be disturbed by the
      * overlay. They are removed by clearFilter (Esc, `filter -c`, navigation).
      *
-     * Returns { ok, matched, shown } or { ok: false, message }.
+     * Returns { ok, matched, shown, truncated } or { ok: false, message }.
      */
     filterPane(pane, selector, opts) {
         const options = opts || {};
 
         if (!this.ui || !pane) return { ok: false, message: 'No pane to filter' };
 
-        const collected = this.collectFilterMatches(pane, selector, options.test);
-        if (!collected.ok) return { ok: false, message: collected.message };
+        let doc = null;
+        try {
+            const iframe = pane.querySelector('iframe');
+            doc = iframe ? (iframe.contentDocument || iframe.contentWindow.document) : null;
+        } catch (e) {
+            doc = null; // cross-origin
+        }
 
-        const doc = collected.doc;
-        const matched = collected.elements;
+        if (!doc || !doc.documentElement) {
+            return {
+                ok: false,
+                message: `Cross-origin content: cannot highlight inside ${this.getPaneUrl(pane)}`
+            };
+        }
+
+        const newParts = options.parts || [{
+            selector: selector,
+            test: options.test || null,
+            uniqueBy: options.uniqueBy || null
+        }];
+
+        let parts = newParts;
+        if (options.add && this.filters.has(pane)) {
+            parts = this.filters.get(pane).parts.concat(newParts);
+        }
+
+        let matched;
+        let truncated = false;
+
+        if (Array.isArray(options.elements)) {
+            matched = options.elements.slice();
+        } else {
+            matched = [];
+            const seen = new Set();
+
+            for (let i = 0; i < parts.length; i++) {
+                const collected = this.collectFilterMatches(pane, parts[i].selector, parts[i].test);
+                if (!collected.ok) return { ok: false, message: collected.message };
+                if (collected.truncated) truncated = true;
+
+                this.uniqueElements(collected.elements, parts[i].uniqueBy).forEach((element) => {
+                    if (seen.has(element)) return;
+                    seen.add(element);
+                    matched.push(element);
+                });
+            }
+        }
 
         this.clearFilter(pane);
 
@@ -1598,12 +1774,14 @@ class BMUXClient {
         doc.documentElement.appendChild(layer);
 
         const state = {
-            selector: selector,
+            selector: parts.map((part) => part.selector).join(', '),
             label: options.label || selector,
             test: options.test || null,
+            uniqueBy: options.uniqueBy || null,
+            parts: parts,
             max: max,
             doc: doc,
-            iframe: collected.iframe,
+            iframe: pane.querySelector('iframe'),
             layer: layer,
             boxes: [],
             elements: [],
@@ -1652,11 +1830,10 @@ class BMUXClient {
         };
 
         // A key pressed with the focus inside the pane document never reaches the
-        // top frame's key handler, so Escape is caught here as well. This listener
-        // only exists while a highlight is on screen, so it cannot steal Escape
-        // from the page at any other time.
+        // top frame's key handler, so Escape is caught here as well — unless a
+        // prompt owns the keyboard at that moment.
         state.onKey = (event) => {
-            if (event.key !== 'Escape') return;
+            if (event.key !== 'Escape' || this.hasOpenPrompt(pane)) return;
             event.preventDefault();
             event.stopPropagation();
             const cleared = this.clearAllFilters();
@@ -1682,106 +1859,389 @@ class BMUXClient {
 
         state.onLeave();
 
-        return { ok: true, matched: matched.length, shown: result.shown };
+        return { ok: true, matched: matched.length, shown: result.shown, truncated: truncated };
     }
 
-    // --- filter confirmation prompt ---
+    // --- prompts: ask the user something, by click or by key ---
 
-    hasPendingConfirm() {
-        return !!this.pendingConfirm;
+    hasOpenPrompt(pane) {
+        if (pane) return this.prompts.has(pane);
+        return this.prompts.size > 0;
     }
 
     /**
-     * Ask before drawing a large or preset filter. The answer comes from the
-     * `yes` / `no` commands (y / n also work from the keyboard, and Escape
-     * cancels) so it works from the console, a pane input, or with the focus
-     * clicked inside the page.
+     * Ask a question in a floating card above the pane's footer and resolve when
+     * it is answered, cancelled, replaced or timed out.
+     *
+     * options: { question, details, choices: [{ id, label, primary }],
+     *            input: { placeholder }, timeout }
+     *
+     * Resolves { choice, text, cancelled }. `choice` is the chosen id, or null.
      */
-    requestFilterConfirm(pane, selector, opts) {
-        const options = opts || {};
-        this.clearPendingConfirm();
+    ask(pane, options) {
+        const prompt = options || {};
+        const target = pane || this.getActivePane();
 
-        const collected = this.collectFilterMatches(pane, selector, options.test);
-        const count = collected.ok ? collected.elements.length : 0;
-        const label = options.label || selector;
+        return new Promise((resolve) => {
+            if (!this.ui || !target) {
+                resolve({ choice: null, text: '', cancelled: true });
+                return;
+            }
 
-        const pending = {
-            pane: pane,
-            selector: selector,
-            label: label,
-            options: { max: options.max, test: options.test, label: label },
-            doc: collected.ok ? collected.doc : null,
-            onKey: null,
-            timer: null
-        };
-        this.pendingConfirm = pending;
+            this.cancelPrompt(target, 'replaced by a newer prompt');
 
-        this.setPaneStatus(pane, `FILTER: ${label} - ${count} match(es) — yes / no`, 'filtering');
+            const state = {
+                pane: target,
+                question: prompt.question || 'Continue?',
+                details: prompt.details || '',
+                choices: (prompt.choices || []).slice(0, BMUX_PROMPT_MAX_KEYS),
+                wantsInput: !!prompt.input,
+                inputPlaceholder: prompt.input && prompt.input.placeholder ? prompt.input.placeholder : '',
+                resolve: resolve,
+                card: null,
+                input: null,
+                doc: null,
+                onKey: null,
+                onResize: null,
+                timer: null
+            };
 
-        if (pending.doc) {
-            pending.onKey = (event) => {
-                const key = String(event.key || '');
-                if (key === 'Escape' || /^[yn]$/i.test(key)) {
+            const card = document.createElement('div');
+            card.className = 'bmux-prompt';
+            card.setAttribute('role', 'dialog');
+            card.setAttribute('aria-live', 'polite');
+
+            const question = document.createElement('div');
+            question.className = 'bmux-prompt-question';
+            question.textContent = state.question;
+            card.appendChild(question);
+
+            if (state.details) {
+                const details = document.createElement('div');
+                details.className = 'bmux-prompt-details';
+                details.textContent = state.details;
+                card.appendChild(details);
+            }
+
+            if (state.choices.length) {
+                const row = document.createElement('div');
+                row.className = 'bmux-prompt-choices';
+
+                state.choices.forEach((choice, index) => {
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.className = 'bmux-prompt-btn' + (choice.primary ? ' primary' : '');
+                    button.dataset.choice = choice.id;
+                    button.textContent = choice.label;
+
+                    const key = document.createElement('kbd');
+                    key.textContent = String(index + 1);
+                    button.appendChild(key);
+
+                    button.addEventListener('click', (event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        this.resolvePrompt(target, choice.id);
+                    });
+
+                    row.appendChild(button);
+                });
+
+                card.appendChild(row);
+            }
+
+            if (state.wantsInput) {
+                const row = document.createElement('div');
+                row.className = 'bmux-prompt-input-row';
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'bmux-prompt-input';
+                input.placeholder = state.inputPlaceholder;
+
+                const submit = document.createElement('button');
+                submit.type = 'button';
+                submit.className = 'bmux-prompt-btn primary';
+                submit.textContent = 'OK';
+
+                const send = (event) => {
+                    if (event) {
+                        event.preventDefault();
+                        event.stopPropagation();
+                    }
+                    this.resolvePrompt(target, 'text', input.value);
+                };
+
+                input.addEventListener('keydown', (event) => {
+                    if (event.key === 'Enter') send(event);
+                    else if (event.key === 'Escape') {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        this.resolvePrompt(target, null);
+                    }
+                });
+                submit.addEventListener('click', send);
+
+                row.appendChild(input);
+                row.appendChild(submit);
+                card.appendChild(row);
+
+                state.input = input;
+            }
+
+            this.ui.overlay.appendChild(card);
+            state.card = card;
+            this.prompts.set(target, state);
+
+            this.positionPrompt(state);
+
+            state.onResize = () => this.positionPrompt(state);
+            window.addEventListener('resize', state.onResize);
+
+            // Keys pressed with the focus inside the pane never reach the top
+            // frame, so the prompt listens on the pane's document too.
+            try {
+                state.doc = target.querySelector('iframe') ? target.querySelector('iframe').contentDocument : null;
+            } catch (e) {
+                state.doc = null;
+            }
+
+            if (state.doc) {
+                state.onKey = (event) => {
+                    if (!this.handlePromptKey(event)) return;
                     event.preventDefault();
                     event.stopPropagation();
-                    this.resolveFilterConfirm(/^y$/i.test(key));
+                };
+                try {
+                    state.doc.addEventListener('keydown', state.onKey, true);
+                } catch (e) {
+                    state.onKey = null;
                 }
-            };
+            }
+
+            const timeout = prompt.timeout === undefined ? BMUX_PROMPT_TIMEOUT : prompt.timeout;
+            if (timeout > 0 && !state.wantsInput) {
+                state.timer = setTimeout(() => {
+                    this.cancelPrompt(target, 'timed out');
+                }, timeout);
+            }
+
+            if (state.input) {
+                state.input.focus();
+            }
+
+            this.refreshPromptStack();
+        });
+    }
+
+    /** Ask for a line of text. Resolves { text, cancelled }. */
+    askText(pane, options) {
+        const prompt = options || {};
+        return this.ask(pane, {
+            question: prompt.question || 'Value?',
+            details: prompt.details || '',
+            input: { placeholder: prompt.placeholder || 'type a value and press Enter' },
+            choices: [{ id: 'cancel', label: 'Cancel' }],
+            timeout: 0
+        }).then((answer) => ({
+            text: answer.choice === 'text' ? String(answer.text || '').trim() : '',
+            cancelled: answer.cancelled || answer.choice !== 'text'
+        }));
+    }
+
+    /** Answer the open prompt for a pane with a choice id. */
+    resolvePrompt(pane, choiceId, text) {
+        const state = this.prompts.get(pane);
+        if (!state) return false;
+
+        this.prompts.delete(pane);
+        if (state.timer) clearTimeout(state.timer);
+        if (state.onResize) window.removeEventListener('resize', state.onResize);
+
+        if (state.onKey && state.doc) {
             try {
-                pending.doc.addEventListener('keydown', pending.onKey, true);
+                state.doc.removeEventListener('keydown', state.onKey, true);
             } catch (e) {
-                pending.onKey = null;
+                // the pane document may already be gone
             }
         }
 
-        pending.timer = setTimeout(() => {
-            this.clearPendingConfirm('prompt timed out, nothing drawn');
-        }, BMUX_CONFIRM_TIMEOUT);
+        if (state.card && state.card.parentNode) state.card.parentNode.removeChild(state.card);
 
-        return { ok: true, count: count };
-    }
+        state.resolve({
+            choice: choiceId == null ? null : choiceId,
+            text: text == null ? '' : String(text),
+            cancelled: choiceId == null
+        });
 
-    /** Answer a pending filter prompt. */
-    resolveFilterConfirm(accept) {
-        const pending = this.pendingConfirm;
-        if (!pending) return { ok: false, message: 'Nothing to confirm' };
-
-        this.clearPendingConfirm();
-
-        if (!accept) {
-            this.setPaneStatus(pending.pane, `FILTER: ${pending.label} — cancelled`, 'filtering');
-            return { ok: true, applied: false, label: pending.label };
-        }
-
-        const result = this.filterPane(pending.pane, pending.selector, pending.options);
-        if (!result.ok) return { ok: false, message: result.message };
-
-        return {
-            ok: true,
-            applied: true,
-            label: pending.label,
-            matched: result.matched,
-            shown: result.shown
-        };
-    }
-
-    clearPendingConfirm(reason) {
-        const pending = this.pendingConfirm;
-        if (!pending) return false;
-
-        this.pendingConfirm = null;
-        if (pending.timer) clearTimeout(pending.timer);
-
-        if (pending.onKey && pending.doc) {
-            try {
-                pending.doc.removeEventListener('keydown', pending.onKey, true);
-            } catch (e) {
-                // document already gone
-            }
-        }
-
-        if (reason) this.log(`Filter prompt: ${reason}`);
+        this.refreshPromptStack();
         return true;
+    }
+
+    /** Drop a pane's open prompt (kill, navigation, reset, replacement). */
+    cancelPrompt(pane, reason) {
+        if (!this.prompts.has(pane)) return false;
+        if (reason) this.log(`Prompt cancelled: ${reason}`);
+        return this.resolvePrompt(pane, null);
+    }
+
+    cancelPrompts(pane) {
+        if (pane) return this.cancelPrompt(pane, 'pane went away');
+        Array.from(this.prompts.keys()).forEach((target) => this.cancelPrompt(target, 'reset'));
+        return true;
+    }
+
+    /** Answer whichever prompt is open (used by yes / no). */
+    answerOpenPrompt(choiceId, pane) {
+        let target = null;
+
+        if (pane && this.prompts.has(pane)) {
+            target = pane;
+        } else {
+            const open = Array.from(this.prompts.keys());
+            if (!open.length) return { ok: false, message: 'Nothing to confirm' };
+            if (open.length > 1) return { ok: false, message: 'More than one prompt is open: answer it on its pane' };
+            target = open[0];
+        }
+
+        const state = this.prompts.get(target);
+        const wanted = state.choices.some((choice) => choice.id === choiceId)
+            ? choiceId
+            : (state.choices.find((choice) => choice.primary) || state.choices[0] || {}).id;
+
+        this.resolvePrompt(target, wanted);
+        return { ok: true, choice: wanted };
+    }
+
+    /** Keyboard handling shared by the top frame and the pane documents. */
+    handlePromptKey(event) {
+        const pane = this.findPromptPaneForEvent(event);
+        if (!pane) return false;
+
+        const state = this.prompts.get(pane);
+        if (!state) return false;
+
+        if (event.key === 'Escape') {
+            this.resolvePrompt(pane, null);
+            return true;
+        }
+
+        const primary = state.choices.find((choice) => choice.primary) || state.choices[0];
+
+        if (event.key === 'Enter') {
+            if (state.wantsInput && document.activeElement === state.input) return false;
+            if (primary) {
+                this.resolvePrompt(pane, primary.id);
+                return true;
+            }
+            return false;
+        }
+
+        if (/^[1-9]$/.test(event.key)) {
+            const choice = state.choices[Number(event.key) - 1];
+            if (choice) {
+                this.resolvePrompt(pane, choice.id);
+                return true;
+            }
+            return false;
+        }
+
+        const letter = String(event.key || '').toLowerCase();
+        if (letter === 'y' || letter === 'n') {
+            const wanted = letter === 'y' ? 'yes' : 'no';
+            const choice = state.choices.find((entry) => entry.id === wanted);
+            if (choice) {
+                this.resolvePrompt(pane, choice.id);
+                return true;
+            }
+            if (letter === 'y' && primary) {
+                this.resolvePrompt(pane, primary.id);
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /** Which pane's prompt a key event belongs to (top frame, or a pane doc). */
+    findPromptPaneForEvent(event) {
+        if (!this.prompts.size) return null;
+
+        // One open prompt: it owns the keys.
+        if (this.prompts.size === 1) return this.prompts.keys().next().value;
+
+        // Several: resolve by which document the key came from.
+        const doc = event && event.target && event.target.ownerDocument
+            ? event.target.ownerDocument
+            : (event && event.view ? event.view.document : null);
+
+        const panes = Array.from(this.prompts.keys());
+        for (let i = 0; i < panes.length; i++) {
+            const iframe = panes[i].querySelector('iframe');
+            try {
+                if (iframe && doc && iframe.contentDocument === doc) return panes[i];
+            } catch (e) {
+                // cross-origin pane: cannot compare documents
+            }
+        }
+
+        return null;
+    }
+
+    /** Anchor a prompt card just above its pane's footer. */
+    positionPrompt(state) {
+        if (!state || !state.card) return;
+
+        const pane = state.pane;
+        const card = state.card;
+        const paneRect = pane.getBoundingClientRect();
+        const footer = pane.querySelector('.bmux-pane-footer');
+        const footerRect = footer ? footer.getBoundingClientRect() : paneRect;
+
+        const width = Math.max(220, Math.min(paneRect.width - 16, 560));
+        const left = Math.max(8, paneRect.left + 8);
+        const bottom = Math.max(8, window.innerHeight - footerRect.top + 8);
+
+        card.style.width = `${Math.round(width)}px`;
+        card.style.left = `${Math.round(left)}px`;
+        card.style.bottom = `${Math.round(bottom)}px`;
+    }
+
+    refreshPromptStack() {
+        Array.from(this.prompts.values()).forEach((state) => this.positionPrompt(state));
+    }
+
+    /** Keep the first element per de-dupe key (`href`, `src` or the text). */
+    uniqueElements(elements, uniqueBy) {
+        if (!uniqueBy) return elements;
+
+        const seen = new Set();
+        const kept = [];
+
+        elements.forEach((element) => {
+            let key = '';
+            try {
+                if (uniqueBy === 'src') {
+                    key = element.getAttribute ? (element.getAttribute('src') || '') : '';
+                } else if (uniqueBy === 'text') {
+                    key = (element.textContent || '').trim().replace(/\s+/g, ' ');
+                } else {
+                    key = element.getAttribute ? (element.getAttribute('href') || '') : '';
+                }
+            } catch (e) {
+                key = '';
+            }
+
+            if (!key) {
+                kept.push(element);
+                return;
+            }
+            if (seen.has(key)) return;
+            seen.add(key);
+            kept.push(element);
+        });
+
+        return kept;
     }
 
     /** Draw (or re-draw) one box per match, capped by the filter's max. */
@@ -1823,7 +2283,11 @@ class BMUXClient {
         return { matched: matched.length, shown: shown.length };
     }
 
-    /** Re-query the selector and redraw, for pages that change while filtered. */
+    /**
+     * Re-query every part and redraw, for pages that change while filtered.
+     * Refinement rounds narrow the drawn set without changing the parts, so a
+     * refresh re-broadens the boxes to the selector set.
+     */
     refreshFilter(pane) {
         const state = this.filters.get(pane);
         if (!state) return null;
@@ -1834,13 +2298,24 @@ class BMUXClient {
             return null;
         }
 
-        const collected = this.collectFilterMatches(pane, state.selector, state.test);
-        if (!collected.ok || collected.doc !== doc) {
-            this.clearFilter(pane);
-            return null;
+        const merged = [];
+        const seen = new Set();
+
+        for (let i = 0; i < state.parts.length; i++) {
+            const collected = this.collectFilterMatches(pane, state.parts[i].selector, state.parts[i].test);
+            if (!collected.ok || collected.doc !== doc) {
+                this.clearFilter(pane);
+                return null;
+            }
+
+            this.uniqueElements(collected.elements, state.parts[i].uniqueBy).forEach((element) => {
+                if (seen.has(element)) return;
+                seen.add(element);
+                merged.push(element);
+            });
         }
 
-        const result = this.redrawFilterBoxes(pane, state, collected.elements);
+        const result = this.redrawFilterBoxes(pane, state, merged);
         this.setPaneStatus(pane,
             `FILTER: ${state.label} · ${state.elements.length} match(es)`, 'filtering');
         return result;
@@ -1996,6 +2471,7 @@ class BMUXClient {
 
         this.clearPaneIndexes();
         this.clearFilter(target);
+        this.cancelPrompt(target, 'its pane was killed');
         if (this.zoomedPane === target) this.zoomedPane = null;
         if (this.lastActivePane === target) this.lastActivePane = null;
 
@@ -2029,6 +2505,7 @@ class BMUXClient {
     renderWindow() {
         this.clearPaneIndexes();
         this.clearAllFilters();
+        this.cancelPrompts();
         this.zoomedPane = null;
         this.layoutName = null;
         this.lastActivePane = null;
@@ -2092,6 +2569,13 @@ class BMUXClient {
         consoleButton.textContent = '\u25B8';
         consoleButton.title = "Show this pane's console (log toggle)";
 
+        // Per-pane maximize/restore: the on-screen form of Ctrl+b, Shift+z.
+        const maxButton = document.createElement('button');
+        maxButton.className = 'bmux-pane-max-btn';
+        maxButton.type = 'button';
+        maxButton.textContent = '\u2922';
+        maxButton.title = 'Maximize this pane (Shift+z)';
+
         const badge = document.createElement('span');
         badge.className = 'bmux-pane-badge';
         badge.title = 'Pane number and id (focus-pane <number|%id>)';
@@ -2101,6 +2585,7 @@ class BMUXClient {
         cmdContainer.appendChild(title);
         cmdContainer.appendChild(status);
         cmdContainer.appendChild(consoleButton);
+        cmdContainer.appendChild(maxButton);
         cmdContainer.appendChild(badge);
 
         // Console panel: a drag grip on its top edge, then the scrollback log.
@@ -2127,6 +2612,14 @@ class BMUXClient {
             this.togglePaneConsole(pane);
         });
 
+        maxButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.runCommand('resize-pane -Z', { pane: pane }).then((result) => {
+                if (result) this.log(result);
+            });
+        });
+
         grip.addEventListener('mousedown', (event) => this.startConsoleResize(event, pane));
         grip.addEventListener('dblclick', () => this.setPaneConsoleHeight(pane, BMUX_CONSOLE_HEIGHT));
 
@@ -2136,6 +2629,7 @@ class BMUXClient {
         iframe.addEventListener('load', () => {
             this.refreshPaneTitles();
             if (this.filters.has(pane)) this.clearFilter(pane);
+            this.cancelPrompt(pane, 'the pane navigated');
         });
 
         // Bind command input
@@ -2160,16 +2654,20 @@ class BMUXClient {
      * (it used to auto-collapse after five seconds, with no way back).
      */
     async runPaneCommand(pane, cmdText) {
-        this.appendPaneOutput(pane, `> ${cmdText}`, 'command');
+        const segments = splitCommandLine(cmdText);
+        if (!segments.length) return '';
+
         this.setPaneConsoleOpen(pane, true);
 
-        const result = await this.runCommand(cmdText, { pane: pane });
-
-        if (result) {
-            this.appendPaneOutput(pane, result, 'result');
+        const results = [];
+        for (let i = 0; i < segments.length; i++) {
+            this.appendPaneOutput(pane, `> ${segments[i]}`, 'command');
+            const result = await this.runCommand(segments[i], { pane: pane });
+            if (result) this.appendPaneOutput(pane, result, 'result');
+            results.push(result);
         }
 
-        return result;
+        return results.filter((result) => result).join('\n');
     }
 
     // --- pane console (the scrollback under each pane's input) ---

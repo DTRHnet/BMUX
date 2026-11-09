@@ -184,6 +184,10 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `setControlMode(on)` | Set Control Mode |
 | `showCommandMode()` / `hideCommandMode()` | Open/close the `:` line |
 | `log(message)` | Append to the debug console |
+| `ask({ question, details, choices })` | Ask a question in a card; resolves `{ choice, text, cancelled }` |
+| `askText({ question, placeholder })` | Ask for a line of text; resolves `{ text, cancelled }` |
+| `answerOpenPrompt(choiceId, pane)` | Programmatically answer the open prompt |
+| `hasOpenPrompt(pane)` | Whether a prompt is open |
 
 ## Adding a filter preset
 
@@ -209,6 +213,79 @@ const BMUX_FILTER_PRESETS = {
 selector expresses. A `test(element, doc, view)` predicate runs inside the pane
 document, and returning `false` (or throwing) simply drops the element. Add the
 preset, reload, and both `filter cards` and `filter --presets` pick it up.
+
+## Asking the user
+
+Commands can ask questions and get clickable answers. `runCommand` awaits the
+command, so just `await api.ask(...)` and carry on:
+
+```javascript
+'delete-comments': {
+    scope: 'pane',
+    description: 'Delete every comment element after confirming',
+    usage: 'delete-comments',
+    execute: async function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
+        const doc = safeGetIframeDocument(pane.querySelector('iframe'));
+        if (!doc) return 'Error: Cross-origin content';
+
+        const comments = Array.from(doc.querySelectorAll('.comment'));
+        if (!comments.length) return 'No comments here';
+
+        const answer = await api.ask({
+            question: `Delete ${comments.length} comment(s)?`,
+            details: '.comment elements in this pane',
+            choices: [
+                { id: 'yes', label: 'Delete them', primary: true },
+                { id: 'no', label: 'Keep them' }
+            ]
+        });
+
+        if (answer.cancelled || answer.choice !== 'yes') {
+            return 'Cancelled: nothing deleted';
+        }
+
+        comments.forEach((element) => element.remove());
+        return `Deleted ${comments.length} comment(s)`;
+    }
+}
+```
+
+Text questions use the same card:
+
+```javascript
+const asked = await api.askText({ question: 'Keep only matches containing…', placeholder: 'price' });
+if (asked.cancelled) return 'Nothing typed';
+const needle = asked.text.toLowerCase();
+```
+
+What you get for free:
+
+- a card above the pane's footer with real buttons, digit shortcuts (`1`…`9`),
+  `Enter` for the primary choice, `y` / `n` on yes/no cards, and `Esc` to cancel;
+- `yes` / `no` commands answer the open prompt, mapping a missing choice onto the
+  primary button;
+- the prompt is cancelled for you when the pane is killed, navigates, or the
+  overlay resets, so an awaited command can never hang;
+- yes/no cards time out after 15 seconds (resolved as cancelled); text cards wait;
+- one prompt per pane — a newer `ask` replaces the older one.
+
+Reach for `api.ask` whenever a command would otherwise need a second command to
+finish its job (the filter refinement loop works exactly this way).
+
+## Chaining commands
+
+Any command can be chained from the UI with `;` — you get the behaviour for free by
+returning a string like every other command. Two things to keep in mind:
+
+- Segments run **awaited**, so an `await api.ask(...)` in one segment blocks the
+  next segment until it is answered. Do not leave a prompt un-answered forever in
+  a chain; give it a `timeout`.
+- A failure (an `Error: …` string) does not stop the chain. If a command must stop
+  a chain, that is not supported yet — return a message that tells the user to
+  re-run the rest.
 
 ## Adding a key binding
 

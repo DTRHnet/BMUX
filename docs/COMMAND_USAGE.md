@@ -93,7 +93,69 @@ keystrokes through to it instead of running bindings.
 
 ---
 
-## 2. Mouse
+## 2. Chaining commands
+
+`;` runs commands one after another. Every entry point understands it — the debug
+console, the `:` line, a pane input, and key bindings:
+
+```
+> filter img; filter a
+> split-window -h; list-panes
+> filter -c; filter links --in main
+```
+
+- Segments run **awaited**: a prompt raised by one segment is answered before the
+  next starts.
+- A failing segment does not stop the chain (shell `;` semantics). Each segment is
+  echoed on its own line with its own result.
+- `\;` is a literal semicolon, and a `;` inside quotes or `[] () {}` does not
+  split, so `filter a[href="x;y"]` stays one command and `rename-pane a\;b` keeps
+  the semicolon in the title.
+- **Filters accumulate across segments**: `filter img; filter a` boxes both sets.
+  `--replace` starts a clean set; `filter -c` clears.
+- `&&` (stop on error) is not implemented yet; a chain is always “run all”.
+
+---
+
+## 3. Prompts
+
+When a command needs an answer, it raises a card anchored above the pane's footer.
+The card, its choices and its keyboard shortcuts are identical for every command —
+`filter` is the first user of the API, and command authors get the same thing via
+`api.ask` / `api.askText` (see [ADDING_COMMANDS.md](ADDING_COMMANDS.md)).
+
+```
+┌─ 23 links found and labelled. Specify harder constraints? ─┐
+│ links (a[href]) · 23 box(es) on screen                     │
+│ [ Yes, refine 1 ]   [ No, keep these 2 ]                   │
+└────────────────────────────────────────────────────────────┘
+```
+
+How to answer:
+
+| Input | Effect |
+|-------|--------|
+| Click a button | Chooses that option |
+| `1` … `9` | Chooses the matching button |
+| `Enter` | Takes the primary (highlighted) choice |
+| `y` / `n` | Answers a yes/no card |
+| `yes` / `no` (typed in any input) | Same as `y` / `n`; maps a missing choice onto the primary button |
+| `Esc` | Cancels the prompt |
+
+Rules:
+
+- The card never steals focus from a text field, and keys pressed with the focus
+  clicked **inside the pane** work too.
+- One prompt per pane; a newer question replaces the older one.
+- A prompt is cancelled — never left hanging — when its pane is killed, its iframe
+  navigates, the overlay is reset (`new-window`, `detach`), or a newer prompt
+  replaces it.
+- Yes/no cards time out after 15 seconds (cancelled). Text cards wait
+  indefinitely.
+
+---
+
+## 4. Mouse
 
 | Action | Result |
 |--------|--------|
@@ -105,6 +167,7 @@ keystrokes through to it instead of running bindings.
 | Drag a pane console's top edge | Resize that console (minimum 40px, max 70% of the pane) |
 | Double-click a pane console's edge | Reset its height to 140px |
 | Drag the floating console's corner | Resize the floating console |
+| Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
 
 Handles are 8 px wide with a hairline marker and a `col-resize`/`row-resize`
 cursor. While dragging, a shield covers the overlay so the pointer cannot slip
@@ -113,7 +176,7 @@ drag is logged, e.g. `Resize: row ratio 0.33`.
 
 ---
 
-## 3. Overlay commands
+## 5. Overlay commands
 
 Overlay commands manage the whole overlay. They work with or without a pane.
 
@@ -281,7 +344,7 @@ Hidden aliases (`y`, `n`) are left out.
 
 ---
 
-## 4. Pane commands
+## 6. Pane commands
 
 Pane commands act on one pane: the pane whose input you typed into, or the active
 pane when run from the console or the `:` line.
@@ -410,18 +473,64 @@ A preset, or any filter matching more than 25 elements, asks before drawing:
 Boxed 2 of 2 match(es) for links
 ```
 
-- `yes` / `no` answer it (the hidden aliases `y` / `n` do the same), so it works
-  from the console, a pane input, or the keyboard.
-- `y` / `n` / `Esc` answer it directly when the focus is not in a text field —
-  including with the focus clicked inside the page.
-- An unanswered prompt times out after 15 seconds and draws nothing.
-- `filter -y links` skips the prompt entirely, for scripts.
+- `yes` / `no` (typed in any input; `y` / `n` are hidden aliases) answer whatever
+  prompt is open, mapping a missing choice onto the card's primary button.
+- Clicking, digits, `Enter`, `y` / `n` and `Esc` all work as described in
+  [Prompts](#3-prompts).
+- Yes/no cards time out after 15 seconds (cancelled; the boxes stay as drawn).
+- `filter -y links` skips the questions entirely, for scripts.
+
+### Narrowing the result down
+
+A preset, or a result set larger than 25, **draws and labels first**, then offers
+to narrow it:
+
+```
+> filter links
+… 23 match(es) boxed …
+┌─ 23 links found and labelled. Specify harder constraints? ─┐
+│ [ Yes, refine 1 ]   [ No, keep these 2 ]                    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+*Yes, refine* opens the narrowing card:
+
+| Choice | Effect | Flag |
+|--------|--------|------|
+| Inside a container… | keep matches inside a selector you type | `--in <selector>` |
+| Exclude a container… | drop matches inside a selector you type | `--not-in <selector>` |
+| Text contains… | keep matches whose text contains a word | `--text <word>` |
+| Visible only | drop `display:none` / `visibility:hidden` / `opacity:0` / no-box elements | `--visible` |
+| Unique targets | de-duplicate by `href`, `src` or text | `--unique [href\|src\|text]` |
+| Keep these | stop refining, leave the boxes | `-y` (skip all questions) |
+| Cancel filter | clear the boxes | `filter -c` |
+
+Each step intersects the current set, re-labels the boxes and asks again (at most
+6 rounds). The same narrowing works without the questions, which is what to use in
+scripts:
+
+```
+> filter links --in main --text price --visible --unique href
+> filter images --in main --not-in .sidebar
+```
+
+### Accumulating filters
+
+Filtering a pane that is already boxed **adds** to the set instead of replacing it,
+which is what makes a chain useful:
+
+```
+> filter img; filter a        # images and links boxed together
+> filter -c; filter a         # start clean, then only links
+> filter links --replace       # replace without clearing first
+```
 
 Clearing:
 
 - **`Esc`** clears the highlights before anything else consumes Escape — from the
   top frame, from the debug console or a pane input, and with the focus clicked
-  inside the pane (a second `Esc` then leaves Control Mode as usual).
+  inside the pane (a second `Esc` then leaves Control Mode as usual). While a
+  prompt is open, `Esc` cancels the prompt instead.
 - **`filter -c`** clears them from the command surface.
 
 Same-origin only: a cross-origin pane cannot be measured or written into, so the
@@ -477,7 +586,7 @@ Clears the pane's output area and prints nothing.
 
 ---
 
-## 5. Active pane context
+## 7. Active pane context
 
 The debug console and the `:` line always act on the **active pane**:
 
@@ -498,7 +607,7 @@ Ways to change it:
 
 ---
 
-## 6. Error handling
+## 8. Error handling
 
 The dispatcher never throws at you; every failure comes back as text.
 
@@ -533,7 +642,7 @@ Error: <message from the command>
 
 ---
 
-## 7. Workflow examples
+## 9. Workflow examples
 
 ### Sidebar layout by command
 
@@ -601,7 +710,7 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 8. Tips
+## 10. Tips
 
 1. **`list-panes` first** whenever focus or sizes surprise you.
 2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with
@@ -618,7 +727,7 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 9. Where commands live
+## 11. Where commands live
 
 | File | Responsibility |
 |------|----------------|

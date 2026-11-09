@@ -149,7 +149,8 @@
 }
 
 /* Console toggle in the pane footer */
-.bmux-pane-console-btn {
+.bmux-pane-console-btn,
+.bmux-pane-max-btn {
   background: transparent;
   border: 1px solid #444;
   border-radius: 4px;
@@ -161,9 +162,102 @@
   cursor: pointer;
 }
 
-.bmux-pane-console-btn:hover {
+.bmux-pane-console-btn:hover,
+.bmux-pane-max-btn:hover {
   border-color: #00aaff;
   color: #ffffff;
+}
+
+/* Maximized pane: the button shows the contract glyph and stays lit. */
+.bmux-pane-max-btn-active {
+  border-color: #00aaff;
+  color: #ffffff;
+  background: rgba(0, 170, 255, 0.22);
+}
+
+/* Prompt card: questions raised by a command, answered by click or by key. */
+.bmux-prompt {
+  position: absolute;
+  z-index: 8;
+  max-width: 560px;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  background: rgba(18, 22, 28, 0.97);
+  border: 1px solid #00aaff;
+  border-radius: 8px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.55);
+  color: #e8eef5;
+  font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  font-size: 12px;
+}
+
+.bmux-prompt-question {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
+.bmux-prompt-details {
+  margin-bottom: 8px;
+  color: #8fa3b8;
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
+}
+
+.bmux-prompt-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.bmux-prompt-btn {
+  display: inline-flex;
+  align-items: center;
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 6px;
+  color: #dfe8f2;
+  font-size: 11px;
+  padding: 5px 9px;
+  cursor: pointer;
+}
+
+.bmux-prompt-btn:hover {
+  border-color: #00aaff;
+  color: #ffffff;
+}
+
+.bmux-prompt-btn.primary {
+  background: #00aaff;
+  border-color: #00aaff;
+  color: #01131c;
+  font-weight: 600;
+}
+
+.bmux-prompt-btn kbd {
+  margin-left: 6px;
+  padding: 0 3px;
+  font-size: 9px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  opacity: 0.7;
+}
+
+.bmux-prompt-input-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.bmux-prompt-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  background: #0d1218;
+  border: 1px solid #345;
+  border-radius: 4px;
+  color: #ffffff;
+  font-family: 'Consolas', monospace;
+  font-size: 11px;
 }
 
 /* Resize grip for the floating debug console */
