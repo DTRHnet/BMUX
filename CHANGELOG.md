@@ -5,6 +5,96 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-09
+
+The layout survives a reload, and named layouts can be saved and restored.
+Persistence finally exists, is validated, and can be switched off.
+
+### Added
+
+- **Per-tab layout restore.** The layout of the current tab is saved as it changes
+  and restored on the next load: the split tree with its ratios, each pane's URL,
+  custom titles, which pane was focused, which was maximized, and each pane
+  console's open state and height.
+  - stored in `chrome.storage.session` under `layout:tab:<tabId>`, so it survives
+    a reload or navigation and dies with the browser;
+  - saved on a 400 ms debounce from every structural change, plus immediately when
+    the tab is hidden or unloaded;
+  - restored **before the first pane is drawn**, so the overlay never flashes an
+    empty layout, with an 800 ms ceiling if the service worker is asleep;
+  - pane ids and the id counter are restored, so old and new panes never collide.
+- **Named layouts** in `chrome.storage.local`, per site origin, explicitly saved:
+  - `save-layout [name]`, `restore-layout <name>`, `list-layouts`,
+    `delete-layout <name|--all>`;
+  - they survive browser restarts, and at most 30 are kept per origin (oldest
+    dropped first).
+- **`persist [on|off|status]`** — the auto-restore switch. `off` clears this tab's
+  snapshot and stops all writes; named layouts are untouched because they were
+  explicit saves. `status` also says where the current layout came from
+  (`fresh`, `session` or `named`).
+- **Validation** in the background: snapshots are checked whole before being
+  stored or applied — version, tree shape, split ratios in range, URL strings, at
+  most 12 panes, depth ≤ 32, ≤ 64 KB. A rejected snapshot is dropped, never
+  partly applied.
+- **Housekeeping**: closing a tab deletes its snapshot, and on browser startup any
+  session layout whose tab no longer exists is pruned.
+
+### Changed
+
+- **The background service worker is now a real component**: it relays command
+  lines (unchanged), owns all persistence, and knows which tab is asking. The dead
+  `STATE` / `loadState` / `saveState` / `createSession` / `get-state` /
+  `new-session` machinery — which was written once on install and read by nobody —
+  is gone.
+- The popup's "New Session" button became **"Reset Layout"** (`new-window`).
+- `unlimitedStorage` was dropped from the manifest: snapshots are a few KB, so the
+  default quota is ample. Fewer permissions, same behaviour.
+- Content scripts never touch `chrome.storage` directly: `chrome.storage.session`
+  is not readable from them without `setAccessLevel`, and the background already
+  knows the tab id.
+- `fetchState` / `updateUI` — the code that logged "State Fetched" and did nothing
+  — are gone.
+
+### Fixed
+
+- Reloading a page no longer destroys your layout.
+- A corrupt, unsupported or oversized stored layout can no longer break startup:
+  it is ignored, logged, and a fresh single pane is rendered.
+- A pane id collision after restoring into a page with more panes than before is
+  impossible: the counter is restored to at least the highest id seen.
+
+### Notes
+
+- **Restoring recreates panes, so pages load fresh.** Scroll position, form input
+  and in-page JS state cannot be carried over — that is a browser constraint, not a
+  shortcut.
+- **What is not persisted**: prompts, filter boxes, focus history and console
+  scrollback (transient UI). Console open/height *is* persisted.
+- Stored layouts contain plaintext URLs and titles of pages you opened, in your
+  own browser profile (never `sync`, never uploaded). `persist off` clears the tab
+  snapshot; `delete-layout` removes named ones.
+- Extension reload/update clears `storage.session`, so the tab layout is lost —
+  named layouts remain.
+- On a browser without `storage.session`, the tab layer falls back to
+  `storage.local` with a 6 hour expiry.
+
+### Verification
+
+- `node --check` clean; all files kept CRLF; `manifest.json` parses.
+- jsdom: **644 checks** pass, with the real `background/main.js` loaded as a second
+  window and wired to in-memory `storage.session` / `storage.local`, so the tests
+  exercise the shipped persistence path end to end: round trip (ratios, titles,
+  zoom, active pane, ids, consoles), reload via a second content window, named
+  layouts (save/list/restore/delete, origin scoping, surviving a reload), the off
+  switch, corrupt/junk/unsupported/malformed snapshots, pane/depth/ratio/version
+  caps, tab-close cleanup, startup pruning, exit saves, and debounce coalescing.
+- Chromium 150 with the extension unpacked: **87 checks** pass, including a real
+  `page.reload()` restoring two panes at a 30/70 split with the custom title and
+  the maximize state, pages loading fresh after restore, `save-layout work` →
+  `new-window` → `restore-layout work`, and `persist off` → reload → one pane.
+- Not verified: a real browser restart (the harness cannot restart Chromium), the
+  `storage.session` fallback path on a browser that lacks it, and touch input.
+
 ## [0.4.0] - 2026-11-09
 
 Commands can be chained, commands can ask questions you can click, filters narrow
@@ -486,7 +576,7 @@ every entry point shares.
 
 ---
 
-## Planned for 0.5.0
+## Planned for 0.6.0
 
 - Floating panes (a pane that overlays the layout instead of taking space)
 - `break-pane` / `join-pane`

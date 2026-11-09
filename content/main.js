@@ -66,6 +66,12 @@ const BMUX_FILTER_SCAN_MAX = 5000;
 // Digit-key shortcuts for prompt choices stop at 9.
 const BMUX_PROMPT_MAX_KEYS = 9;
 
+// Layout persistence: debounce for saves, and how long to wait for the saved
+// layout before rendering a fresh one anyway.
+const BMUX_SAVE_DEBOUNCE = 400;
+const BMUX_RESTORE_TIMEOUT = 800;
+const SNAPSHOT_VERSION = 1;
+
 // Pane console: height when first opened, the drag limits, and scrollback cap.
 const BMUX_CONSOLE_HEIGHT = 140;
 const BMUX_CONSOLE_MIN_HEIGHT = 40;
@@ -397,6 +403,11 @@ class BMUXClient {
         this.filters = new Map();  // pane -> filter highlight state
         this.prompts = new Map();  // pane -> open prompt card
 
+        this.persistEnabled = true;   // auto-restore switch (from the background)
+        this.restoring = false;       // true while a snapshot is being applied
+        this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
+        this.saveTimer = null;
+
         this.ui = null;
         this.handles = [];
 
@@ -410,9 +421,11 @@ class BMUXClient {
         this.setupListeners();
         this.log("Initialized. waiting for Alt+Shift+B");
 
-        // If top, fetch initial state
+        // Restore the saved layout before the first pane is drawn, so nothing
+        // flashes: loadPersistedLayout() renders either the snapshot or a fresh
+        // window.
         if (this.isTop) {
-            this.fetchState();
+            this.loadPersistedLayout();
         }
     }
 
@@ -588,8 +601,8 @@ class BMUXClient {
         this.ui.debugContainer.appendChild(debugGrip);
         this.makeResizable(this.ui.debugContainer, debugGrip);
 
-        // Initial Render
-        this.renderWindow();
+        // The first render happens in loadPersistedLayout(), after the saved
+        // layout has been read, so a restore never flashes an empty overlay.
     }
 
     /** Resize a fixed-position panel by dragging a corner grip. */
@@ -686,16 +699,298 @@ class BMUXClient {
         // keeps every pane proportional to the new size. Filter boxes are in
         // document coordinates, so they are re-measured as well.
         window.addEventListener('resize', () => {
-            if (this.ui) this.renderLayout();
+            if (this.ui) this.renderLayout({ persist: false });
             Array.from(this.filters.keys()).forEach((pane) => this.refreshFilter(pane));
+        });
+
+        // Leaving the page: saving on visibility change is the reliable hook (an
+        // MV3 tab can be torn down without a pagehide that finishes its work);
+        // pagehide stays as the backstop.
+        const saveOnExit = (reason) => {
+            if (this.saveTimer) clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+            this.saveNow(reason);
+        };
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) saveOnExit('hidden');
+        });
+        window.addEventListener('pagehide', () => saveOnExit('pagehide'));
+    }
+
+    /**
+     * Ask the background something about persistence and wait (briefly) for the
+     * answer. Resolves null on timeout or when the background cannot be reached,
+     * so a dead service worker can never block the overlay.
+     */
+    persistRequest(message, timeoutMs) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+
+            const timer = timeoutMs ? setTimeout(() => finish(null), timeoutMs) : null;
+
+            try {
+                chrome.runtime.sendMessage(message, (reply) => {
+                    if (timer) clearTimeout(timer);
+                    const failed = chrome.runtime && chrome.runtime.lastError;
+                    finish(failed ? null : (reply || null));
+                });
+            } catch (e) {
+                if (timer) clearTimeout(timer);
+                finish(null);
+            }
         });
     }
 
-    fetchState() {
-        chrome.runtime.sendMessage({ command: 'get-state' }, (state) => {
-            this.log("State Fetched");
-            if (this.isTop) this.updateUI(state);
+    /** Restore the tab's saved layout, or render a fresh window. */
+    async loadPersistedLayout() {
+        if (!this.isTop || !this.ui) return;
+
+        const reply = await this.persistRequest({ command: 'persist-load' }, BMUX_RESTORE_TIMEOUT);
+
+        if (reply && reply.enabled !== undefined) {
+            // Anything but an explicit false counts as on, so a corrupt stored
+            // value can never silently disable restoring.
+            this.persistEnabled = reply.enabled !== false;
+        }
+
+        if (reply && reply.snapshot) {
+            const applied = this.applySnapshot(reply.snapshot);
+            if (applied.ok) {
+                this.restoredFrom = 'session';
+                this.log(`Layout restored: ${applied.panes} pane(s)`);
+                return;
+            }
+            this.log(`Saved layout ignored: ${applied.reason}`);
+        } else if (reply && reply.reason) {
+            this.log(`No saved layout: ${reply.reason}`);
+        }
+
+        this.renderWindow();
+    }
+
+    /** The current layout as a versioned, transport-safe snapshot. */
+    serializeLayout() {
+        if (!this.layout) return null;
+
+        const active = this.getActivePane();
+        const consoles = {};
+
+        this.getPanes().forEach((pane) => {
+            consoles[this.getPaneId(pane)] = {
+                open: this.isPaneConsoleOpen(pane),
+                height: this.getPaneConsoleHeight(pane)
+            };
         });
+
+        const serializeNode = (node) => {
+            if (!node) return null;
+            if (node.kind === 'leaf') {
+                const pane = node.pane;
+                const data = { id: this.getPaneId(pane), url: this.getPaneUrl(pane) };
+                const custom = pane && pane.dataset ? pane.dataset.paneTitle : '';
+                if (custom) data.title = custom;
+                return { kind: 'leaf', pane: data };
+            }
+            return {
+                kind: 'split',
+                direction: node.direction,
+                ratio: Number(Number(node.ratio).toFixed(4)),
+                first: serializeNode(node.first),
+                second: serializeNode(node.second)
+            };
+        };
+
+        let origin = window.location.href;
+        try {
+            origin = window.location.origin === 'null' ? window.location.href : window.location.origin;
+        } catch (e) {
+            origin = window.location.href;
+        }
+
+        return {
+            version: SNAPSHOT_VERSION,
+            savedAt: Date.now(),
+            origin: origin,
+            url: window.location.href,
+            activeId: active ? this.getPaneId(active) : null,
+            zoomedId: this.zoomedPane ? this.getPaneId(this.zoomedPane) : null,
+            nextPaneId: this.nextPaneId,
+            consoles: consoles,
+            layout: serializeNode(this.layout)
+        };
+    }
+
+    /** Rebuild the overlay from a snapshot. Never throws. */
+    applySnapshot(snapshot) {
+        if (!snapshot || snapshot.version !== SNAPSHOT_VERSION || !snapshot.layout) {
+            return { ok: false, reason: 'unsupported snapshot' };
+        }
+
+        this.restoring = true;
+        try {
+            this.clearPaneIndexes();
+            this.clearAllFilters();
+            this.cancelPrompts();
+            this.zoomedPane = null;
+            this.layoutName = null;
+            this.lastActivePane = null;
+            this.rects = new Map();
+
+            Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'))
+                .forEach((pane) => pane.remove());
+
+            const byId = new Map();
+
+            const build = (node) => {
+                if (!node) return null;
+
+                if (node.kind === 'leaf') {
+                    const data = node.pane || {};
+                    const pane = this.createPaneElement(data.url || window.location.href);
+                    if (data.id) pane.dataset.paneId = String(data.id);
+                    if (data.title) pane.dataset.paneTitle = String(data.title);
+                    byId.set(pane.dataset.paneId, pane);
+                    this.ui.panes.appendChild(pane);
+                    return { kind: 'leaf', pane: pane };
+                }
+
+                if (node.kind !== 'split' || (node.direction !== 'row' && node.direction !== 'column')) {
+                    return null;
+                }
+
+                const first = build(node.first);
+                const second = build(node.second);
+                if (!first) return second;
+                if (!second) return first;
+
+                return {
+                    kind: 'split',
+                    direction: node.direction,
+                    ratio: bmuxClamp(Number(node.ratio) || 0.5, BMUX_MIN_SHARE, BMUX_MAX_SHARE),
+                    first: first,
+                    second: second
+                };
+            };
+
+            const tree = build(snapshot.layout);
+            if (!tree) {
+                this.restoring = false;
+                return { ok: false, reason: 'empty layout' };
+            }
+
+            this.layout = tree;
+
+            const consoles = snapshot.consoles || {};
+            this.getPanes().forEach((pane) => {
+                const saved = consoles[this.getPaneId(pane)];
+                if (!saved) return;
+                if (saved.height) pane.dataset.consoleHeight = String(saved.height);
+                if (saved.open) this.setPaneConsoleOpen(pane, true);
+            });
+
+            const highestId = this.getPanes().reduce((max, pane) => {
+                const number = parseInt(String(this.getPaneId(pane)).replace('%', ''), 10);
+                return Number.isFinite(number) ? Math.max(max, number) : max;
+            }, 0);
+
+            const savedNextId = parseInt(snapshot.nextPaneId, 10);
+            this.nextPaneId = Math.max(
+                Number.isFinite(savedNextId) ? savedNextId : 0,
+                highestId + 1,
+                this.nextPaneId
+            );
+
+            const active = snapshot.activeId ? byId.get(String(snapshot.activeId)) : null;
+            this.setActivePane(active || this.getPanes()[0]);
+
+            if (snapshot.zoomedId) {
+                const zoomed = byId.get(String(snapshot.zoomedId));
+                if (zoomed) this.zoomedPane = zoomed;
+            }
+
+            this.renderLayout();
+            this.restoredFrom = 'session';
+
+            return { ok: true, panes: this.getPanes().length };
+        } catch (error) {
+            return { ok: false, reason: error && error.message ? error.message : String(error) };
+        } finally {
+            this.restoring = false;
+        }
+    }
+
+    /** Debounced save of the current layout (session layer). */
+    scheduleSave() {
+        if (!this.isTop || !this.ui || this.restoring || !this.persistEnabled || !this.layout) return;
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => {
+            this.saveTimer = null;
+            this.saveNow();
+        }, BMUX_SAVE_DEBOUNCE);
+    }
+
+    /** Write the current layout now. */
+    saveNow(reason) {
+        if (!this.isTop || !this.persistEnabled) return Promise.resolve(null);
+
+        const snapshot = this.serializeLayout();
+        if (!snapshot) return Promise.resolve(null);
+
+        return this.persistRequest({ command: 'persist-save', snapshot: snapshot }, 1500)
+            .then((reply) => {
+                if (reason) this.log(`Layout saved (${reason})`);
+                return reply;
+            });
+    }
+
+    // --- persistence used by the commands ---
+
+    setPersistEnabled(enabled) {
+        this.persistEnabled = !!enabled;
+        return this.persistRequest({ command: 'persist-set-enabled', enabled: !!enabled }, 1500)
+            .then((reply) => ({
+                ok: !!(reply && reply.status === 'ok'),
+                enabled: this.persistEnabled
+            }));
+    }
+
+    saveNamedLayout(name) {
+        const snapshot = this.serializeLayout();
+        if (!snapshot) return Promise.resolve({ ok: false, reason: 'nothing to save' });
+
+        return this.persistRequest({ command: 'layout-save', name: name, snapshot: snapshot }, 2000)
+            .then((reply) => reply || { ok: false, reason: 'no answer from the background' });
+    }
+
+    listNamedLayouts() {
+        return this.persistRequest({ command: 'layout-list' }, 2000).then((reply) => {
+            if (!reply) return { ok: false, reason: 'no answer from the background', layouts: [] };
+            return { ok: true, origin: reply.origin, layouts: reply.layouts || [] };
+        });
+    }
+
+    restoreNamedLayout(name) {
+        return this.persistRequest({ command: 'layout-load', name: name }, 2000).then((reply) => {
+            if (!reply) return { ok: false, reason: 'no answer from the background' };
+            if (!reply.snapshot) return { ok: false, reason: reply.reason || 'not found' };
+
+            const applied = this.applySnapshot(reply.snapshot);
+            if (!applied.ok) return { ok: false, reason: applied.reason };
+
+            this.restoredFrom = 'named';
+            return { ok: true, panes: applied.panes, name: reply.name || name };
+        });
+    }
+
+    deleteNamedLayout(name) {
+        return this.persistRequest({ command: 'layout-delete', name: name }, 2000)
+            .then((reply) => reply || { ok: false, reason: 'no answer from the background' });
     }
 
     toggle() {
@@ -1042,6 +1337,7 @@ class BMUXClient {
             pane.dataset.paneTitle = clean;
         }
         this.refreshPaneTitles();
+        this.scheduleSave();
     }
 
     /** Fractional rect of a pane within #bmux-panes ({ x, y, w, h } in 0..1). */
@@ -1092,6 +1388,7 @@ class BMUXClient {
 
         this.refreshPaneBadges();
         this.refreshStatus();
+        this.scheduleSave();
     }
 
     lastPane() {
@@ -1290,8 +1587,13 @@ class BMUXClient {
         pane.style.height = `calc(${(rect.h * 100).toFixed(4)}% - ${2 * g}px)`;
     }
 
-    /** Recompute rectangles from the tree and apply them. */
-    renderLayout() {
+    /**
+     * Recompute rectangles from the tree and apply them. Every structural change
+     * lands here, so this is where the layout is persisted from — except during a
+     * restore, or when the caller says the render is cosmetic (a window resize).
+     */
+    renderLayout(opts) {
+        const options = opts || {};
         if (!this.ui) return;
 
         const { leaves, splits } = this.computeLayout();
@@ -1321,6 +1623,8 @@ class BMUXClient {
         this.refreshPaneControls();
         this.refreshStatus();
         this.refreshPromptStack();
+
+        if (options.persist !== false) this.scheduleSave();
     }
 
     /** One draggable handle per split boundary, positioned from the last render. */
@@ -2698,6 +3002,7 @@ class BMUXClient {
             if (log) log.scrollTop = log.scrollHeight;
         }
 
+        this.scheduleSave();
         return !!open;
     }
 
@@ -2721,6 +3026,7 @@ class BMUXClient {
 
         pane.dataset.consoleHeight = String(applied);
         output.style.height = `${applied}px`;
+        this.scheduleSave();
         return applied;
     }
 
@@ -2780,12 +3086,6 @@ class BMUXClient {
         document.addEventListener('mouseup', up, true);
     }
 
-    updateUI(state) {
-        if (!this.ui) return;
-        if (state && state.activeSessionId) {
-            // Sync UI
-        }
-    }
 }
 
 window.bmux = new BMUXClient();

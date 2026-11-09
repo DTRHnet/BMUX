@@ -1,12 +1,17 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.4.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.5.0:** your layout survives a reload. Splits, ratios, URLs, titles,
+> focus, zoom and console state are saved per tab and restored on load, named
+> layouts can be saved with `save-layout` / `restore-layout`, and `persist off`
+> switches all of it off.
+>
 > **New in 0.4.0:** commands chain with `;` (`filter img; filter a`), commands can
 > ask questions you **click** (cards with buttons, digits or `y`/`n`), `filter`
 > draws then narrows in rounds (*inside a container*, *text contains*, *visible
@@ -112,6 +117,34 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
   there (`q` in Control Mode)
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
+
+### 💾 Sessions that survive a reload
+The layout of the tab you are in is saved as it changes and put back when the
+page loads:
+
+- **What comes back**: the split tree and its ratios, every pane's URL, custom
+  titles, the focused pane, the maximized pane, and each pane console's open state
+  and height.
+- **Where it lives**: `chrome.storage.session`, keyed by tab id — survives a
+  reload or navigation, dies with the browser, never synced.
+- **Restored before the first pane is drawn**, so you never see an empty overlay
+  flash.
+- **Named layouts** go to `chrome.storage.local` and survive restarts:
+
+```
+> save-layout work        # 2 pane(s) saved for https://example.com
+> restore-layout work     # back to those panes, titles and sizes
+> list-layouts            # what is saved for this site
+> delete-layout work      # or --all
+> persist off             # stop saving this tab, and clear its snapshot
+> persist status          # on/off, and where the current layout came from
+```
+
+- **Restoring recreates panes**, so the pages load fresh — scroll position and
+  in-page state cannot be carried over.
+- Snapshots are validated (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep,
+  ≤ 64 KB) before they are stored or applied; a bad one is ignored, never partly
+  restored.
 
 ### ⛓️ Chained commands
 `;` runs commands one after another, from the console, the `:` line, a pane input
@@ -309,6 +342,11 @@ These act on the whole overlay.
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
+| `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
+| `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
+| `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
+| `list-layouts` | Saved layouts for this site | `> list-layouts` |
+| `delete-layout <name\|--all>` | Remove saved layouts | `> delete-layout work` |
 | `yes` / `no` | Answer the open prompt (`y` / `n` are aliases) | `> yes` |
 
 ### Pane Commands
@@ -496,6 +534,15 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - ✅ Stores state locally in browser
 - ✅ Open source - fully auditable code
 
+### What BMUX Stores Locally
+- The layout of each tab (split tree, pane URLs, custom titles, focus, zoom,
+  console state) in `chrome.storage.session` — cleared when the browser closes.
+- Named layouts you explicitly saved, per site origin, in `chrome.storage.local`.
+- The auto-restore switch.
+- **Never `sync`**, never uploaded. `persist off` clears the current tab's
+  snapshot; `delete-layout --all` removes a site's named layouts. Both are
+  plaintext in your own browser profile, like history.
+
 ### What BMUX Does NOT Do
 - ❌ Track your browsing
 - ❌ Send data over network
@@ -505,7 +552,8 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 ### Permissions Explained
 - **`declarativeNetRequest`** - Remove iframe-blocking headers
 - **`<all_urls>`** - Apply rules to any site you load
-- **`tabs`, `storage`** - Manage panes and save state
+- **`tabs`** - Know which tab a layout belongs to (and relay keys from panes)
+- **`storage`** - Save layouts (`session` for the tab, `local` for named ones)
 
 See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 
@@ -519,8 +567,12 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Same limitations** as browser DevTools iframes
 
 ### Current Version (0.1.0)
-- ⏳ **No sessions or persistence** - the layout lives in the page, so a reload
-  starts over
+- ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
+  position, form input and in-page state are lost on restore
+- ⏳ **Not persisted**: prompts, filter boxes, focus history and console
+  scrollback (transient UI); console open/height is
+- ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
+  lost (named layouts remain)
 - ⏳ **No multiple windows / layout tabs** - `new-window` resets the overlay
 - ⏳ **No floating panes** - every pane takes layout space
 - ⏳ **No `break-pane` / `join-pane`**
@@ -576,10 +628,16 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Filters accumulate across commands (`--replace` to reset)
 
 ### Version 0.5.0
+- [x] Per-tab layout restore (split tree, ratios, URLs, titles, focus, zoom, consoles)
+- [x] Named layouts in `chrome.storage.local` (`save-layout` / `restore-layout` / `list-layouts` / `delete-layout`)
+- [x] `persist [on|off|status]` off switch that also clears the snapshot
+- [x] Snapshot validation (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB)
+- [x] Background owns persistence, tab-close cleanup and startup pruning
+
+### Version 0.6.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
-- [ ] Session persistence (save and restore layouts, titles, URLs)
 - [ ] Broadcasting input to all panes
 - [ ] Pane drag-and-drop reordering
 - [ ] Touch/pointer-based resizing
@@ -627,4 +685,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.4.0 | Last Updated: November 2026
+Version 0.5.0 | Last Updated: November 2026

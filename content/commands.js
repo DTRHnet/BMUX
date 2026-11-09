@@ -748,6 +748,112 @@ const BMUX_COMMANDS = {
         }
     },
 
+    'persist': {
+        scope: 'overlay',
+        description: 'Turn layout auto-restore on or off (off clears this tab snapshot)',
+        usage: 'persist [on|off|status]',
+        execute: async function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `Auto-restore: ${client.persistEnabled ? 'on' : 'off'} · ` +
+                    `this layout came from ${client.restoredFrom || 'a fresh start'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: persist [on|off|status]';
+            }
+
+            const result = await client.setPersistEnabled(action === 'on');
+            if (!result.ok) return 'Error: the background did not answer';
+
+            return result.enabled
+                ? 'Auto-restore on: this tab layout is saved as it changes'
+                : 'Auto-restore off: the tab snapshot was cleared and nothing more is written';
+        }
+    },
+
+    'save-layout': {
+        scope: 'overlay',
+        description: 'Save the current layout under a name; named layouts survive restarts',
+        usage: 'save-layout [name]',
+        execute: async function (api, args) {
+            const name = args.join(' ').trim() || 'default';
+
+            const result = await api.client.saveNamedLayout(name);
+            if (!result.ok) return `Error: ${result.reason || 'could not save the layout'}`;
+
+            return `Saved layout "${result.name}" (${result.panes} pane(s))` +
+                `${result.origin ? ` for ${result.origin}` : ''}`;
+        }
+    },
+
+    'restore-layout': {
+        scope: 'overlay',
+        description: 'Apply a saved layout by name',
+        usage: 'restore-layout <name>',
+        execute: async function (api, args) {
+            const client = api.client;
+
+            if (!args[0]) {
+                const listed = await client.listNamedLayouts();
+                const names = (listed.layouts || []).map((entry) => entry.name);
+                return names.length
+                    ? `Error: Usage: restore-layout <name>. Saved: ${names.join(', ')}`
+                    : 'Error: Usage: restore-layout <name> (nothing saved for this site yet)';
+            }
+
+            const result = await client.restoreNamedLayout(args[0]);
+            if (!result.ok) {
+                const listed = await client.listNamedLayouts();
+                const names = (listed.layouts || []).map((entry) => entry.name);
+                return `Error: ${result.reason}${names.length ? `. Saved: ${names.join(', ')}` : ''}`;
+            }
+
+            return `Restored layout "${result.name}" (${result.panes} pane(s))`;
+        }
+    },
+
+    'list-layouts': {
+        scope: 'overlay',
+        description: 'List the layouts saved for this site',
+        usage: 'list-layouts',
+        execute: async function (api, args) {
+            const listed = await api.client.listNamedLayouts();
+            if (!listed.ok) return `Error: ${listed.reason}`;
+
+            if (!listed.layouts.length) {
+                return `No saved layouts for ${listed.origin || 'this site'}`;
+            }
+
+            const rows = listed.layouts.map((entry, index) => {
+                const when = entry.savedAt
+                    ? new Date(entry.savedAt).toISOString().replace('T', ' ').slice(0, 16)
+                    : 'unknown';
+                return `${index + 1}. ${entry.name} - ${entry.panes} pane(s) - ${when}`;
+            });
+
+            return [`Saved layouts for ${listed.origin || 'this site'}:`, ...rows].join('\n');
+        }
+    },
+
+    'delete-layout': {
+        scope: 'overlay',
+        description: 'Delete a saved layout, or all of them for this site',
+        usage: 'delete-layout <name|--all>',
+        execute: async function (api, args) {
+            if (!args[0]) return 'Error: Usage: delete-layout <name|--all>';
+
+            const result = await api.client.deleteNamedLayout(args[0]);
+            if (!result.ok) return `Error: ${result.reason || 'could not delete'}`;
+
+            return result.deleted
+                ? `Deleted ${result.deleted} layout(s)`
+                : 'Nothing to delete';
+        }
+    },
+
     'new-window': {
         scope: 'overlay',
         description: 'Reset the overlay to a single pane showing the current page',

@@ -176,7 +176,81 @@ drag is logged, e.g. `Resize: row ratio 0.33`.
 
 ---
 
-## 5. Overlay commands
+## 5. Persistence
+
+The layout of the tab you are in is saved as it changes, and restored the next time
+the page loads. There is nothing to type for that; the commands are for the
+explicit cases.
+
+### What survives what
+
+| Thing | Survives | Where |
+|-------|----------|-------|
+| Split tree and ratios, pane URLs, custom titles, focus, maximize, console open/height | page reload, in-page navigation | `chrome.storage.session` (`layout:tab:<tabId>`) |
+| Named layouts (`save-layout`) | browser restart, extension update | `chrome.storage.local` |
+| Prompts, filter boxes, focus history, console scrollback | nothing (transient UI) | — |
+
+Restoring **recreates the panes**, so each page loads fresh: scroll position, form
+input and in-page JavaScript state cannot be carried over.
+
+### `persist [on|off|status]`
+`on` and `off` control the automatic per-tab saving. `off` also clears the current
+tab's snapshot (named layouts stay — they were explicit saves). `status` reports
+the mode and where the current layout came from.
+
+```
+> persist status
+Auto-restore: on · this layout came from session
+> persist off
+Auto-restore off: the tab snapshot was cleared and nothing more is written
+```
+
+### `save-layout [name]`
+Saves the current layout for this site's origin under `name` (default `default`).
+Names are single words without `:` — `save-layout work`, not `save-layout my work`.
+At most 30 are kept per origin; the oldest is dropped.
+
+```
+> save-layout work
+Saved layout "work" (2 pane(s)) for https://example.com
+```
+
+### `restore-layout <name>`
+Applies a saved layout. If the name is unknown it tells you the names that exist.
+
+```
+> restore-layout work
+Restored layout "work" (2 pane(s))
+> restore-layout nope
+Error: no layout named "nope". Saved: work
+```
+
+### `list-layouts`
+Lists this site's saved layouts with pane count and save time.
+
+```
+> list-layouts
+Saved layouts for https://example.com:
+1. work - 2 pane(s) - 2026-11-09 20:37
+```
+
+### `delete-layout <name|--all>`
+Deletes one layout, or every layout for this site.
+
+### Snapshots are validated
+Every snapshot is checked whole before it is stored or applied: version, tree
+shape, split ratios inside 1–99%, URL strings, at most 12 panes, depth at most 32,
+at most 64 KB. A snapshot that fails is dropped and logged; the overlay renders a
+fresh single pane instead of half-applying it.
+
+### Housekeeping
+Closing a tab deletes its snapshot, and on browser startup any session layout whose
+tab no longer exists is pruned. Where `chrome.storage.session` is unavailable the
+tab layer falls back to `chrome.storage.local` with a 6 hour expiry.
+
+---
+
+## 6. Overlay commands
 
 Overlay commands manage the whole overlay. They work with or without a pane.
 
@@ -344,7 +418,7 @@ Hidden aliases (`y`, `n`) are left out.
 
 ---
 
-## 6. Pane commands
+## 7. Pane commands
 
 Pane commands act on one pane: the pane whose input you typed into, or the active
 pane when run from the console or the `:` line.
@@ -586,7 +660,7 @@ Clears the pane's output area and prints nothing.
 
 ---
 
-## 7. Active pane context
+## 8. Active pane context
 
 The debug console and the `:` line always act on the **active pane**:
 
@@ -607,7 +681,7 @@ Ways to change it:
 
 ---
 
-## 8. Error handling
+## 9. Error handling
 
 The dispatcher never throws at you; every failure comes back as text.
 
@@ -642,7 +716,7 @@ Error: <message from the command>
 
 ---
 
-## 9. Workflow examples
+## 10. Workflow examples
 
 ### Sidebar layout by command
 
@@ -710,7 +784,7 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 10. Tips
+## 11. Tips
 
 1. **`list-panes` first** whenever focus or sizes surprise you.
 2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with
@@ -727,12 +801,12 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 11. Where commands live
+## 12. Where commands live
 
 | File | Responsibility |
 |------|----------------|
 | `content/commands.js` | Every command (`BMUX_COMMANDS`), each with `scope`, `description`, `usage`, `execute(api, args)`, plus `BMUX_KEYBINDINGS` |
 | `content/main.js` | Overlay DOM, layout tree and rendering, mouse resizing, focus model, and the dispatcher that parses a line and calls `execute` with `api = { client, pane, log }` |
-| `background/main.js` | State and message relay; forwards a command line from a pane frame to the top frame |
+| `background/main.js` | Message relay, and all layout persistence (session snapshots per tab, named layouts per origin) with validation, pruning and tab-close cleanup |
 
 To add a command, see [`ADDING_COMMANDS.md`](ADDING_COMMANDS.md).

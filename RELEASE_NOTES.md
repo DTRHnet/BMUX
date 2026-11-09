@@ -1,3 +1,67 @@
+# BMUX Version 0.5.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.5.0
+**Release Date**: November 9, 2026
+**Status**: Layout persistence release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Reload survival | Splits, ratios, pane URLs, titles, focus, maximize and console state are saved per tab and restored on load |
+| Storage | `storage.session` per tab (reload-safe, dies with the browser) + `storage.local` for explicit named layouts; never `sync` |
+| Commands | `persist [on\|off\|status]`, `save-layout`, `restore-layout`, `list-layouts`, `delete-layout` |
+| Safety | Snapshots validated whole (version, shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB); bad ones ignored, never half-applied |
+| Housekeeping | Tab-close cleanup, startup pruning, 6 h fallback where `storage.session` is missing |
+| Cleanup | The dead session `STATE` machinery and the "State Fetched" stub are gone; `unlimitedStorage` dropped |
+
+## The shape of it
+
+The content script never touches storage. It asks the background, which knows the
+tab id and owns the keys:
+
+```
+               persist-save {snapshot}                     storage.session
+content ─────────────────────────────► background ─────────────────────► layout:tab:<tabId>
+        ◄─────────────────────────────            │
+               persist-load {enabled, snapshot}     └───► storage.local
+                                                          layout:named:<origin>:<name>
+                                                          persist:enabled
+```
+
+**Writes** are debounced from every structural change (400 ms) plus an immediate
+save when the tab is hidden or unloaded. **Reads** happen before the first pane is
+drawn, so a restore never flashes an empty overlay, with an 800 ms ceiling if the
+service worker is cold.
+
+## What does not come back
+
+Restoring **recreates** the panes, so the pages load fresh: scroll position, form
+input and in-page JavaScript state cannot be carried across a reload. Prompts,
+filter boxes, focus history and console scrollback are not persisted either (the
+console's open state and height are).
+
+## Verification
+
+- 644 jsdom checks — with the real `background/main.js` running as a second window
+  against in-memory `storage.session` / `storage.local`, so the shipped persistence
+  path is exercised end to end: round trip, reload via a fresh content script,
+  named layouts, the off switch, corrupt/junk/unsupported/malformed snapshots,
+  caps, tab-close cleanup, startup pruning, exit saves and debounce coalescing.
+- 87 Chromium checks — including a real `page.reload()` restoring a 30/70 split
+  with a custom title and the maximize state, pages loading fresh afterwards,
+  `save-layout` → `new-window` → `restore-layout`, and `persist off` → reload →
+  one pane.
+- Not verified: an actual browser restart (the harness cannot restart Chromium),
+  the `storage.session` fallback path on a browser that lacks it, and touch input.
+
+---
+
 # BMUX Version 0.4.0 - Release Summary
 
 ## Release Information

@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 ## Activation
 ```
@@ -38,6 +38,20 @@ Ctrl+b, then Arrow        - Move focus
 Ctrl+b, then Alt+Arrow    - Resize
 Ctrl+b, then z / q / o / ; / Space - Zoom / numbers / cycle / last / layout
 ```
+
+## Persistence (layouts survive a reload)
+```
+Automatic         - Splits, ratios, URLs, titles, focus, zoom and consoles are
+                    saved per tab and restored when the page loads again
+> save-layout work        - Save this layout for the site (survives restarts)
+> restore-layout work     - Bring it back
+> list-layouts            - What is saved for this site
+> delete-layout work      - Remove it (or --all)
+> persist off             - Stop saving this tab and clear its snapshot
+> persist status          - On/off, and where the current layout came from
+```
+Restoring recreates the panes, so the pages load fresh (scroll position is not
+kept). `persist off` is the privacy switch; nothing is ever synced.
 
 ## Chaining commands
 ```

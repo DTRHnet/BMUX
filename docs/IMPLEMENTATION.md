@@ -202,7 +202,46 @@ that pane through the dispatcher, so the pane button, `z` / `Shift+z`, and the
 toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 `refreshPaneControls` syncs the glyphs from the render path.
 
-### 16. **Modern UI Design**
+### 16. **Layout persistence**
+Two layers, both written by `background/main.js` (the content script never touches
+`chrome.storage` — `storage.session` is not readable from a content script without
+`setAccessLevel`, and only the background knows the tab id):
+
+| Layer | Key | Lifetime |
+|-------|-----|----------|
+| `storage.session` | `layout:tab:<tabId>` | reload / navigation of that tab; dies with the browser |
+| `storage.local` | `layout:named:<origin>:<name>` | explicit saves; survives restarts |
+| `storage.local` | `persist:enabled` | the auto-restore switch |
+
+Messages the content script uses: `persist-load`, `persist-save`, `persist-clear`,
+`persist-set-enabled`, `layout-save`, `layout-list`, `layout-load`,
+`layout-delete`. Every reply carries the origin and tab id; nothing is stored by the
+content script.
+
+**Write path.** `renderLayout()` ends with `scheduleSave()` (400 ms debounce);
+`setActivePane`, `renamePane` and the console setters save explicitly;
+`visibilitychange -> hidden` and `pagehide` save immediately, because an MV3 tab can
+be torn down without a later debounce firing. A save is skipped while
+`this.restoring` is set, when the switch is off, and when there is no layout.
+
+**Read path.** `init()` builds the UI but renders no panes; `loadPersistedLayout()`
+asks for the tab's snapshot (800 ms ceiling if the worker is asleep) and either
+`applySnapshot()`s it or calls `renderWindow()`. `applySnapshot` rebuilds the tree
+from data — one pane per leaf, an `id -> element` map for the active/zoomed pane,
+consoles restored, `nextPaneId` at least the highest restored id — inside a
+`restoring` barrier so saves cannot recurse, with `try/finally` so the barrier is
+always cleared.
+
+**Validation.** The background validates every snapshot whole (version, node kinds,
+directions, ratios in 1–99%, URL strings, ≤ 12 panes, depth ≤ 32, ≤ 64 KB) before
+storing and again before handing one back; a rejected snapshot is deleted and
+reported as "no snapshot", never partly applied.
+
+**Housekeeping.** `tabs.onRemoved` deletes that tab's key; `onStartup`/`onInstalled`
+prune session keys for tabs that no longer exist; where `storage.session` is
+missing the tab layer falls back to `local` with a 6 hour expiry.
+
+### 17. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -238,7 +277,7 @@ toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 BMUX/
 ├── manifest.json          # Extension configuration (v0.1.0)
 ├── background/
-│   └── main.js           # Service worker (global state & message relay)
+│   └── main.js           # Service worker (relay + layout persistence)
 ├── content/
 │   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher
 │   ├── commands.js       # Command registry + key bindings (source of truth)
@@ -269,6 +308,13 @@ registry and key bindings exist before the client is constructed.
 2. `content/main.js` resolves the key through `BMUX_KEYBINDINGS` →
 3. `runCommand()` looks the command up in `BMUX_COMMANDS` and calls `execute`
 
+**Persistence:**
+1. The content script changes the layout (or the tab is hidden/unloaded) ->
+2. `scheduleSave()` / `saveNow()` sends `persist-save { snapshot }` ->
+3. The background validates it and writes `layout:tab:<sender.tab.id>` ->
+4. On the next load the content script asks `persist-load` and applies the answer
+   before its first render
+
 **In-Mode Commands (inside a pane's iframe):**
 1. User presses a key while focus is in a pane's iframe →
 2. That frame's content script resolves the key to a command line and sends
@@ -297,7 +343,8 @@ to `content/commands.js` only.
 1. **First Load**: If extension doesn't activate, reload the page once after installing
 2. **Iframe Sandbox**: Some sites block iframes (e.g., Google, Facebook)
 3. **Hotkey Conflicts**: If `Alt+Shift+B` is taken, change in `chrome://extensions/shortcuts`
-4. **No persistence**: the layout lives in the page, so a reload starts over
+4. **Restored panes load fresh**: a page cannot be cloned live, so scroll
+   position, form input and in-page state are lost on restore
 5. **No multiple windows / layout tabs**: `new-window` resets the overlay
 6. **No floating panes, break/join pane, or input broadcasting**
 7. **Mouse only**: resizing requires a pointer; touch is not handled
