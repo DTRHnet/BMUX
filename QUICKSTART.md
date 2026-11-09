@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.3.0**
+**Version 0.4.0**
 
 ## Activation
 ```
@@ -39,6 +39,31 @@ Ctrl+b, then Alt+Arrow    - Resize
 Ctrl+b, then z / q / o / ; / Space - Zoom / numbers / cycle / last / layout
 ```
 
+## Chaining commands
+```
+> filter img; filter a          - Run both, one after another
+> split-window -h; list-panes   - Any commands, from any input
+> esc \; key                    - \; is a literal semicolon
+```
+A failing command doesn't stop the chain; a prompt raised by one is answered
+before the next starts.
+
+## Prompts (click, key or command)
+```
+[ Yes, refine 1 ]  [ No, keep these 2 ]   - Click, or press the digit
+Enter                                     - Take the highlighted/primary choice
+y / n                                     - Answer a yes/no prompt
+yes / no                                  - Type the answer instead
+Esc                                       - Cancel the prompt
+```
+
+## Maximize a pane
+```
+⤢ button in the pane footer  - Maximize that pane (same as Ctrl+b, Shift+z)
+⤡ button                     - Restore the layout
+z / Shift+z                  - The same, from the keyboard
+```
+
 ## Toolbar Buttons
 ```
 Split H / Split V   - Split the active pane
@@ -70,17 +95,20 @@ It stays open with a scrollbar; it no longer auto-collapses after a few seconds.
 ## Filter highlighting
 ```
 > filter .card              - Box every match in this pane, numbered
+> filter img; filter a      - Box two kinds of match at once (they accumulate)
 > filter links internal     - Preset words: links that stay on this site
 > filter images large       - images wider than 200px
 > filter --presets          - List every preset and variant
 > filter -n 50 .card        - Cap the boxes (default 200)
 > filter -l a               - List matches only, draw nothing
 > filter -c                 - Remove the boxes
-> filter -y links           - Skip the yes/no prompt
-yes / no  (or y / n)        - Answer a prompt: "2 match(es) — box them?"
-Esc                         - Cancel a prompt, else clear the boxes
+> filter -y links           - Draw without asking
+> filter links --in main --text price --visible --unique href
+> filter -c                 - Clear the boxes (--replace resets a filter set)
 ```
-Presets and results over 25 elements ask before drawing.
+Presets and results over 25 elements draw first, then offer to narrow down:
+*Inside a container*, *Exclude a container*, *Text contains*, *Visible only*,
+*Unique targets*, *Keep these*, *Cancel* — all clickable.
 Each box has an outline plus corner ticks so tiny elements are findable. Hovering
 one writes `FILTER: .card - DIV.card "Product" · 3/12` into the pane's footer
 status line and turns that box green. Same-origin panes only.

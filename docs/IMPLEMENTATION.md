@@ -165,12 +165,50 @@ status line, attaches a `keydown` listener to the pane document so `y` / `n` /
 `resolveFilterConfirm(accept)` is what the `yes` / `no` commands (and the hidden
 `y` / `n` aliases) call, and `filter -y` bypasses the prompt entirely.
 
-### 13. **Modern UI Design**
+### 13. **Command chains**
+`splitCommandLine` splits a line on top-level semicolons (`;` outside quotes and
+`[] () {}`; `\;` is literal) and `runLine` executes the segments one after
+another, awaiting each. Every entry point (debug console, `:` line, pane input,
+key dispatch, background relay) goes through `runLine`, so chaining works
+everywhere; the pane console echoes and reports each segment separately.
+
+Because segments are awaited, a command that raises a prompt blocks the rest of
+the chain until the prompt is answered — which is what makes
+`filter links; list-panes` show the refined result in the second segment.
+
+### 14. **Prompts**
+`ask(pane, { question, details, choices })` returns a promise and renders a card
+above that pane's footer:
+
+- the card is a child of the overlay, positioned from the pane's rectangle and its
+  footer's top edge (`positionPrompt`), re-positioned on `resize` and on every
+  `renderLayout` (`refreshPromptStack`);
+- choices are real buttons with a digit shortcut; `handlePromptKey` (top frame)
+  plus a `keydown` listener on the pane document (so keys pressed with focus
+  inside the page work) resolve digit / `Enter` / `y` / `n` / `Esc`;
+- `resolvePrompt` removes the card and listeners and resolves the promise with
+  `{ choice, text, cancelled }`; `cancelPrompt` does the same with a cancel;
+- one prompt per pane (`prompts: Map<pane, state>`), and the prompt is cancelled
+  when the pane is killed, its iframe loads a new document, `renderWindow` runs, or
+  the overlay is hidden;
+- `askText` is the same card with an input row; text prompts do not time out.
+
+`api.ask` / `api.askText` expose it to commands, and `answerOpenPrompt` is what the
+`yes` / `no` commands call.
+
+### 15. **Per-pane maximize**
+Every pane footer carries a `⤢` / `⤡` button. A click runs `resize-pane -Z` for
+that pane through the dispatcher, so the pane button, `z` / `Shift+z`, and the
+toolbar `Zoom` button all change one piece of state (`zoomedPane`);
+`refreshPaneControls` syncs the glyphs from the render path.
+
+### 16. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
 - **Per-pane footer**: title, `>` command input, status segment (filter names),
-  console toggle, `[number id]` badge, and a resizable console panel
+  console toggle, maximize button, `[number id]` badge, and a resizable console
+  panel
 - **Status bar**: `[CONTROL MODE]`/`[NORMAL]` on the left, focused pane and size
   (plus `· ZOOM`) on the right
 - **display-panes**: large numbers over each pane while picking

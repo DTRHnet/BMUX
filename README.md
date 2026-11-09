@@ -1,12 +1,18 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.3.0**
+**Version 0.4.0**
 
 A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.3.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.4.0:** commands chain with `;` (`filter img; filter a`), commands can
+> ask questions you **click** (cards with buttons, digits or `y`/`n`), `filter`
+> draws then narrows in rounds (*inside a container*, *text contains*, *visible
+> only*, *unique targets*), filters accumulate, and every pane has its own `⤢`
+> maximize button.
+>
 > **New in 0.3.0:** the per-pane console is a real scrollback (opens, stays
 > open, scrolls, drag to resize, `l` or `log toggle`), `filter` understands preset
 > words (`filter links internal`) and asks yes/no before boxing a preset or a big
@@ -107,6 +113,43 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
 
+### ⛓️ Chained commands
+`;` runs commands one after another, from the console, the `:` line, a pane input
+or a key binding:
+
+```
+> filter img; filter a          # box images and links together
+> split-window -h; list-panes   # split, then show the result
+```
+
+- Segments run **awaited**, so a question raised by one is answered before the
+  next starts.
+- A failing segment does not stop the chain, and each gets its own echo.
+- `\;` is a literal semicolon; a `;` inside quotes or `[] () {}` does not split,
+  so `filter a[href="x;y"]` stays one command.
+
+### ❓ Prompts you can click
+When a command needs an answer, a card appears above the pane's footer:
+
+```
+┌─ 23 links found and labelled. Specify harder constraints? ──┐
+│ links (a[href]) · 23 box(es) on screen                      │
+│ [ Yes, refine 1 ]  [ No, keep these 2 ]                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Click a button, press its digit, press `Enter` for the primary choice, use
+`y`/`n` on yes/no cards, type `yes` / `no`, or `Esc` to cancel. It never steals
+focus from a text field, and keys pressed with the focus inside the pane work too.
+Prompt cards are a command-API feature (`api.ask` / `api.askText`), so any future
+question uses the same UI.
+
+### ⤢ Maximize any pane
+Every pane footer has a `⤢` button: click it to maximize that pane (the on-screen
+form of `Ctrl+b`, `Shift+z`), click `⤡` to restore. Clicking another pane's `⤢`
+moves the maximize there. Keyboard (`z`, `Shift+z`), the toolbar `Zoom` button and
+the pane buttons share one state.
+
 ### 💻 Per-pane console you can actually read
 The console under each pane's input is a scrollback, not a flash message:
 
@@ -148,11 +191,19 @@ Boxed 2 of 2 match(es). Hover one to name it in the pane status line; Esc or "fi
   `filter comments` · `filter authors` · `filter dates` ·
   `filter articles headlines` · `filter forms` · `filter code` · `filter main`.
   `filter --presets` prints the vocabulary with the selector behind each word.
-- **It asks before drawing** when you use a preset or match more than 25
-  elements: `2 match(es) for links. Box them? Type "yes" / "no" (or press y / n;
-  Esc cancels, "filter -y" skips this prompt).`
+- **It draws first, then offers to narrow** when you use a preset or match more
+  than 25 elements: `23 links found and labelled. Specify harder constraints?`
+  → *Yes, refine* opens a card with **Inside a container…**, **Exclude a
+  container…**, **Text contains…**, **Visible only**, **Unique targets**,
+  **Keep these** and **Cancel**. Each round narrows the current set, re-labels the
+  boxes and asks again (max 6 rounds).
+- **The same narrowing without the questions**:
+  `filter links --in main --text price --visible --unique href`
+  (`--replace` starts a clean set, `-y` skips all prompts).
 - `filter -l .card` lists without drawing, `filter -n 50 .card` caps the boxes
-  (default 200), `filter -c` clears, `filter -y …` skips the prompt.
+  (default 200), `filter -c` clears, `filter -y …` skips the questions.
+- **Filters accumulate**: `filter img; filter a` boxes both; `--replace` starts
+  over and `filter -c` clears everything.
 - **`Esc` clears the boxes** — before it does anything else, from the top frame,
   from an input, or with the focus clicked inside the pane. A second `Esc` still
   leaves Control Mode.
@@ -258,7 +309,7 @@ These act on the whole overlay.
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
-| `yes` / `no` | Answer a filter confirmation prompt (`y` / `n` are aliases) | `> yes` |
+| `yes` / `no` | Answer the open prompt (`y` / `n` are aliases) | `> yes` |
 
 ### Pane Commands
 
@@ -269,7 +320,7 @@ for the console and `:` line.
 |---------|-------------|---------|
 | `source` | View HTML source (transforms pane) | `> source` |
 | `restore` | Return from console to browser view | `> restore` |
-| `filter <selector> [-n max] [-y]` | Box matches in the pane and name them on hover | `> filter .card` |
+| `filter <selector> [-n max] [-y] [--in s] [--not-in s] [--text w] [--visible] [--unique] [--replace]` | Box matches, name them on hover, narrow them | `> filter links --in main` |
 | `filter <preset> [variant]` | Preset query, e.g. `links internal`, `images large` | `> filter links internal` |
 | `filter --presets` | List the preset vocabulary | `> filter --presets` |
 | `filter -l <selector>` | List matches without drawing | `> filter -l a` |
@@ -345,6 +396,7 @@ a command line, so keys are not a second code path.
 | Double-click a boundary | Reset that split to 50/50 |
 | Drag a pane console's top edge | Resize that console (double-click resets it) |
 | Drag the debug console's corner | Resize the floating console |
+| Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
 
 ---
 
@@ -478,8 +530,11 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   `capture-pane`); navigation, reload, sizing and reordering work regardless
 - ⏳ **Filter boxes are measured when drawn** — a page that moves elements without
   mutating the DOM (CSS transitions) needs the filter re-run
-- ⏳ **A filter prompt times out after 15s** and draws nothing; re-run the filter
-  if you miss it
+- ⏳ **A yes/no prompt times out after 15s** (cancelled, boxes stay); text
+  prompts wait indefinitely
+- ⏳ **Refining narrows what is drawn**, but a page mutation re-queries the
+  selectors, so the boxes can re-broaden after a refinement
+- ⏳ **Chained filters keep appending** until `filter -c` or `--replace`
 - ⏳ **Presets depend on the page's markup** — `prices`/`comments` need
   conventional class names, so plain selectors are the fallback
 - ⏳ `kill-pane` refuses the last pane (use `new-window` to reset)
@@ -514,6 +569,13 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Resizable floating debug console
 
 ### Version 0.4.0
+- [x] `;` command chaining, awaited, from every entry point
+- [x] Clickable prompt cards (`api.ask` / `api.askText`) with digit/`y`/`n`/`Esc` parity
+- [x] Per-pane `⤢` maximize button synced with `Shift+z`
+- [x] Filter refinement rounds (`--in`, `--not-in`, `--text`, `--visible`, `--unique`)
+- [x] Filters accumulate across commands (`--replace` to reset)
+
+### Version 0.5.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
@@ -565,4 +627,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.3.0 | Last Updated: November 2026
+Version 0.4.0 | Last Updated: November 2026
