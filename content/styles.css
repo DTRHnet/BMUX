@@ -608,6 +608,102 @@
   background: var(--bmux-accent-soft);
 }
 
+/* --- .bmux script panel (`script`, `script run`, `script file`) --- */
+#bmux-script-panel {
+  position: fixed;
+  left: 20px;
+  bottom: 46px;
+  width: 470px;
+  max-width: calc(100vw - 40px);
+  background: var(--bmux-bg);
+  border: 1px solid var(--bmux-line);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+  z-index: 2147483647;
+}
+
+#bmux-script-panel.bmux-script-hidden {
+  display: none;
+}
+
+#bmux-script-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 8px;
+  background: var(--bmux-bg-raised);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  color: var(--bmux-text-dim);
+  user-select: none;
+}
+
+#bmux-script-title {
+  font-weight: bold;
+  letter-spacing: 0.06em;
+  color: var(--bmux-accent);
+  white-space: nowrap;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+#bmux-script-progress {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--bmux-text-dim);
+}
+
+/* A running script tints its progress line, so the state is visible at a glance. */
+#bmux-script-panel.bmux-script-running #bmux-script-progress {
+  color: var(--bmux-accent);
+}
+
+.bmux-script-btn {
+  padding: 1px 7px;
+  font-size: 11px;
+  line-height: 16px;
+  font-family: inherit;
+  border-radius: 4px;
+  border: 1px solid var(--bmux-line);
+  background: var(--bmux-bg-sunken);
+  color: var(--bmux-text);
+  cursor: pointer;
+}
+
+.bmux-script-btn:hover {
+  border-color: var(--bmux-accent-line);
+  color: var(--bmux-accent-strong);
+}
+
+#bmux-script-text {
+  margin: 0;
+  padding: 8px;
+  min-height: 132px;
+  max-height: 320px;
+  border: none;
+  border-top: 1px solid var(--bmux-line);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  background: var(--bmux-bg-sunken);
+  color: var(--bmux-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre;
+  overflow: auto;
+  resize: vertical;
+  outline: none;
+}
+
 #bmux-command-line {
   position: absolute;
   bottom: 24px;

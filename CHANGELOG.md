@@ -5,6 +5,78 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-11-09
+
+Commands can live in a file. A `.bmux` script runs a list of command lines with
+`sleep` between them — for recording a demo, sharing a layout, or turning a
+sequence you keep typing into one word.
+
+### Added
+
+- **`.bmux` script files.** One command per line, `#`/`//` comments, blank lines
+  ignored, a pasted `>` or `$` prompt stripped. Each line goes through the ordinary
+  dispatcher, so arguments, `;` chaining, prompts and error handling behave exactly
+  as they do when the same line is typed. Limits: 500 commands, 2000 characters
+  per line, 64 KB per file — a file that breaks one is refused whole, naming the
+  offending line.
+- **`sleep <seconds>`** — an awaitable, cancellable pause (`2`, `0.5`, `2s`,
+  `250ms`; no argument is one second; capped at an hour). It is a normal command,
+  so `sleep 2; list-panes` works, and the overlay stays live while it waits.
+- **`script [run|file|demo|open|close|stop|status]`** — run the panel's contents, load
+  a `.bmux` from disk (with a real file picker and `--run` to start on load), run
+  the built-in demo, or stop a run. Stop cuts a pending `sleep` short and the next
+  line never runs.
+- **The script panel** — a textarea with Run / Stop / File / ×, `Ctrl+Enter` to run,
+  and a progress line that always names the current command
+  (`7/73 · select-layout main-vertical`), tinted while a script is running.
+- **A run is a transcript**: every line is echoed as `[7/73] …` with its result, a
+  failing line does not stop the rest (`;`-chain semantics), and the summary counts
+  the errors (`ran 73/73`, `stopped after 12/73`, `… 2 command(s) reported an error`).
+- **One script at a time**, and a script cannot start another — the runner refuses a
+  nested run so that `script stop` always means something.
+- **Two shipped examples**: `examples/demo.bmux` (site-agnostic, byte-identical to
+  what `script demo` runs) and `examples/dtrh-tour.bmux` (the three-page dtrh.net
+  tour used for the README screenshot and the recorded demo).
+- **Screenshot** `docs/images/05-script-panel.png`: the tour at its last step on
+  dtrh.net — three panes titled `home`, `changelog` and `tools`, the panel holding
+  the script and `finished · 63/63`.
+
+### Changed
+
+- `content/scripts.js` is a new content script, loaded before `commands.js`: it owns
+  the format (parser, sleep arguments, built-in demo text) and holds no commands.
+- `Tab` completion knows `script`'s actions, and `inherit` was added to the
+  vocabulary (`persist` already had it).
+- `manifest.json` is 0.6.0 and lists the third content script.
+
+### Notes
+
+- **A script cannot click.** A prompt raised by a script waits for a human (or the
+  15 s timeout) — the demos pass `-y` to `filter` and leave the clickable card to
+  the person driving the demo.
+- **A script does not survive navigation.** Reload, a new tab and the inheritance
+  round trip destroy the runner, so those steps stay manual in the demos.
+- **Not a programming language** by design: no variables, loops or branches, so
+  every line remains something you could have typed.
+- The panel is not persisted; a running script ends with the page.
+
+### Verification
+
+- `node --check` clean; CRLF kept everywhere; `manifest.json` parses as 0.6.0.
+- jsdom: **859 checks** — 48 new ones for the format (comments, prompts, sleeps,
+  limits, per-line errors), the runner (ordering, real pacing, stop cutting a sleep,
+  nested-run refusal, panel state, summary text), the commands (`sleep`, `script`
+  status/usage) and both shipped examples (they parse, every command they use
+  exists, `examples/demo.bmux` is byte-identical to the built-in copy, and the site
+  tour really does load pages and name panes).
+- Chromium 150, unpacked: **133 checks** — a `.bmux` file uploaded through the real
+  file input and run from the panel (panes change, titles land, progress reads
+  `finished · 6/6`), then a `sleep 30` script stopped from the button mid-pause, with
+  the next command proven not to have run.
+- The shipped demo was also run end to end in Chromium against
+  [dtrh.net](https://www.dtrh.net/): `73/73` commands, **zero** error lines in the
+  log, ending on three panes titled `main`, `docs`, `tools` in the frost palette.
+
 ## [0.5.0] - 2026-11-09
 
 The layout survives a reload, and named layouts can be saved and restored.

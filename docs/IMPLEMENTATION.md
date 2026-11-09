@@ -313,7 +313,37 @@ that silently does nothing can be identified.
   `document.activeElement`, so a keydown aimed at a BMUX input is never swallowed by
   Control Mode (this is what made a hidden debug input unusable).
 
-### 20. **Modern UI Design**
+### 20. **Script files (`.bmux`)**
+A script is commands, not code. `bmuxParseScript(text)` (in `content/scripts.js`)
+turns the file into `{ index, line, text, sleep }` entries — stripping comments
+(`#`, `//`, `#!`), blanks and a pasted `>`/`$` prompt — and refuses the whole file
+with a line number if it breaks a limit (500 commands, 2000 characters per line,
+64 KB). No command is special-cased: `BMUXClient.runScript()` runs each entry
+through `runCommand()`, the same dispatcher every other entry point uses.
+
+**Pacing.** `sleep` is an ordinary command (`sleepSeconds()` on the client), so it
+works in a script and in a `;` chain alike. The pause is a cancellable promise held
+in `this.sleepState`; `cancelSleep()` resolves it early, which is how `script stop`
+ends a `sleep 30` immediately instead of waiting it out.
+
+**Runner state.** `this.scriptRun = { name, total, index, stopped }` is the single
+source of truth: `script stop` sets `stopped` and cuts the sleep, the loop checks
+it before each line, and `runCommand('script …')` refuses to start a second run
+while it is set (a script cannot start a script, so Stop always means something).
+A failing line is logged and the loop continues — shell `;` semantics — and the
+summary counts the errors.
+
+**Panel.** `#bmux-script-panel` is part of the injected overlay (textarea, Run /
+Stop / File / ×, a progress line and a hidden `<input type=file accept=".bmux">`),
+so `script file` uses a real file picker and `FileReader`; nothing is read from
+disk behind the user's back. The panel is not persisted: it is a tool for the
+session, and a running script dies with the page anyway.
+
+**Why scripts cannot click.** A prompt is answered by a human event, so a script
+that opens one waits for it (or the 15 s timeout). The shipped demo passes `-y` to
+the filter commands and leaves the clickable card to the person driving the demo.
+
+### 21. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -347,18 +377,25 @@ that silently does nothing can be identified.
 ### File Structure
 ```
 BMUX/
-├── manifest.json          # Extension configuration (v0.1.0)
+├── manifest.json          # Extension configuration (v0.6.0)
 ├── background/
 │   └── main.js           # Service worker (relay + layout persistence)
 ├── content/
-│   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher
+│   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher, script runner
 │   ├── commands.js       # Command registry + key bindings (source of truth)
-│   └── styles.css        # UI, split handles, drag shield
+│   ├── scripts.js        # .bmux format: parser, sleep arguments, built-in demo
+│   └── styles.css        # UI, split handles, panels, drag shield
+├── examples/
+│   ├── demo.bmux         # Site-agnostic demo (what `script demo` runs)
+│   └── dtrh-tour.bmux    # Three-page tour of dtrh.net (screenshot/recording)
 └── (no popup: the toolbar icon activates BMUX directly)
 ```
 
-`manifest.json` loads `content/commands.js` before `content/main.js`, so the
-registry and key bindings exist before the client is constructed.
+`manifest.json` loads `content/scripts.js`, then `content/commands.js`, then
+`content/main.js`, so the `.bmux` parser and the registry both exist before the
+client is constructed. The scripts file holds no commands of its own: it is the
+format (parser + `sleep` arguments + the built-in demo text), which is why the
+registry and the runner can both use it.
 
 ### Message Flow
 
