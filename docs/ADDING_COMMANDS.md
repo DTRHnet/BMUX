@@ -31,7 +31,7 @@ content/commands.js  the command
     description: 'What this does',    // one line, shown by help
     usage: 'command-name [arguments]',
     execute: async function (api, args) {
-        // api.client : the top-frame BMUXClient (pane/overlay primitives)
+        // api.client : the top-frame BMUXClient (layout, pane and overlay primitives)
         // api.pane   : the pane this command was invoked for, or the active pane
         // api.log    : append a line to the debug console
         // args       : array of arguments, already split on whitespace
@@ -52,6 +52,10 @@ Rules that keep commands consistent with the rest of BMUX:
 4. **Never throw for bad input.** Return an error or usage line. The dispatcher
    catches throws, but a clear message is better than `Error: undefined`.
 5. **`usage` starts with the command name**, because `help` prints it verbatim.
+6. **Do not move pane elements in the DOM.** Reparenting an iframe reloads the
+   page inside it. Use the layout primitives (`api.client.splitWindow`,
+   `killPane`, `applyLayout`, `swapPanes`, `rotatePanes`, `setPaneSize`,
+   `zoomPane`) instead of touching the DOM structure.
 
 ## Adding a pane command
 
@@ -74,7 +78,13 @@ Rules that keep commands consistent with the rest of BMUX:
         const doc = safeGetIframeDocument(iframe);   // helper in commands.js
         if (!doc) return 'Error: Cross-origin content';
 
-        const found = doc.querySelectorAll(args[0]);
+        let found;
+        try {
+            found = doc.querySelectorAll(args[0]);
+        } catch (e) {
+            return `Error: Invalid selector "${args[0]}"`;
+        }
+
         return `Found ${found.length} element(s) matching ${args[0]}`;
     }
 }
@@ -85,39 +95,64 @@ line, every pane input, and `help`.
 
 ## Adding an overlay command
 
-Overlay commands use the client primitives rather than touching the DOM themselves:
+Overlay commands use the client primitives rather than touching the DOM:
 
 ```javascript
-'zoom-pane': {
+'spread-panes': {
     scope: 'overlay',
-    description: 'Report the focused pane at full size (not implemented)',
-    usage: 'zoom-pane',
+    description: 'Give every pane the same share of its parent split',
+    usage: 'spread-panes',
     execute: function (api) {
-        const pane = api.client.getActivePane();
-        if (!pane) return 'Error: No active pane';
-        return `Would zoom pane ${api.client.getPaneNumber(pane)} (${api.client.getPaneId(pane)})`;
+        const client = api.client;
+        const panes = client.getPanes();
+        if (panes.length < 2) return 'Error: Split first';
+
+        panes.forEach((pane) => client.setPaneSize(pane, 1 / panes.length));
+        return `Evened out ${panes.length} panes`;
     }
 }
 ```
 
 ### Client primitives available on `api.client`
 
+**Panes and identity**
+
 | Method | Returns |
 |--------|---------|
-| `getPanes()` | Array of pane elements, DOM order |
+| `getPanes()` | Array of pane elements in layout order |
 | `getActivePane()` | The pane with the `active` class, or the first pane |
 | `getPaneId(pane)` | The pane's id string, e.g. `%2` |
-| `getPaneNumber(pane)` | The pane's 1-based reading-order number |
+| `getPaneNumber(pane)` | The pane's 1-based layout number |
 | `getPaneUrl(pane)` | The pane's current URL (cross-origin safe) |
+| `getPaneTitle(pane)` | Custom title, else page title, else URL |
+| `renamePane(pane, title)` | Set or clear (`-`) the footer title |
+| `getPaneRect(pane)` | Fractional rect `{ x, y, w, h }` in 0..1 |
+| `getPaneSizeLabel(pane)` | Human size, e.g. `30%x100%` |
 | `findPaneByToken(token)` | Pane from `2` or `%2`, or `null` |
-| `setActivePane(pane)` | Makes the pane active, refreshes badges and status bar |
+| `setActivePane(pane)` | Focus a pane, refresh badges and status bar |
+| `lastPane()` / `cyclePane(step)` | Previous pane / next or previous pane |
+| `isZoomed(pane)` | Whether that pane is zoomed |
+
+**Layout operations** (these never reload a page)
+
+| Method | Returns |
+|--------|---------|
+| `splitWindow(direction, opts)` | `{ ok, pane }`; `opts = { size, before, keepFocus, url }` |
+| `killPane(pane)` | `{ ok, pane }` or `{ ok: false, message }` (last pane refused) |
+| `resizePane(pane, direction, percent)` | Moves the adjacent boundary |
+| `setPaneSize(pane, share)` | Sets the pane's share of its parent split |
+| `zoomPane(pane)` | Toggle zoom; `{ ok, zoomed }` |
+| `applyLayout(name)` | `even-horizontal`, `even-vertical`, `main-vertical`, `main-horizontal`, `tiled` |
+| `nextLayout()` | Cycle to the next preset |
+| `swapPanes(a, b)` | Trade two panes' positions |
+| `rotatePanes(reverse)` | Move every pane one slot |
+| `displayPanes()` | Show pane numbers for two seconds |
 | `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
-| `splitWindow(direction)` | Splits the active pane (`'horizontal'`/`'vertical'`) |
-| `newWindow()` | Resets to a single pane |
-| `toggle()` | Hides or shows the overlay |
-| `setControlMode(on)` | Sets Control Mode on/off |
-| `showCommandMode()` / `hideCommandMode()` | Opens/closes the `:` line |
-| `log(message)` | Appends to the debug console |
+| `newWindow()` | Reset to a single pane |
+| `toggle()` | Hide or show the overlay |
+| `setControlMode(on)` | Set Control Mode |
+| `showCommandMode()` / `hideCommandMode()` | Open/close the `:` line |
+| `log(message)` | Append to the debug console |
 
 ## Adding a key binding
 
@@ -128,19 +163,20 @@ Keys are data, not code. Add an entry to `BMUX_KEYBINDINGS` in
 const BMUX_KEYBINDINGS = {
     control: {
         // ...
-        'z': 'zoom-pane'
+        'v': 'split-window -v -l 70%'
     },
     prefix: {
         // ...
-        'z': 'zoom-pane'
+        'v': 'split-window -v -l 70%'
     }
 };
 ```
 
 `control` is used in Control Mode (Alt+Shift+B), `prefix` after `Ctrl+b`. The value
-is a command line, so it can carry arguments (`'focus-pane left'`). Keys that are
-not listed are swallowed by Control Mode, which is what stops the page from seeing
-them.
+is a command line, so it can carry arguments. Alt combinations are written
+`Alt+ArrowLeft`; the space bar is written `Space`. Keys that are not listed are
+swallowed by Control Mode, which is what stops the page from seeing them. Typing
+in a console or pane input always takes precedence over bindings.
 
 ## Built-in commands
 
@@ -149,12 +185,18 @@ Overlay scope:
 | Command | Description |
 |---------|-------------|
 | `help` | List every command, grouped by scope |
-| `list-panes` | Number, id, active marker and URL for each pane |
+| `list-panes [-j]` | Number, id, size, marker, title, URL |
 | `focus-pane <n\|%id\|dir>` | Focus by number, id, or direction (wraps) |
-| `split-window [-h\|-v]` | Split the active pane |
+| `last-pane` | Focus the previous pane |
+| `cycle-pane [next\|prev]` | Next / previous pane in layout order |
+| `split-window [-h\|-v] [-l size] [-b] [-d]` | Split the active pane |
+| `kill-pane [target]` | Close a pane (last pane refused) |
+| `resize-pane [-L\|-R\|-U\|-D n] [-x size] [-Z]` | Resize or zoom |
+| `select-layout <name>` / `next-layout` | Layout presets |
+| `swap-pane <a> [b]` / `rotate-window [-r]` | Reorder panes |
+| `display-panes` | Show numbers, pick with a digit |
 | `new-window` | Reset the overlay to one pane |
 | `detach` | Hide or show the overlay |
-| `kill-pane` | Registered; reports "not implemented" |
 | `control-mode [on\|off\|toggle]` | Enter or leave Control Mode |
 | `command-prompt` | Open the `:` line |
 
@@ -165,6 +207,8 @@ Pane scope:
 | `source` | Show the pane's HTML in a console view |
 | `restore` | Return from console view to browser view |
 | `filter <selector>` | List elements matching a CSS selector |
+| `capture-pane [-n lines]` | Print the pane's visible text |
+| `rename-pane <title\|->` | Set or clear the footer title |
 | `url [new-url]` | Show or change the pane URL |
 | `reload` | Reload the pane |
 | `clear` | Clear the pane's output area |
@@ -258,20 +302,44 @@ iframe.contentWindow.eval('alert("Hello from BMUX!")');
 
 ### Layout scripting
 
-Overlay commands make multi-pane layouts scriptable:
+Overlay commands make multi-pane layouts scriptable, without reloading anything:
 
 ```javascript
-'quad': {
+'study': {
     scope: 'overlay',
-    description: 'Split into four panes',
-    usage: 'quad',
+    description: 'Wide reading pane plus a stack of notes panes',
+    usage: 'study',
     execute: function (api) {
         const client = api.client;
-        client.splitWindow('horizontal');
-        client.splitWindow('vertical');
-        client.setActivePane(client.getPanes()[0]);
-        client.splitWindow('vertical');
-        return 'Four panes';
+        const panes = client.getPanes();
+
+        if (panes.length < 3) {
+            client.splitWindow('horizontal', { size: 0.6 });
+            client.splitWindow('vertical', { size: 0.5 });
+        }
+
+        client.applyLayout('main-vertical');
+        client.renamePane(client.getPanes()[0], 'Reading');
+        return 'Study layout ready';
+    }
+}
+```
+
+### Reporting on the layout
+
+```javascript
+'sizes': {
+    scope: 'overlay',
+    description: 'Show every pane size as JSON',
+    usage: 'sizes',
+    execute: function (api) {
+        const client = api.client;
+        return JSON.stringify(client.getPanes().map((pane) => ({
+            id: client.getPaneId(pane),
+            title: client.getPaneTitle(pane),
+            size: client.getPaneSizeLabel(pane),
+            zoomed: client.isZoomed(pane)
+        })), null, 2);
     }
 }
 ```
@@ -317,7 +385,9 @@ execute: async function (api, args) {
    and a pane's input (`>`) — all three should behave the same.
 4. Run `help`: the new command must appear with its usage line.
 5. Check a bad argument: it should return a message, not throw, and it must not
-   move focus.
+   change the layout or move focus.
+6. If the command changes the layout, check that the pages in the panes are still
+   alive (their iframes must not be recreated).
 
 ## Command template
 

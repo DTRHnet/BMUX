@@ -5,132 +5,151 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0] - 2026-11-09
 
-Pane focus navigation, pane identity, and a single command registry that every
-entry point shares. Nothing here is released yet; the extension version stays at
-0.0.1 until it is cut.
+A ratio-driven layout engine, real pane management, and one command registry that
+every entry point shares.
 
 ### Added
 
-- **Directional pane focus**
-  - `Up` / `Down` / `Left` / `Right` buttons in the toolbar, at the right-hand end.
-    Each one runs `focus-pane <direction>` through the same dispatcher the console
-    uses, so the buttons and the console cannot drift apart.
-  - `focus-pane up|down|left|right` from the debug console, the `:` line, or a
-    pane's input.
-  - Arrow keys move focus in Control Mode and after the `Ctrl+b` prefix.
-  - **Wrap-around:** when nothing lies in the requested direction, focus moves to
-    the pane furthest on the opposite side. With two side-by-side panes and focus
-    on the right one, `Right` lands on the left one.
-  - Picking is geometric: the nearest pane whose centre lies in that direction
-    wins, with a penalty for drifting off-axis, so the pane straight ahead beats a
-    nearer one far off to the side. Layout is nested flexbox, so this reads real
-    pane rectangles rather than assuming a grid.
-  - Click to focus: clicking a pane's body or footer makes it the active pane.
-  - Click into a pane's iframe: the click is inside another document, so the pane
-    is focused from the window blur that names the iframe as `activeElement`
-    (this works for cross-origin frames too).
-
-- **Pane identity**
-  - Each pane has an id (`%1`, `%2`, …) assigned once when the pane is created and
-    never reused.
-  - Each pane also has a number: its reading-order position, recomputed after a
-    split or a new window so numbers always run 1..n.
-  - Every pane footer shows a `[number id]` badge, e.g. `[2 %2]`.
-  - `list-panes` prints each pane's number, id, active marker and URL.
-
-- **Overlay commands are now available from the console**
-  - `list-panes`, `focus-pane`, `split-window -h|-v`, `new-window`, `detach`,
-    `kill-pane`, `control-mode` and `command-prompt` can be typed in the debug
-    console, the `:` line, or a pane's input.
-  - `help` lists every command, grouped by scope, generated from the registry.
-  - The `:` line (Control Mode) is itself a command (`command-prompt`).
-
-- **`BMUX_KEYBINDINGS`** in `content/commands.js`: Control Mode and `Ctrl+b` keys
-  are mapped to command lines, so the keys, the buttons and the console all run
-  the same commands.
+- **Ratio-driven layout engine**
+  - The layout is a binary split tree — `leaf` or `split(direction, ratio)` — and
+    `split-window`, `kill-pane`, `resize-pane`, zoom, layout presets, `swap-pane`
+    and `rotate-window` all edit that tree and recompute rectangles.
+  - Panes are absolutely positioned inside `#bmux-panes` from fractional
+    rectangles, so resizing the browser window keeps every pane proportional.
+  - **Pane elements are never moved in the DOM.** Splitting, changing layout,
+    swapping and rotating therefore no longer reload the pages in the panes.
+    (Until 0.0.1, splitting reparented the iframe, and reparenting an iframe
+    reloads it.)
+- **Mouse resizing**: one draggable handle per split boundary — 8 px hit area, a
+  hairline marker, a hover highlight and a `col-resize`/`row-resize` cursor.
+  Double-clicking a handle resets that split to 50/50. While dragging, a
+  full-overlay shield keeps the pointer off the pane iframes, which would
+  otherwise swallow the events that drive the drag.
+- **`split-window` sizes and placement**: `-l <size>` / `-p <size>` (`30%`, `30`
+  or `0.3`), `-b` (put the new pane first), `-d` (keep focus on the pane being
+  split). Splits are clamped to 10–90%.
+- **`kill-pane`** is real: it closes a pane, gives the space back to its
+  neighbour, moves focus sensibly, and refuses to kill the last pane.
+- **`resize-pane`**: `-L/-R/-U/-D <percent>` moves the adjacent boundary,
+  `-x <size>` sets the pane's share of its parent, `-Z` toggles zoom.
+- **Zoom**: a pane can fill the overlay while the other panes keep running (they
+  are hidden, not destroyed). Marked `[ZOOM]` in `list-panes` and `· ZOOM` in the
+  status bar; any directional focus move unzooms first.
+- **Layout presets**: `select-layout even-horizontal|even-vertical|main-vertical|
+  main-horizontal|tiled`, and `next-layout` (`Space` in Control Mode) to cycle.
+- **Pane titles**: `rename-pane <title>` (or `-` to clear). The footer shows the
+  title, derived from the page `<title>` when same-origin or from the URL
+  otherwise.
+- **`swap-pane`** and **`rotate-window`**: reorder panes without reloading any
+  page.
+- **`display-panes`**: shows each pane number over the pane; press a digit to
+  focus that pane, `Escape` cancels (`q` in Control Mode).
+- **`capture-pane [-n <lines>]`**: prints the pane's visible text (same-origin).
+- **`list-panes`** now shows size and title and accepts `-j|--json` for tooling.
+- **`cycle-pane [next|prev]`** and **`last-pane`** (`o` and `;`).
+- **Directional pane focus** (from the unreleased work on this branch, first
+  shipped in 0.1.0):
+  - `Up` / `Down` / `Left` / `Right` toolbar buttons, each running
+    `focus-pane <direction>` through the shared dispatcher.
+  - Arrow keys move focus in Control Mode and after the `Ctrl+b` prefix,
+    with wrap-around at the edge of the layout.
+  - Picking is geometric: the nearest pane whose centre lies in that direction,
+    with a penalty for drifting off-axis; with nothing in that direction, focus
+    wraps to the pane furthest on the opposite side.
+  - Click to focus on a pane's body or footer, and inside its iframe (via the
+    window blur/`activeElement` sync, which also works cross-origin).
+- **Pane identity**: ids `%N` assigned once and never reused, reading-order
+  numbers, a `[number id]` footer badge, and the focused pane in the status bar.
+- **Overlay commands from the console**: `list-panes`, `focus-pane`,
+  `split-window`, `kill-pane`, `resize-pane`, `select-layout`, `swap-pane`,
+  `rotate-window`, `new-window`, `detach`, `control-mode` and `command-prompt` can
+  be typed in the debug console, the `:` line or a pane's input.
+- **`BMUX_KEYBINDINGS`**: both key tables are command lines in
+  `content/commands.js`; `Alt+arrow` resizes, `z` zooms, `q` shows numbers, `o`
+  and `;` cycle and return, `Space` cycles layouts.
+- Toolbar gains `Zoom` and `Layout` buttons.
 
 ### Changed
 
-- **`content/commands.js` is the single source of truth.** Every command defines
-  `scope` (`overlay` or `pane`), `description`, `usage` and
-  `execute(api, args)`. Overlay commands live there too — not in `main.js`.
-- **`content/main.js` holds no command definitions, no help text and no
-  key-to-action switch.** It parses a line, looks the name up in the registry
-  (own-property lookup) and calls `execute` with an `api` object
-  (`{ client, pane, log }`). The client keeps only the primitives commands need:
-  `getPanes`, `getPaneNumber`, `getPaneId`, `getActivePane`, `setActivePane`,
-  `findPaneByToken`, `focusDirection`, `splitWindow`, `newWindow`, `toggle`,
-  `setControlMode`, `showCommandMode`/`hideCommandMode`, `log`.
-- Toolbar buttons run their command and log the line plus its result in the
-  debug console. They no longer enter and leave Control Mode themselves.
-- **Background relay carries a command line.** `relay-line` →
-  `execute-line` with `{ line }`, replacing `relay-to-top` with `{ action, params }`.
-  The background no longer knows any command names.
-- `toggleControlMode()` is now a thin wrapper over `setControlMode(on)`, so
-  entering and leaving Control Mode is one code path (`control-mode on|off|toggle`).
-- Status bar right-hand side shows the focused pane, e.g. `pane 2 %2`.
-- The debug console input placeholder now says what it does (run a command).
-- Split and New Window refresh pane numbers and badges.
+- `content/commands.js` is the single source of truth for commands: every command
+  (overlay and pane) defines `scope`, `description`, `usage` and
+  `execute(api, args)`. `content/main.js` holds no command definitions, no help
+  text and no key-to-action switch — it parses a line, looks the name up
+  (own-property lookup) and calls `execute`.
+- Toolbar buttons, the debug console, the `:` line, pane inputs, both key tables
+  and the background relay all run the same dispatcher.
+- Panes are numbered by **layout order** (top-to-bottom, left-to-right), so
+  numbers follow the picture instead of the order panes were created in.
+- The background relay carries a command line (`relay-line` → `execute-line` with
+  `{ line }`) instead of `action`/`params`; the background knows no command names.
+- `setControlMode(on)` replaces the toggle-only implementation; `control-mode
+  on|off|toggle` and `Escape` share that one path.
+- `split-window` still clones the active pane's URL into the new pane, but the
+  original pane is no longer reparented.
+- Attaching the overlay no longer leaves focus inside a hidden command input.
+- The debug console no longer gets a duplicate "Split …" line for each split.
+- `help` is generated from the registry and grouped by scope.
 
 ### Fixed
 
-- **Prototype names can no longer resolve as commands or keys.** Lookups use
-  `Object.prototype.hasOwnProperty.call`, so `constructor`, `__proto__`,
-  `hasOwnProperty` and friends report `Unknown command` instead of calling an
-  inherited function.
-- **Bad arguments never throw.** An unknown pane number, an unknown pane id, a
-  non-numeric token, a missing argument or an unknown flag return an error or
-  usage line and leave focus where it was; a throw inside any command is caught
-  by the dispatcher and reported as `Error: …`.
-- The `:` line's open state is tracked explicitly. Previously the check read the
-  inline `display` style, which is empty before the line is ever opened, so keys
-  could be swallowed while the command input had focus.
-- Control Mode key handling no longer dereferences the overlay UI in frames that
-  have none (the content script also runs inside each pane's iframe, where
-  `this.ui` is undefined).
-- Pane output no longer shows an empty output box for commands that return
-  nothing (`clear`).
+- **Prototype names can no longer resolve as commands or keys** —
+  `constructor`, `__proto__` and `hasOwnProperty` report `Unknown command`.
+- **Bad arguments never throw**: unknown pane/number/id, unknown flags, missing
+  arguments and invalid sizes return a message and leave the layout and focus
+  untouched; a throw inside a command is caught and reported.
+- Space could not trigger a binding (`event.key` is `' '`, not `'Space'`).
+- Mouse resizing stopped as soon as the pointer crossed a pane iframe.
+- `resize-pane` used to refuse a direction with no neighbour on that side; every
+  direction now moves the adjacent boundary.
+- `rotate-window` rotated the wrong way (panes moved to the previous slot).
+- Control Mode key handling no longer dereferences an overlay UI that pane frames
+  do not have.
+- The `:` line's open state is tracked explicitly, so keys are no longer
+  swallowed when the command input has focus before the line was ever opened.
+- Pane output no longer shows an empty box for commands that return nothing.
 
 ### Notes
 
-- `kill-pane` is registered and reports "not implemented". No pane is killed;
-  `x` in Control Mode and `Ctrl+b x` say so instead of doing nothing silently.
-- `new-window` still resets the overlay to a single pane; it discards the current
-  layout (unchanged).
-- Splitting still reloads the iframe of the pane being split, because moving an
-  iframe in the DOM reloads it. Unchanged by this work and still worth a
-  follow-up.
+- Still not implemented: floating panes, break/join pane, multiple windows or
+  layout tabs, sessions/persistence, and broadcasting input to all panes.
+- `kill-pane` never kills the last pane; use `new-window` to reset instead.
+- `new-window` still resets the overlay to a single pane.
 - `Escape` closes the `:` line and leaves Control Mode on; a second `Escape`
-  leaves Control Mode. Unchanged.
-- `docs/DESIGN.md`, `docs/UPDATE_STATUS.md` and `RELEASE_NOTES.md` are kept as
-  historical documents and were not rewritten.
+  leaves Control Mode.
+- Mouse resizing needs a mouse: touch input is not handled.
+- Cross-origin panes cannot be inspected (`source`, `filter`, `capture-pane`);
+  navigation, reload, sizing and reordering work regardless of origin.
+- `docs/DESIGN.md`, `docs/UPDATE_STATUS.md` and the 0.0.1 section of
+  `RELEASE_NOTES.md` are kept as historical documents and were not rewritten.
 
 ### Verification
 
-- `node --check` on every changed script.
+- `node --check` on every changed script; all edited files kept CRLF line endings.
 - **jsdom harness** (`content/commands.js` + `content/main.js` loaded as the
-  manifest loads them, same script order, one global scope): 222 checks covering
-  the toolbar, the dispatcher, both key tables, the `:` line, pane inputs, the
-  debug console, click-to-focus, wrap-around in two-pane and 2x2 layouts, bad
-  input, ids/numbers/badges, and the background relay. All pass.
-- **Real browser**: the extension was loaded unpacked in Chromium 150 (headless,
-  puppeteer-core) and 22 checks passed: overlay injected, one initial pane with
-  id `%1` and badge `[1 %1]`, the four focus buttons present, `Split H` producing
-  two panes with `%1`/`%2` badges, the toolbar command echoed in the console,
-  `focus-pane right` wrapping from the right pane to the left pane using real pane
-  geometry, the status bar showing `pane 1 %1`, `list-panes` from the console with
-  the `[ACTIVE]` marker, Control Mode status, `ArrowRight` moving focus and
-  wrapping, mousedown click-to-focus, and no uncaught page errors or BMUX console
-  errors.
+  manifest loads them, same script order, one global scope): **439 checks**,
+  covering the dispatcher, both key tables, the `:` line, pane inputs, the debug
+  console, click-to-focus, wrap-around, split sizes/`-b`/`-d`, kill, resize,
+  zoom, all five layouts, swap/rotate, mouse drag and clamp, display-panes,
+  titles, capture-pane, list-panes text and JSON, bad input, ids/numbers/badges,
+  and the background relay.
+- **No-reload proof in the harness**: after three layout presets, a swap, a
+  rotation, a resize and another split, every pane element is still the same
+  connected node, still a direct child of `#bmux-panes`, and still owns the very
+  same `<iframe>` element.
+- **Real browser** (unpacked extension in Chromium 150, headless,
+  puppeteer-core): **36 checks**, including mouse-dragging a split handle
+  (592 → 392 px), `z` zoom and unzoom, `Space` layout cycling, `main-vertical`,
+  `swap-pane`, `Alt+Arrow` resizing, `rename-pane`, `capture-pane`, killing panes
+  down to the last one, arrow focus, no uncaught page errors, and a live marker
+  set on the pane iframe's window that survives splitting, zooming, layout
+  changes and swapping — the direct evidence that no page was reloaded.
 - **Not covered by any run**: the `Alt+Shift+B` global hotkey (a browser-level
-  command that cannot be synthesised from DevTools; the browser harness un-hid the
-  overlay directly instead), the popup buttons, the `Ctrl+b` prefix in a real
-  browser, `chrome.storage` state, and `kill-pane` beyond its "not implemented"
-  message. The click-inside-an-iframe focus path is only exercised against jsdom (a
-  simulated window blur with an iframe as `activeElement`); no cross-origin frame was
-  used in either run. Google Chrome 157 rejects `--load-extension`, so the browser run
+  command that cannot be synthesised from DevTools; the browser harness un-hides
+  the overlay directly), the popup buttons, the `Ctrl+b` prefix in a real
+  browser, `chrome.storage` state, and cross-origin panes (every browser check ran
+  same-origin). Google Chrome 157 rejects `--load-extension`, so the browser run
   used `chromium`.
 - Both harnesses are local only (`.verify/`, gitignored; they need `jsdom` and
   `puppeteer-core`) and are not part of the extension.
@@ -212,14 +231,17 @@ entry point shares. Nothing here is released yet; the extension version stays at
 
 ---
 
-## Planned for 0.1.0
+## Planned for 0.2.0
 
-- Full state persistence
-- Pane resizing
-- Named sessions
-- `kill-pane` actually closing a pane
-- Splitting without reloading the split pane's iframe
-- Better error handling
+- Floating panes (a pane that overlays the layout instead of taking space)
+- `break-pane` / `join-pane`
+- Multiple windows / layout tabs with their own layouts
+- Session persistence (save and restore layouts, titles and URLs)
+- Broadcasting input to all panes
+- Pane drag-and-drop reordering with the mouse
+- Touch/pointer-based resizing
+- State persistence in `chrome.storage`
+- Better error handling and recovery
 
 ### Future Considerations
 - Plugin/extension system

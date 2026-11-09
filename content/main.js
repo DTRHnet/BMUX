@@ -5,6 +5,20 @@
  * command definitions, help text or key-to-action switch: every command lives
  * in `content/commands.js`, and every entry point (toolbar, debug console,
  * `:` line, pane inputs, keys, background relay) ends up in `runCommand`.
+ *
+ * Layout model
+ * ------------
+ * Panes are absolutely positioned inside `#bmux-panes`, and their geometry comes
+ * from a binary split tree:
+ *
+ *     leaf  = { kind: 'leaf', pane: HTMLElement }
+ *     split = { kind: 'split', direction: 'row' | 'column', ratio, first, second }
+ *
+ * `ratio` is the share of the split given to `first` (0..1). Every structural
+ * edit — split, kill, resize, zoom, layout preset, swap, rotate — rewrites this
+ * tree and recomputes rectangles. Pane elements are never moved in the DOM,
+ * because moving an iframe in the DOM reloads it: with this model, splitting,
+ * re-laying out, swapping and rotating keep every page alive.
  */
 
 console.log("BMUX Client Loading...");
@@ -21,6 +35,30 @@ const BMUX_DRIFT_WEIGHT = 2;
 // How long the Ctrl+b prefix stays armed, in ms.
 const BMUX_PREFIX_TIMEOUT = 3000;
 
+// Gap kept between panes, in px, applied on both sides of every pane edge.
+const BMUX_GUTTER = 4;
+
+// Split shares are clamped so no pane can be squeezed to nothing by accident.
+const BMUX_MIN_SHARE = 0.1;
+const BMUX_MAX_SHARE = 0.9;
+
+// Resize clamps are wider than split clamps: dragging a border should be able to
+// approach an edge even though a fresh split should not.
+const BMUX_MIN_RESIZE = 0.05;
+const BMUX_MAX_RESIZE = 0.95;
+
+// How long display-panes keeps the numbers on screen, in ms.
+const BMUX_PANE_INDEX_TIMEOUT = 2000;
+
+// Layout presets, in cycle order for next-layout.
+const BMUX_LAYOUTS = ['even-horizontal', 'main-vertical', 'even-vertical', 'main-horizontal', 'tiled'];
+
+function bmuxClamp(value, low, high) {
+    if (value < low) return low;
+    if (value > high) return high;
+    return value;
+}
+
 /**
  * Own-property lookup. Command names and key bindings are data, not
  * prototypes: "constructor" or "__proto__" must report "unknown", never resolve
@@ -28,6 +66,17 @@ const BMUX_PREFIX_TIMEOUT = 3000;
  */
 function bmuxHasOwn(object, key) {
     return object != null && Object.prototype.hasOwnProperty.call(object, key);
+}
+
+/**
+ * The key a binding table is looked up with. Alt combinations are written as
+ * "Alt+ArrowLeft" so keyboard and mouse resizing can share one table.
+ */
+function bmuxBindingKey(event) {
+    // The space bar reports " ", which is unreadable in a binding table.
+    const key = event.key === ' ' ? 'Space' : event.key;
+    if (event.altKey && !event.ctrlKey && !event.metaKey) return `Alt+${key}`;
+    return key;
 }
 
 /**
@@ -111,6 +160,58 @@ function pickPaneInDirection(panes, current, direction, rectOf) {
     return { pane: others[0].pane, wrapped: true };
 }
 
+// --- Layout tree helpers (pure data, no DOM) ---
+
+function bmuxLeaf(pane) {
+    return { kind: 'leaf', pane: pane };
+}
+
+/** Evenly split a list of nodes in `direction` (halves, recursively). */
+function bmuxEvenSplitNodes(nodes, direction) {
+    if (nodes.length === 1) return nodes[0];
+
+    const mid = Math.ceil(nodes.length / 2);
+    return {
+        kind: 'split',
+        direction: direction,
+        ratio: mid / nodes.length,
+        first: bmuxEvenSplitNodes(nodes.slice(0, mid), direction),
+        second: bmuxEvenSplitNodes(nodes.slice(mid), direction)
+    };
+}
+
+function bmuxEvenSplitPanes(panes, direction) {
+    return bmuxEvenSplitNodes(panes.map(bmuxLeaf), direction);
+}
+
+/** First pane on the left/top, the rest stacked beside/below it. */
+function bmuxMainSplit(panes, direction, mainShare) {
+    const main = bmuxLeaf(panes[0]);
+    const rest = panes.slice(1);
+    if (!rest.length) return main;
+
+    const stackDirection = direction === 'row' ? 'column' : 'row';
+    return {
+        kind: 'split',
+        direction: direction,
+        ratio: mainShare,
+        first: main,
+        second: bmuxEvenSplitPanes(rest, stackDirection)
+    };
+}
+
+/** Rows of equal height, each an even horizontal split. */
+function bmuxTiled(panes) {
+    const columns = Math.ceil(Math.sqrt(panes.length));
+    const rows = [];
+
+    for (let i = 0; i < panes.length; i += columns) {
+        rows.push(bmuxEvenSplitPanes(panes.slice(i, i + columns), 'row'));
+    }
+
+    return bmuxEvenSplitNodes(rows, 'column');
+}
+
 class BMUXClient {
     constructor() {
         this.isTop = window.self === window.top;
@@ -121,7 +222,18 @@ class BMUXClient {
         this.isControlMode = false;
         this.commandLineOpen = false;
         this.nextPaneId = 1;
+
+        this.layout = null;        // root of the split tree
+        this.layoutName = null;    // preset name, or null once edited by hand
+        this.rects = new Map();    // pane -> { x, y, w, h } fractions
+        this.zoomedPane = null;
+        this.lastActivePane = null;
+
+        this.paneIndexPrompt = false;
+        this.paneIndexTimer = null;
+
         this.ui = null;
+        this.handles = [];
 
         this.init();
     }
@@ -147,6 +259,12 @@ class BMUXClient {
             this.ui.debug.appendChild(line);
             this.ui.debug.scrollTop = this.ui.debug.scrollHeight;
         }
+    }
+
+    isTypingTarget() {
+        const element = document.activeElement;
+        if (!element) return false;
+        return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
     }
 
     /**
@@ -189,7 +307,6 @@ class BMUXClient {
         overlay.id = 'bmux-overlay';
         overlay.className = 'hidden';
 
-        // Modern HTML Structure
         overlay.innerHTML = `
           <div id="bmux-toolbar">
              <div style="font-weight:bold; margin-right:15px; color:#fff;">BMUX</div>
@@ -202,11 +319,14 @@ class BMUXClient {
                 <button class="bmux-btn bmux-btn-nav" id="btn-focus-down" title="focus-pane down">Down</button>
                 <button class="bmux-btn bmux-btn-nav" id="btn-focus-left" title="focus-pane left">Left</button>
                 <button class="bmux-btn bmux-btn-nav" id="btn-focus-right" title="focus-pane right">Right</button>
+                <button class="bmux-btn bmux-btn-nav" id="btn-zoom" title="resize-pane -Z">Zoom</button>
+                <button class="bmux-btn bmux-btn-nav" id="btn-layout" title="next-layout">Layout</button>
              </div>
           </div>
 
           <div id="bmux-panes">
-            <!-- Panes will be injected here -->
+            <!-- Panes are absolutely positioned children; handles sit above them -->
+            <div id="bmux-handles"></div>
           </div>
 
           <!-- Draggable Debug Console -->
@@ -224,6 +344,10 @@ class BMUXClient {
             <input id="bmux-command-input" type="text" />
           </div>
 
+          <!-- Covers the overlay while a split boundary is dragged, so the
+               pointer cannot slip over a pane iframe mid-drag -->
+          <div id="bmux-drag-shield"></div>
+
           <div id="bmux-status-bar">
             <span id="bmux-status-left">[NORMAL]</span>
             <span id="bmux-status-right">Ready</span>
@@ -236,11 +360,14 @@ class BMUXClient {
         this.ui = {
             overlay: overlay,
             panes: overlay.querySelector('#bmux-panes'),
+            handles: overlay.querySelector('#bmux-handles'),
             statusBar: overlay.querySelector('#bmux-status-bar'),
             statusLeft: overlay.querySelector('#bmux-status-left'),
             statusRight: overlay.querySelector('#bmux-status-right'),
             commandLine: overlay.querySelector('#bmux-command-line'),
             commandInput: overlay.querySelector('#bmux-command-input'),
+
+            dragShield: overlay.querySelector('#bmux-drag-shield'),
 
             debug: overlay.querySelector('#bmux-debug-content'),
             debugHeader: overlay.querySelector('#bmux-debug-header'),
@@ -255,7 +382,9 @@ class BMUXClient {
             btnFocusUp: overlay.querySelector('#btn-focus-up'),
             btnFocusDown: overlay.querySelector('#btn-focus-down'),
             btnFocusLeft: overlay.querySelector('#btn-focus-left'),
-            btnFocusRight: overlay.querySelector('#btn-focus-right')
+            btnFocusRight: overlay.querySelector('#btn-focus-right'),
+            btnZoom: overlay.querySelector('#btn-zoom'),
+            btnLayout: overlay.querySelector('#btn-layout')
         };
 
         // Bind Toolbar
@@ -269,6 +398,8 @@ class BMUXClient {
         this.ui.btnFocusDown.onclick = () => this.runCommandAndLog('focus-pane down');
         this.ui.btnFocusLeft.onclick = () => this.runCommandAndLog('focus-pane left');
         this.ui.btnFocusRight.onclick = () => this.runCommandAndLog('focus-pane right');
+        this.ui.btnZoom.onclick = () => this.runCommandAndLog('resize-pane -Z');
+        this.ui.btnLayout.onclick = () => this.runCommandAndLog('next-layout');
 
         // Bind Debug Input
         this.ui.debugInput.addEventListener('keydown', (e) => {
@@ -287,7 +418,7 @@ class BMUXClient {
         this.makeDraggable(this.ui.debugContainer, this.ui.debugHeader);
 
         // Initial Render
-        this.renderWindow({ root: null });
+        this.renderWindow();
     }
 
     makeDraggable(element, handle) {
@@ -323,7 +454,6 @@ class BMUXClient {
     setupListeners() {
         // 1. Message Listener (from Background or Popup)
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
-            // Toggle Command (usually from Popup) - Only Top cares
             if (this.isTop && request.command === 'toggle-bmux') {
                 this.toggle();
                 sendResponse({ status: 'ok' });
@@ -343,7 +473,6 @@ class BMUXClient {
         });
 
         // 2. Key Listener (Capture locally and send to background)
-        // We capture in capture-phase to intercept before page
         document.addEventListener('keydown', (e) => this.handleKey(e), true);
 
         // 3. Focus sync: a click into a pane's iframe focuses the iframe, and
@@ -351,6 +480,12 @@ class BMUXClient {
         // blurring with an iframe as activeElement means that iframe's pane was
         // clicked, so make it the active pane.
         window.addEventListener('blur', () => this.syncActivePaneFromFocus(), true);
+
+        // 4. The overlay can be resized; pane rects are fractions, so one render
+        // keeps every pane proportional to the new size.
+        window.addEventListener('resize', () => {
+            if (this.ui) this.renderLayout();
+        });
     }
 
     fetchState() {
@@ -366,8 +501,13 @@ class BMUXClient {
         this.log(`Toggle: ${this.isActive}`);
         if (this.isActive) {
             this.ui.overlay.classList.remove('hidden');
-            this.ui.commandInput.focus();
+            // Do not steal focus: keys must reach Control Mode, not a text field.
+            if (document.activeElement && document.activeElement.blur) {
+                document.activeElement.blur();
+            }
+            this.renderLayout();
         } else {
+            this.clearPaneIndexes();
             this.ui.overlay.classList.add('hidden');
         }
     }
@@ -387,33 +527,41 @@ class BMUXClient {
     handleKey(e) {
         // If we are in the Top frame and the Command Line is open and focused,
         // handle Enter/Escape here and let every other key through to the input.
-        // (The open state is tracked explicitly: reading the inline style would
-        // also catch the line before it was ever opened, since the CSS keeps it
-        // hidden and the inline style is empty.)
         if (this.isTop && this.ui && this.commandLineOpen &&
             document.activeElement === this.ui.commandInput) {
             if (e.key === 'Enter') {
                 this.submitCommandLine();
                 e.preventDefault(); e.stopPropagation();
             } else if (e.key === 'Escape') {
-                // Escape closes the : line and leaves Control Mode on, as before.
                 this.hideCommandMode();
                 e.preventDefault(); e.stopPropagation();
             }
             return;
         }
 
+        // display-panes picker: while the numbers are on screen, a digit selects
+        // that pane and Escape cancels.
+        if (this.paneIndexPrompt && !this.isTypingTarget()) {
+            if (/^[1-9]$/.test(e.key)) {
+                e.preventDefault(); e.stopPropagation();
+                const panes = this.getPanes();
+                const index = Number(e.key) - 1;
+                this.clearPaneIndexes();
+                if (index < panes.length) this.setActivePane(panes[index]);
+                return;
+            }
+            if (e.key === 'Escape') {
+                e.preventDefault(); e.stopPropagation();
+                this.clearPaneIndexes();
+                return;
+            }
+        }
+
         // CONTROL MODE LOGIC
         if (this.isControlMode) {
-            // Allow typing in debug console even in Control Mode
-            if (this.ui && document.activeElement === this.ui.debugInput) {
-                return; // Let debug console handle its own keys
-            }
-
-            // Also allow typing in pane command inputs
-            if (document.activeElement && document.activeElement.classList &&
-                document.activeElement.classList.contains('bmux-pane-cmd-input')) {
-                return; // Let pane command input handle its own keys
+            // Typing in the console or a pane input keeps working in Control Mode
+            if (this.isTypingTarget()) {
+                return;
             }
 
             e.preventDefault();
@@ -421,7 +569,7 @@ class BMUXClient {
 
             this.log(`Control Key: ${e.key}`);
 
-            const line = bmuxKeyBinding('control', e.key);
+            const line = bmuxKeyBinding('control', bmuxBindingKey(e));
             if (line) {
                 this.dispatchLine(line);
             }
@@ -429,16 +577,13 @@ class BMUXClient {
         }
 
         // LEGACY PREFIX LOGIC (Ctrl+b)
-        // Kept for those who prefer it
         if (e.ctrlKey && e.key === 'b') {
-            console.log("Prefix detected");
             this.prefixPressed = true;
             chrome.runtime.sendMessage({ command: 'prefix-detected' });
             e.preventDefault(); e.stopPropagation();
             clearTimeout(this.prefixTimeout);
             this.prefixTimeout = setTimeout(() => {
                 this.prefixPressed = false;
-                console.log("Prefix Timeout");
             }, BMUX_PREFIX_TIMEOUT);
             return;
         }
@@ -448,9 +593,7 @@ class BMUXClient {
             e.stopPropagation();
             this.prefixPressed = false;
 
-            console.log("Command key in frame:", e.key);
-
-            const line = bmuxKeyBinding('prefix', e.key);
+            const line = bmuxKeyBinding('prefix', bmuxBindingKey(e));
             if (line) {
                 this.dispatchLine(line);
             }
@@ -554,9 +697,26 @@ class BMUXClient {
 
     // --- Pane primitives (used by commands.js through api.client) ---
 
+    /** Panes in layout order (reading order of the split tree). */
     getPanes() {
         if (!this.ui) return [];
-        return Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'));
+        const panes = [];
+        this.collectPaneRefs(this.layout, panes);
+
+        if (!panes.length) {
+            return Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'));
+        }
+        return panes;
+    }
+
+    collectPaneRefs(node, out) {
+        if (!node) return;
+        if (node.kind === 'leaf') {
+            out.push(node.pane);
+            return;
+        }
+        this.collectPaneRefs(node.first, out);
+        this.collectPaneRefs(node.second, out);
     }
 
     getActivePane() {
@@ -573,7 +733,7 @@ class BMUXClient {
         return pane.dataset.paneId || '?';
     }
 
-    /** Reading-order position, 1-based. Changes after a split or new window. */
+    /** Reading-order position, 1-based. Follows the layout, not the DOM. */
     getPaneNumber(pane) {
         return this.getPanes().indexOf(pane) + 1;
     }
@@ -592,6 +752,60 @@ class BMUXClient {
         }
 
         return iframe.getAttribute('src') || iframe.src || '(unknown)';
+    }
+
+    /** Custom title set with rename-pane, or a title derived from the page. */
+    getPaneTitle(pane) {
+        if (!pane) return '';
+
+        const custom = pane.dataset ? pane.dataset.paneTitle : '';
+        if (custom) return custom;
+
+        const iframe = pane.querySelector ? pane.querySelector('iframe') : null;
+        if (iframe) {
+            try {
+                const title = iframe.contentDocument && iframe.contentDocument.title;
+                if (title && title.trim()) return title.trim();
+            } catch (e) {
+                // Cross-origin: fall back to the URL
+            }
+        }
+
+        const url = this.getPaneUrl(pane);
+        try {
+            const parsed = new URL(url);
+            if (!parsed.hostname) return url;
+            const path = parsed.pathname === '/' ? '' : parsed.pathname;
+            return `${parsed.hostname}${path}`;
+        } catch (e) {
+            return url;
+        }
+    }
+
+    renamePane(pane, title) {
+        if (!pane || !pane.dataset) return;
+        const clean = String(title == null ? '' : title).trim();
+        if (!clean || clean === '-') {
+            delete pane.dataset.paneTitle;
+        } else {
+            pane.dataset.paneTitle = clean;
+        }
+        this.refreshPaneTitles();
+    }
+
+    /** Fractional rect of a pane within #bmux-panes ({ x, y, w, h } in 0..1). */
+    getPaneRect(pane) {
+        if (!this.rects || !this.rects.has(pane)) this.renderLayout();
+        return this.rects.get(pane) || { x: 0, y: 0, w: 1, h: 1 };
+    }
+
+    getPaneSizeLabel(pane) {
+        const rect = this.getPaneRect(pane);
+        return `${Math.round(rect.w * 100)}%x${Math.round(rect.h * 100)}%`;
+    }
+
+    isZoomed(pane) {
+        return !!this.zoomedPane && this.zoomedPane === pane;
     }
 
     /**
@@ -619,26 +833,69 @@ class BMUXClient {
     setActivePane(pane) {
         if (!pane) return;
 
+        const previous = this.getActivePane();
+        if (previous && previous !== pane) this.lastActivePane = previous;
+
         this.getPanes().forEach((candidate) => candidate.classList.remove('active'));
         pane.classList.add('active');
 
         this.refreshPaneBadges();
-
-        if (this.ui && this.ui.statusRight) {
-            this.ui.statusRight.textContent = `pane ${this.getPaneNumber(pane)} ${this.getPaneId(pane)}`;
-        }
+        this.refreshStatus();
     }
 
-    /** Refresh every footer badge to "[number id]", e.g. "[2 %2]". */
+    lastPane() {
+        const panes = this.getPanes();
+        const target = this.lastActivePane;
+        if (!target || panes.indexOf(target) === -1 || target === this.getActivePane()) {
+            return { ok: false, message: 'No previous pane' };
+        }
+        this.setActivePane(target);
+        return { ok: true, pane: target };
+    }
+
+    cyclePane(step) {
+        const panes = this.getPanes();
+        if (panes.length < 2) return { ok: false, message: 'Only one pane' };
+
+        const current = panes.indexOf(this.getActivePane());
+        const next = ((current + (step || 1)) % panes.length + panes.length) % panes.length;
+        this.setActivePane(panes[next]);
+        return { ok: true, pane: panes[next] };
+    }
+
+    /** Footer badges: "[number id]". */
     refreshPaneBadges() {
-        this.getPanes().forEach((pane, index) => {
+        this.getPanes().forEach((pane) => {
             const badge = pane.querySelector('.bmux-pane-badge');
             if (badge) {
-                badge.textContent = `[${index + 1} ${this.getPaneId(pane)}]`;
+                badge.textContent = `[${this.getPaneNumber(pane)} ${this.getPaneId(pane)}]`;
+                badge.title = `${this.getPaneTitle(pane)} — ${this.getPaneUrl(pane)} (${this.getPaneSizeLabel(pane)})`;
             }
         });
     }
 
+    refreshPaneTitles() {
+        this.getPanes().forEach((pane) => {
+            const title = pane.querySelector('.bmux-pane-title');
+            if (title) title.textContent = this.getPaneTitle(pane);
+        });
+    }
+
+    refreshStatus() {
+        if (!this.ui || !this.ui.statusRight) return;
+
+        const pane = this.getActivePane();
+        if (!pane) {
+            this.ui.statusRight.textContent = 'Ready';
+            return;
+        }
+
+        const zoom = this.isZoomed(pane) ? ' · ZOOM' : '';
+        this.ui.statusRight.textContent =
+            `pane ${this.getPaneNumber(pane)} ${this.getPaneId(pane)} · ${this.getPaneSizeLabel(pane)}${zoom}`;
+    }
+
+    /** Pixel rect of a pane, as rendered. */
     paneRect(pane) {
         const rect = pane.getBoundingClientRect ? pane.getBoundingClientRect() : null;
         const left = rect ? (rect.left || 0) : 0;
@@ -662,13 +919,24 @@ class BMUXClient {
      */
     focusDirection(direction) {
         const panes = this.getPanes();
-        const current = this.getActivePane();
 
-        if (!panes.length || !current) {
+        if (!panes.length) {
             return { ok: false, message: 'No panes to focus' };
         }
         if (panes.length === 1) {
             return { ok: false, message: 'Only one pane: split first' };
+        }
+
+        // A zoomed pane hides the others; any directional move unzooms first so
+        // the geometry it reads is the real layout.
+        if (this.zoomedPane) {
+            this.zoomedPane = null;
+            this.renderLayout();
+        }
+
+        const current = this.getActivePane();
+        if (!current) {
+            return { ok: false, message: 'No panes to focus' };
         }
 
         const picked = pickPaneInDirection(panes, current, direction, (pane) => this.paneRect(pane));
@@ -681,74 +949,551 @@ class BMUXClient {
         return { ok: true, pane: picked.pane, wrapped: picked.wrapped, direction: direction };
     }
 
-    // --- Layout ---
+    // --- Layout tree operations ---
 
-    splitWindow(direction) {
-        if (!this.ui) return;
+    findLeaf(pane) {
+        const walk = (node) => {
+            if (!node) return null;
+            if (node.kind === 'leaf') return node.pane === pane ? node : null;
+            return walk(node.first) || walk(node.second);
+        };
+        return walk(this.layout);
+    }
 
-        const activePane = this.getActivePane();
-        if (!activePane) {
-            this.renderWindow({ root: null });
+    findParent(node) {
+        const walk = (current) => {
+            if (!current || current.kind === 'leaf') return null;
+            if (current.first === node) return { parent: current, side: 'first' };
+            if (current.second === node) return { parent: current, side: 'second' };
+            return walk(current.first) || walk(current.second);
+        };
+        return walk(this.layout);
+    }
+
+    replaceNode(oldNode, newNode) {
+        const parent = this.findParent(oldNode);
+        if (!parent) {
+            this.layout = newNode;
             return;
         }
+        parent.parent[parent.side] = newNode;
+    }
 
-        // Clone the URL from the active pane (safely handle cross-origin)
-        const activeIframe = activePane.querySelector('iframe');
-        let cloneUrl = window.location.href;
+    /** Path from the root to the leaf holding `pane`, with the side taken. */
+    pathToPane(pane) {
+        const walk = (node, trail) => {
+            if (!node) return null;
+            if (node.kind === 'leaf') return node.pane === pane ? trail : null;
+            return walk(node.first, trail.concat([{ node: node, side: 'first' }])) ||
+                walk(node.second, trail.concat([{ node: node, side: 'second' }]));
+        };
+        return walk(this.layout, []);
+    }
 
-        if (activeIframe) {
-            try {
-                // Try to get the actual src first
-                cloneUrl = activeIframe.src || activeIframe.contentWindow.location.href;
-            } catch (e) {
-                // Cross-origin restriction - use iframe src attribute
-                cloneUrl = activeIframe.getAttribute('src') || window.location.href;
-                this.log(`Cross-origin: Using src attribute (${cloneUrl.substring(0, 50)}...)`);
+    computeLayout() {
+        const leaves = [];
+        const splits = [];
+
+        const walk = (node, rect) => {
+            if (!node) return;
+            if (node.kind === 'leaf') {
+                leaves.push({ pane: node.pane, rect: rect });
+                return;
+            }
+            splits.push({ node: node, rect: rect });
+
+            if (node.direction === 'row') {
+                const firstWidth = rect.w * node.ratio;
+                walk(node.first, { x: rect.x, y: rect.y, w: firstWidth, h: rect.h });
+                walk(node.second, { x: rect.x + firstWidth, y: rect.y, w: rect.w - firstWidth, h: rect.h });
+            } else {
+                const firstHeight = rect.h * node.ratio;
+                walk(node.first, { x: rect.x, y: rect.y, w: rect.w, h: firstHeight });
+                walk(node.second, { x: rect.x, y: rect.y + firstHeight, w: rect.w, h: rect.h - firstHeight });
+            }
+        };
+
+        walk(this.layout, { x: 0, y: 0, w: 1, h: 1 });
+        return { leaves: leaves, splits: splits };
+    }
+
+    applyPaneRect(pane, rect) {
+        const g = BMUX_GUTTER;
+        pane.style.left = `calc(${(rect.x * 100).toFixed(4)}% + ${g}px)`;
+        pane.style.top = `calc(${(rect.y * 100).toFixed(4)}% + ${g}px)`;
+        pane.style.width = `calc(${(rect.w * 100).toFixed(4)}% - ${2 * g}px)`;
+        pane.style.height = `calc(${(rect.h * 100).toFixed(4)}% - ${2 * g}px)`;
+    }
+
+    /** Recompute rectangles from the tree and apply them. */
+    renderLayout() {
+        if (!this.ui) return;
+
+        const { leaves, splits } = this.computeLayout();
+        const zoomed = this.zoomedPane;
+
+        this.rects = new Map();
+
+        leaves.forEach((entry) => {
+            const pane = entry.pane;
+            this.rects.set(pane, entry.rect);
+
+            if (zoomed && pane !== zoomed) {
+                pane.style.display = 'none';
+                return;
+            }
+
+            pane.style.display = '';
+            const rect = zoomed === pane ? { x: 0, y: 0, w: 1, h: 1 } : entry.rect;
+            this.applyPaneRect(pane, rect);
+        });
+
+        // While zoomed, the split boundaries belong to hidden panes: no handles.
+        this.renderHandles(zoomed ? [] : splits);
+
+        this.refreshPaneBadges();
+        this.refreshPaneTitles();
+        this.refreshStatus();
+    }
+
+    /** One draggable handle per split boundary, positioned from the last render. */
+    renderHandles(splits) {
+        if (!this.ui || !this.ui.handles) return;
+
+        const layer = this.ui.handles;
+
+        while (this.handles.length < splits.length) {
+            const handle = document.createElement('div');
+            handle.className = 'bmux-split-handle';
+            layer.appendChild(handle);
+            this.handles.push(handle);
+        }
+
+        this.handles.forEach((handle, index) => {
+            const entry = splits[index];
+
+            if (!entry) {
+                handle.style.display = 'none';
+                handle._split = null;
+                return;
+            }
+
+            const node = entry.node;
+            const rect = entry.rect;
+            const horizontal = node.direction === 'row';
+            const g = BMUX_GUTTER;
+
+            handle.style.display = '';
+            handle._split = node;
+            handle._rect = rect;
+            handle.title = 'Drag to resize, double-click to reset';
+
+            if (horizontal) {
+                const boundary = rect.x + rect.w * node.ratio;
+                handle.className = 'bmux-split-handle bmux-handle-column';
+                handle.style.left = `calc(${(boundary * 100).toFixed(4)}% - 4px)`;
+                handle.style.top = `calc(${(rect.y * 100).toFixed(4)}% + ${g}px)`;
+                handle.style.width = '8px';
+                handle.style.height = `calc(${(rect.h * 100).toFixed(4)}% - ${2 * g}px)`;
+            } else {
+                const boundary = rect.y + rect.h * node.ratio;
+                handle.className = 'bmux-split-handle bmux-handle-row';
+                handle.style.left = `calc(${(rect.x * 100).toFixed(4)}% + ${g}px)`;
+                handle.style.top = `calc(${(boundary * 100).toFixed(4)}% - 4px)`;
+                handle.style.width = `calc(${(rect.w * 100).toFixed(4)}% - ${2 * g}px)`;
+                handle.style.height = '8px';
+            }
+
+            handle.onmousedown = (event) => this.startHandleDrag(event, handle);
+            handle.ondblclick = () => this.resetHandle(handle);
+        });
+    }
+
+    /**
+     * Drag a split boundary with the mouse. Ratios are fractions of the split's
+     * own rect, so the pixel delta is converted with the rect's rendered size.
+     */
+    startHandleDrag(event, handle) {
+        const node = handle._split;
+        if (!node) return;
+
+        if (event.button !== undefined && event.button !== 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+
+        const horizontal = node.direction === 'row';
+        const bounds = this.ui.panes.getBoundingClientRect();
+        const span = horizontal ? bounds.width * handle._rect.w : bounds.height * handle._rect.h;
+        if (!span) return;
+
+        const startPosition = horizontal ? event.clientX : event.clientY;
+        const startRatio = node.ratio;
+        const previousCursor = document.body.style.cursor;
+        document.body.style.cursor = horizontal ? 'col-resize' : 'row-resize';
+
+        // Mouse events over a pane's iframe never reach this document, so the
+        // overlay is covered while dragging: the pointer stays over the shield.
+        const shield = this.ui.dragShield;
+        if (shield) {
+            shield.className = horizontal ? 'active column' : 'active row';
+        }
+
+        const move = (moveEvent) => {
+            const delta = ((horizontal ? moveEvent.clientX : moveEvent.clientY) - startPosition) / span;
+            node.ratio = bmuxClamp(startRatio + delta, BMUX_MIN_RESIZE, BMUX_MAX_RESIZE);
+            this.layoutName = null;
+            this.renderLayout();
+        };
+
+        const up = () => {
+            document.removeEventListener('mousemove', move, true);
+            document.removeEventListener('mouseup', up, true);
+            document.body.style.cursor = previousCursor;
+            if (shield) shield.className = '';
+            this.log(`Resize: ${node.direction} ratio ${node.ratio.toFixed(2)}`);
+        };
+
+        document.addEventListener('mousemove', move, true);
+        document.addEventListener('mouseup', up, true);
+    }
+
+    resetHandle(handle) {
+        const node = handle._split;
+        if (!node) return;
+        node.ratio = 0.5;
+        this.layoutName = null;
+        this.renderLayout();
+        this.log('Resize: reset to 50/50');
+    }
+
+    /** Set one pane's share of its parent split, as a fraction (0..1). */
+    setPaneSize(pane, share) {
+        const trail = this.pathToPane(pane);
+        if (!trail || !trail.length) {
+            return { ok: false, message: 'Only one pane: nothing to resize' };
+        }
+
+        const immediate = trail[trail.length - 1];
+        const clamped = bmuxClamp(share, BMUX_MIN_RESIZE, BMUX_MAX_RESIZE);
+        immediate.node.ratio = immediate.side === 'first' ? clamped : 1 - clamped;
+        this.layoutName = null;
+        this.renderLayout();
+        return { ok: true, share: clamped };
+    }
+
+    /**
+     * Move the split boundary next to `pane` in `direction` by `percent` points of
+     * the overlay. The boundary moves in the pressed direction whether the pane
+     * sits before or after it, so every direction does something on every pane
+     * that has a split on that axis.
+     *
+     * Returns { ok, ratio } or { ok: false, message }.
+     */
+    resizePane(pane, direction, percent) {
+        if (this.zoomedPane) {
+            return { ok: false, message: 'Pane is zoomed: resize-pane -Z first' };
+        }
+
+        const horizontal = direction === 'left' || direction === 'right';
+        const trail = this.pathToPane(pane);
+
+        if (!trail) return { ok: false, message: 'No such pane' };
+
+        let boundary = null;
+        for (let i = trail.length - 1; i >= 0; i--) {
+            if (trail[i].node.direction === (horizontal ? 'row' : 'column')) {
+                boundary = trail[i].node;
+                break;
             }
         }
 
-        const parent = activePane.parentNode;
-        const container = document.createElement('div');
-        container.className = 'bmux-split-container';
-        container.style.display = 'flex';
-        container.style.flex = activePane.style.flex || '1';
-        container.style.width = '100%';
-        container.style.height = '100%';
-        container.style.flexDirection = direction === 'horizontal' ? 'row' : 'column';
+        if (!boundary) {
+            return {
+                ok: false,
+                message: horizontal
+                    ? 'No side-by-side split to resize (the layout has no vertical boundary)'
+                    : 'No stacked split to resize (the layout has no horizontal boundary)'
+            };
+        }
 
-        // Create new pane with cloned URL and command input
+        const delta = Math.abs(percent) / 100;
+        const sign = (direction === 'right' || direction === 'down') ? 1 : -1;
+        boundary.ratio = bmuxClamp(boundary.ratio + sign * delta, BMUX_MIN_RESIZE, BMUX_MAX_RESIZE);
+        this.layoutName = null;
+        this.renderLayout();
+
+        return { ok: true, ratio: boundary.ratio };
+    }
+
+    zoomPane(pane) {
+        const target = pane || this.getActivePane();
+        if (!target) return { ok: false, message: 'No pane to zoom' };
+
+        if (this.zoomedPane === target) {
+            this.zoomedPane = null;
+            this.renderLayout();
+            return { ok: true, zoomed: false };
+        }
+
+        this.zoomedPane = target;
+        this.setActivePane(target);
+        this.renderLayout();
+        return { ok: true, zoomed: true };
+    }
+
+    /** Rebuild the tree as one of the presets, keeping the same panes. */
+    applyLayout(name) {
+        const panes = this.getPanes();
+        if (!panes.length) return { ok: false, message: 'No panes' };
+
+        let tree;
+        switch (name) {
+            case 'even-horizontal':
+                tree = bmuxEvenSplitPanes(panes, 'row');
+                break;
+            case 'even-vertical':
+                tree = bmuxEvenSplitPanes(panes, 'column');
+                break;
+            case 'main-vertical':
+                tree = bmuxMainSplit(panes, 'row', 0.6);
+                break;
+            case 'main-horizontal':
+                tree = bmuxMainSplit(panes, 'column', 0.6);
+                break;
+            case 'tiled':
+                tree = bmuxTiled(panes);
+                break;
+            default:
+                return { ok: false, message: `Unknown layout "${name}". Try: ${BMUX_LAYOUTS.join(', ')}` };
+        }
+
+        this.layout = tree;
+        this.layoutName = name;
+        this.zoomedPane = null;
+        this.renderLayout();
+        return { ok: true, layout: name };
+    }
+
+    nextLayout() {
+        const current = BMUX_LAYOUTS.indexOf(this.layoutName);
+        const next = BMUX_LAYOUTS[(current + 1) % BMUX_LAYOUTS.length];
+        return this.applyLayout(next);
+    }
+
+    /** Swap two panes' positions. Panes keep running: only the tree changes. */
+    swapPanes(first, second) {
+        if (!first || !second || first === second) {
+            return { ok: false, message: 'Give two different panes to swap' };
+        }
+
+        const firstLeaf = this.findLeaf(first);
+        const secondLeaf = this.findLeaf(second);
+        if (!firstLeaf || !secondLeaf) return { ok: false, message: 'No such pane' };
+
+        firstLeaf.pane = second;
+        secondLeaf.pane = first;
+        this.layoutName = null;
+        this.renderLayout();
+        return { ok: true };
+    }
+
+    /** Move every pane one position along the layout order. */
+    rotatePanes(reverse) {
+        const panes = this.getPanes();
+        if (panes.length < 2) return { ok: false, message: 'Only one pane' };
+
+        const leaves = [];
+        const collect = (node) => {
+            if (!node) return;
+            if (node.kind === 'leaf') {
+                leaves.push(node);
+                return;
+            }
+            collect(node.first);
+            collect(node.second);
+        };
+        collect(this.layout);
+
+        const offset = reverse ? 1 : -1;
+        leaves.forEach((leaf, index) => {
+            // forwards: slot j shows the pane that was at slot j-1
+            const source = ((index + offset) % panes.length + panes.length) % panes.length;
+            leaf.pane = panes[source];
+        });
+
+        this.layoutName = null;
+        this.renderLayout();
+        return { ok: true };
+    }
+
+    // --- display-panes ---
+
+    displayPanes() {
+        this.clearPaneIndexes();
+
+        const panes = this.getPanes();
+        if (!panes.length) return { ok: false, message: 'No panes' };
+
+        this.paneIndexPrompt = true;
+        panes.forEach((pane, index) => {
+            const badge = document.createElement('div');
+            badge.className = 'bmux-pane-index';
+            badge.textContent = String(index + 1);
+            pane.appendChild(badge);
+        });
+
+        this.paneIndexTimer = setTimeout(() => this.clearPaneIndexes(), BMUX_PANE_INDEX_TIMEOUT);
+        return { ok: true, panes: panes.length };
+    }
+
+    clearPaneIndexes() {
+        this.paneIndexPrompt = false;
+        if (this.paneIndexTimer) {
+            clearTimeout(this.paneIndexTimer);
+            this.paneIndexTimer = null;
+        }
+        if (this.ui) {
+            Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane-index'))
+                .forEach((element) => element.remove());
+        }
+    }
+
+    // --- Splitting, killing, layout lifecycle ---
+
+    /**
+     * Split the active pane.
+     * opts: {
+     *   direction: 'horizontal' | 'vertical',
+     *   size: fraction for the new pane (0.1..0.9, default 0.5),
+     *   before: put the new pane first (left/top),
+     *   keepFocus: leave focus on the pane being split,
+     *   url: URL for the new pane (default: clone of the active pane)
+     * }
+     */
+    splitWindow(direction, opts) {
+        const options = opts || {};
+        if (!this.ui) return { ok: false, message: 'Overlay not ready' };
+
+        const target = this.getActivePane();
+        if (!target) {
+            this.renderWindow();
+            return { ok: false, message: 'No pane to split' };
+        }
+
+        const cloneUrl = options.url || this.cloneUrlOf(target);
         const newPane = this.createPaneElement(cloneUrl);
+        this.ui.panes.appendChild(newPane);
 
-        activePane.style.flex = '1';
-        activePane.classList.remove('active');
+        const leaf = this.findLeaf(target);
+        if (!leaf) return { ok: false, message: 'No pane to split' };
 
-        parent.replaceChild(container, activePane);
-        container.appendChild(activePane);
-        container.appendChild(newPane);
+        const treeDirection = (direction === 'vertical' || direction === 'column' || direction === 'v')
+            ? 'column'
+            : 'row';
+        const share = bmuxClamp(options.size == null ? 0.5 : options.size, BMUX_MIN_SHARE, BMUX_MAX_SHARE);
 
-        this.setActivePane(newPane);
-        this.log(`Split ${direction}: Cloned ${cloneUrl.substring(0, 50)}...`);
+        const newLeaf = bmuxLeaf(newPane);
+        const splitNode = {
+            kind: 'split',
+            direction: treeDirection,
+            ratio: share,
+            first: options.before ? newLeaf : leaf,
+            second: options.before ? leaf : newLeaf
+        };
+
+        this.replaceNode(leaf, splitNode);
+        this.layoutName = null;
+        this.zoomedPane = null;
+
+        this.setActivePane(options.keepFocus ? target : newPane);
+        this.renderLayout();
+
+        return { ok: true, pane: newPane };
+    }
+
+    cloneUrlOf(pane) {
+        const iframe = pane.querySelector('iframe');
+        if (!iframe) return window.location.href;
+
+        try {
+            return iframe.src || iframe.contentWindow.location.href;
+        } catch (e) {
+            return iframe.getAttribute('src') || window.location.href;
+        }
+    }
+
+    /** Remove a pane and give its space back to the sibling. */
+    killPane(pane) {
+        const panes = this.getPanes();
+        if (panes.length <= 1) {
+            return { ok: false, message: 'Cannot kill the last pane' };
+        }
+
+        const target = pane || this.getActivePane();
+        const leaf = this.findLeaf(target);
+        if (!leaf) return { ok: false, message: 'No such pane' };
+
+        const parent = this.findParent(leaf);
+        if (!parent) return { ok: false, message: 'Cannot kill the last pane' };
+
+        const sibling = parent.parent.first === leaf ? parent.parent.second : parent.parent.first;
+        const siblingPane = this.firstPaneOf(sibling);
+        const wasActive = this.getActivePane() === target;
+
+        this.clearPaneIndexes();
+        if (this.zoomedPane === target) this.zoomedPane = null;
+        if (this.lastActivePane === target) this.lastActivePane = null;
+
+        // Promote the sibling into the parent's place.
+        this.replaceNode(parent.parent, sibling);
+        target.remove();
+
+        this.layoutName = null;
+
+        if (wasActive && siblingPane) {
+            this.setActivePane(siblingPane);
+        }
+        this.renderLayout();
+
+        return { ok: true, pane: siblingPane };
+    }
+
+    firstPaneOf(node) {
+        let cursor = node;
+        while (cursor && cursor.kind === 'split') cursor = cursor.first;
+        return cursor ? cursor.pane : null;
     }
 
     newWindow() {
-        this.log("New Window: layout reset to one pane");
-        this.renderWindow({ root: null });
+        this.clearPaneIndexes();
+        this.log('New Window: layout reset to one pane');
+        this.renderWindow();
     }
 
-    renderWindow(windowData) {
-        this.ui.panes.innerHTML = '';
-        const currentUrl = window.location.href;
-        const pane = this.createPaneElement(currentUrl);
+    /** Reset the overlay to a single pane showing the current page. */
+    renderWindow() {
+        this.clearPaneIndexes();
+        this.zoomedPane = null;
+        this.layoutName = null;
+        this.lastActivePane = null;
+        this.rects = new Map();
+
+        Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'))
+            .forEach((pane) => pane.remove());
+
+        const pane = this.createPaneElement(window.location.href);
         this.ui.panes.appendChild(pane);
+        this.layout = bmuxLeaf(pane);
+
         this.setActivePane(pane);
+        this.renderLayout();
     }
 
     createPaneElement(url) {
         const pane = document.createElement('div');
-        pane.className = 'bmux-pane active';
-        pane.style.flex = '1';
+        pane.className = 'bmux-pane';
 
-        // Ids are assigned once and never reused; numbers are recomputed from DOM order.
+        // Ids are assigned once and never reused; numbers follow the layout.
         pane.dataset.paneId = `%${this.nextPaneId++}`;
 
         // Clicking anywhere on the pane makes it the active pane. Clicks that land
@@ -760,11 +1505,10 @@ class BMUXClient {
         iframe.src = url || window.location.href;
         pane.appendChild(iframe);
 
-        // Footer with command input
+        // Footer with title, command input and badge
         const footer = document.createElement('div');
         footer.className = 'bmux-pane-footer';
 
-        // Command Input Container
         const cmdContainer = document.createElement('div');
         cmdContainer.className = 'bmux-pane-cmd-container';
 
@@ -777,21 +1521,28 @@ class BMUXClient {
         input.type = 'text';
         input.placeholder = 'Type "help" for commands';
 
+        const title = document.createElement('span');
+        title.className = 'bmux-pane-title';
+        title.textContent = '';
+
         const badge = document.createElement('span');
         badge.className = 'bmux-pane-badge';
         badge.title = 'Pane number and id (focus-pane <number|%id>)';
 
         cmdContainer.appendChild(prompt);
         cmdContainer.appendChild(input);
+        cmdContainer.appendChild(title);
         cmdContainer.appendChild(badge);
 
-        // Output Container
         const output = document.createElement('div');
         output.className = 'bmux-pane-output';
 
         footer.appendChild(cmdContainer);
         footer.appendChild(output);
         pane.appendChild(footer);
+
+        // Page title can become known only after the iframe loads (same-origin).
+        iframe.addEventListener('load', () => this.refreshPaneTitles());
 
         // Bind command input
         input.addEventListener('keydown', (e) => {
@@ -828,23 +1579,6 @@ class BMUXClient {
         }
 
         return result;
-    }
-
-    buildNode(node) {
-        if (node.type === 'pane') {
-            return this.createPaneElement(node.url || window.location.href);
-        } else if (node.type === 'container') {
-            const el = document.createElement('div');
-            el.className = 'bmux-split-container';
-            el.style.display = 'flex';
-            el.style.flex = node.flex || '1';
-            el.style.flexDirection = node.direction === 'horizontal' ? 'row' : 'column';
-            if (node.children) {
-                node.children.forEach(child => el.appendChild(this.buildNode(child)));
-            }
-            return el;
-        }
-        return document.createElement('div');
     }
 
     updateUI(state) {

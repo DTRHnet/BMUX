@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.0.1**
+**Version 0.1.0**
 
 ## Activation
 ```
@@ -10,23 +10,31 @@ Extension Icon - Manual toggle via popup
 
 ## Control Mode Keys (after Alt+Shift+B)
 ```
-%       - Split horizontal
-"       - Split vertical (Shift+')
-c       - New window
-d       - Detach (hide overlay)
-x       - Kill pane (not implemented: says so)
-Arrow   - Move focus left / right / up / down (wraps at the edge)
-:       - Command prompt
-Esc     - Exit Control Mode
+%            - Split horizontal
+"            - Split vertical (Shift+')
+c            - New window
+d            - Detach (hide overlay)
+x            - Kill pane (last pane is refused)
+Arrow        - Move focus left / right / up / down (wraps at the edge)
+Alt+Arrow    - Resize: move the boundary 2%
+z            - Zoom the focused pane (toggle)
+q            - Show pane numbers; press a digit to jump
+o / ;        - Cycle to the next pane / back to the previous one
+Space        - Next layout preset
+:            - Command prompt
+Esc          - Exit Control Mode (or cancel the numbers)
 ```
 
 ## Legacy Mode (TMUX-style)
 ```
-Ctrl+b, then %      - Split horizontal
-Ctrl+b, then "      - Split vertical
-Ctrl+b, then c      - New window
-Ctrl+b, then d      - Detach
-Ctrl+b, then Arrow  - Move focus
+Ctrl+b, then %            - Split horizontal
+Ctrl+b, then "            - Split vertical
+Ctrl+b, then c            - New window
+Ctrl+b, then d            - Detach
+Ctrl+b, then x            - Kill pane
+Ctrl+b, then Arrow        - Move focus
+Ctrl+b, then Alt+Arrow    - Resize
+Ctrl+b, then z / q / o / ; / Space - Zoom / numbers / cycle / last / layout
 ```
 
 ## Toolbar Buttons
@@ -36,19 +44,66 @@ New Window          - Reset the overlay to one pane
 Detach              - Hide / show the overlay
 Up / Down /         - Move focus between panes, wrapping at the edge
 Left / Right
+Zoom                - Zoom the focused pane
+Layout              - Cycle layout presets
+```
+
+## Mouse
+```
+Click a pane / its iframe   - Focus it (blue border)
+Drag a boundary             - Resize the split
+Double-click a boundary     - Reset that split to 50/50
 ```
 
 ## Focusing Panes
 ```
 Click a pane           - Makes it active (blue border)
 Up/Down/Left/Right     - Toolbar buttons, or arrow keys in Control Mode
+q then a digit         - display-panes: numbers over the panes
 > focus-pane right     - Same thing from any command input
-> focus-pane 2         - By number (reading order, 1..n)
+> focus-pane 2         - By number (layout order, 1..n)
 > focus-pane %2        - By id (assigned once, never reused)
-> list-panes           - Show every pane: number, id, active marker, URL
+> last-pane / o        - Back to the previous pane / next pane
+> list-panes           - Number, id, size, marker, title, URL
 ```
 With two panes side by side and focus on the right one, `Right` lands on the left
 pane. Every pane footer shows its own `[number id]` badge, e.g. `[2 %2]`.
+
+## Splitting
+```
+> split-window -h            - Beside the active pane (50/50)
+> split-window -v            - Below the active pane
+> split-window -h -l 30%     - New pane gets 30% (also accepts 30 or 0.3)
+> split-window -h -b         - Put the new pane first (left/top)
+> split-window -h -d         - Keep focus on the pane being split
+```
+
+## Resizing and Zooming
+```
+Drag a boundary                 - Mouse resize
+Double-click a boundary         - Back to 50/50
+> resize-pane -R 10             - Move the boundary right by 10%
+> resize-pane -x 25%            - Make the pane 25% of its parent split
+> resize-pane -Z                - Zoom / unzoom the focused pane
+```
+
+## Layouts
+```
+> select-layout even-horizontal - Equal columns
+> select-layout even-vertical   - Equal rows
+> select-layout main-vertical   - Wide main pane on the left, rest stacked
+> select-layout main-horizontal - Tall main pane on top, rest side by side
+> select-layout tiled           - Grid
+> next-layout                   - Cycle (Space in Control Mode)
+```
+Changing layout never reloads the pages in the panes.
+
+## Reordering
+```
+> swap-pane 1 2        - Two panes trade places
+> swap-pane %3         - Swap the active pane with the pane %3
+> rotate-window        - Every pane moves one slot (also --reverse)
+```
 
 ## Pane Commands (type in green > prompt)
 ```
@@ -56,6 +111,8 @@ pane. Every pane footer shows its own `[number id]` badge, e.g. `[2 %2]`.
 > source            - View HTML source in pane
 > restore           - Exit console view
 > filter div        - Find all divs
+> capture-pane      - Print the pane's visible text
+> rename-pane Docs  - Title shown in the footer ("-" clears it)
 > url               - Show current URL
 > url google.com    - Navigate to URL
 > reload            - Reload this pane
@@ -64,12 +121,15 @@ pane. Every pane footer shows its own `[number id]` badge, e.g. `[2 %2]`.
 
 ## Overlay Commands (work from any input)
 ```
-> list-panes            - Every pane with number, id, status, URL
-> focus-pane <target>   - Focus by number, %id, or up|down|left|right
-> split-window -h|-v    - Split the active pane
-> new-window            - Reset to one pane
-> detach                - Hide / show the overlay
-> control-mode on|off   - Enter or leave Control Mode
+> list-panes [-j]        - Every pane; -j for JSON
+> focus-pane <target>    - Focus by number, %id, or up|down|left|right
+> split-window ...       - Split the active pane
+> kill-pane [target]     - Close a pane (the last one is refused)
+> resize-pane ...        - -L/-R/-U/-D, -x <size>, -Z
+> select-layout <name>   - even-horizontal|even-vertical|main-vertical|
+                           main-horizontal|tiled
+> new-window             - Reset to one pane
+> detach                 - Hide / show the overlay
 ```
 
 ## Debug Console (floating window)
@@ -82,12 +142,13 @@ $ source            - Affects active pane (blue border)
 
 ## Tips
 - **Click a pane** to make it active (blue border)
-- **The status bar** shows the focused pane, e.g. `pane 2 %2`
+- **The status bar** shows the focused pane and its size, e.g.
+  `pane 2 %2 · 30%x100%`, plus `· ZOOM` while zoomed
 - **Each move logs its result** in the debug console, e.g.
   `Focus right: pane 1/2 (wrapped)`
 - **Control Mode** prevents typing on page (good for GitHub, etc.)
-- **Debug console** shows all commands but can be dragged away
-- **Per-pane input** is local to that specific pane
+- **Numbers move, ids do not**: after a split, numbers are renumbered but `%N`
+  ids stay with their pane, so scripts should use ids
 - **`source` command** converts pane to terminal view
 - **CSP removal** lets you load any site (GitHub, Google, etc.)
 
@@ -95,11 +156,14 @@ $ source            - Affects active pane (blue border)
 1. **Extension not working?** Reload extension + refresh page
 2. **Can't type?** Exit Control Mode with Esc
 3. **Keys do nothing?** Check the status bar: `[CONTROL MODE]` means BMUX owns
-   the keyboard; `[NORMAL]` means the page does
+   the keyboard; `[NORMAL]` means the page does. A focused console/pane input
+   always receives typing, even in Control Mode.
 4. **Site won't load?** CSP headers should be removed automatically
 5. **Commands not working?** Check if in correct input (> vs $)
 6. **Focus won't move?** `list-panes` first: one pane cannot move focus, and a
    single-pane layout says "Only one pane: split first"
+7. **Can't resize?** `resize-pane -U/-D` needs a stacked split, `-L/-R` needs a
+   side-by-side one; the message says which is missing
 
 ## Documentation
 - Full docs in: `docs/` folder
@@ -110,4 +174,4 @@ $ source            - Affects active pane (blue border)
 
 ---
 
-**Pro Tip**: Use `Alt+Shift+B` to quickly enter/exit Control Mode for rapid pane management!
+**Pro Tip**: Drag a boundary while you work — mouse resizing is the thing a terminal TMUX cannot give you.
