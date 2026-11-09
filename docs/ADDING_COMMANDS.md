@@ -169,6 +169,10 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `clearFilter(pane)` / `clearAllFilters()` | Remove the boxes and the status line |
 | `hasActiveFilters()` | Whether any pane is currently boxed |
 | `setPaneStatus(pane, text, mode)` | Write the pane's status segment (`'filtering'`/`'hovering'`) |
+| `setTheme('frost'\|'classic')` / `setVerbose(on)` / `setDebugOpen(open)` | UI preferences, saved with the layout |
+| `infoReport(section)` | Which the `info` command prints: `layout`, `panes`, `keys`, `state` |
+| `setPaneConsoleFloating(pane, on)` / `togglePaneConsoleFloating(pane)` | Detach a pane console into its own window, or dock it |
+| `paneConsole(pane)` | The console panel wherever it lives (footer or floating window) |
 | `collectFilterMatches(pane, selector, test)` | Query a pane (plus an optional predicate) without drawing; `{ ok, doc, elements }` |
 | `requestFilterConfirm(pane, selector, opts)` | Ask for a yes/no answer before drawing |
 | `resolveFilterConfirm(accept)` | Answer that prompt (what `yes` / `no` call) |
@@ -188,6 +192,10 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `askText({ question, placeholder })` | Ask for a line of text; resolves `{ text, cancelled }` |
 | `answerOpenPrompt(choiceId, pane)` | Programmatically answer the open prompt |
 | `hasOpenPrompt(pane)` | Whether a prompt is open |
+| `scheduleSave()` / `saveNow(reason)` | Persist the layout (debounced / immediately) |
+| `serializeLayout()` | The current layout as a snapshot object |
+| `applySnapshot(snapshot)` | Rebuild the overlay from a snapshot |
+| `setPersistEnabled(on)`, `setPersistInherit(on)`, `saveNamedLayout(name)`, `listNamedLayouts()`, `restoreNamedLayout(name)`, `deleteNamedLayout(name)` | The persistence commands' client side |
 
 ## Adding a filter preset
 
@@ -287,6 +295,52 @@ returning a string like every other command. Two things to keep in mind:
   a chain, that is not supported yet — return a message that tells the user to
   re-run the rest.
 
+## Persisting layout changes
+
+Layouts are saved automatically: `renderLayout()` calls `scheduleSave()` at the
+end, so any command that goes through the layout primitives (`splitWindow`,
+`killPane`, `applyLayout`, `swapPanes`, `rotatePanes`, `setPaneSize`, `zoomPane`)
+is persisted without doing anything. The same is true for `setActivePane`,
+`renamePane` and the pane-console setters, which save explicitly.
+
+If your command changes the layout **without** going through those primitives —
+say it mutates `client.layout` itself — call the hook yourself:
+
+```javascript
+api.client.scheduleSave();        // debounced, 400ms
+await api.client.saveNow('mine'); // immediate, for commands that must not lose it
+```
+
+Rules the persister enforces (in `background/main.js`, on write *and* read): version
+`1`, a well-formed tree of `leaf`/`split` nodes, split ratios inside 1–99%, panes as
+`{ id, url, title? }`, at most 12 panes, depth at most 32, at most 64 KB. A command
+that produces a bigger or stranger layout will not have it restored — keep layouts
+within those limits.
+
+The snapshot shape, if you need to read one:
+
+```javascript
+{
+  version: 1, savedAt: 0, origin: 'https://example.com', url: 'https://example.com/',
+  rootPaneId: '%1', activeId: '%2', zoomedId: null, nextPaneId: 3,
+  prefs: { theme: 'frost', debugOpen: false, verbose: false },
+  consoles: { '%1': { open: true, height: 180 } },
+  layout: { kind: 'split', direction: 'row', ratio: 0.3,
+            first:  { kind: 'leaf', pane: { id: '%1', url: '…', title: 'Docs' } },
+            second: { kind: 'leaf', pane: { id: '%2', url: '…' } } }
+}
+```
+
+**`rootPaneId` is the pane that follows the page.** The snapshot belongs to the
+tab, not to the address: when the tab reloads somewhere else, `applySnapshot()`
+writes `window.location.href` into that pane and leaves every other pane alone. If
+your command tracks "the page this layout was made for", read
+`client.rootPane` / the pane URL rather than `snapshot.url`, and expect the two to
+differ after a navigation. A tab that has no snapshot of its own may also be
+handed another tab's (newest) snapshot when inheritance is on (`inherit off` to
+disable); the same root-pane substitution applies, so never assume the restored
+panes are the ones the snapshot recorded.
+
 ## Adding a key binding
 
 Keys are data, not code. Add an entry to `BMUX_KEYBINDINGS` in
@@ -341,6 +395,11 @@ Pane scope:
 | `restore` | Return from console view to browser view |
 | `filter <selector\|preset> [-n max] [-y]` / `filter -l` / `filter -c` / `filter --presets` | Box matches in the pane, name them on hover, list only, clear, or list the preset vocabulary |
 | `yes` / `no` (`y` / `n` hidden) | Answer a filter confirmation prompt |
+| `debug [on\|off\|toggle]` / `verbose [on\|off\|status]` | Debug window and verbose mirroring |
+| `info [section]` / `theme [frost\|classic]` / `keys` | Diagnostics and palette |
+| `persist [on\|off\|status]` | Per-tab auto-restore switch |
+| `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout |
+| `save-layout [name]` / `restore-layout <name>` / `list-layouts` / `delete-layout <name\|--all>` | Named layouts |
 | `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
 | `capture-pane [-n lines]` | Print the pane's visible text |
 | `rename-pane <title\|->` | Set or clear the footer title |

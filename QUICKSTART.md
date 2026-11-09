@@ -1,17 +1,17 @@
 # BMUX Quick Reference
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 ## Activation
 ```
-Alt+Shift+B    - Toggle Control Mode (recommended)
-Extension Icon - Manual toggle via popup
+Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, blue border); again to turn it off
+Extension Icon - The same: one click activates, another hides
 ```
 
 ## Control Mode Keys (after Alt+Shift+B)
 ```
-%            - Split horizontal
-"            - Split vertical (Shift+')
+%            - Split horizontal (also Shift+5, 5)
+"            - Split vertical (also Shift+', ')
 c            - New window
 d            - Detach (hide overlay)
 x            - Kill pane (last pane is refused)
@@ -39,6 +39,25 @@ Ctrl+b, then Alt+Arrow    - Resize
 Ctrl+b, then z / q / o / ; / Space - Zoom / numbers / cycle / last / layout
 ```
 
+## Persistence (layouts survive a reload)
+```
+Automatic         - Splits, ratios, URLs, titles, focus, zoom and consoles are
+                    saved per tab and restored when the page loads again
+> save-layout work        - Save this layout for the site (survives restarts)
+> restore-layout work     - Bring it back
+> list-layouts            - What is saved for this site
+> delete-layout work      - Remove it (or --all)
+> persist off             - Stop saving this tab and clear its snapshot
+> persist status          - On/off, and where the current layout came from
+> inherit off             - New tabs stop inheriting the newest layout
+```
+The layout belongs to the tab, so it **follows the page**: navigate somewhere else
+and the root pane takes the new address while the other panes stay as they were. A
+brand-new tab inherits the newest layout (`inherit`), with its own page in the root
+pane. Restoring recreates the panes, so the pages load fresh (scroll position is not
+kept). `persist off` stops saving this tab and `inherit off` stops a tab offering
+its layout to new ones; nothing is ever synced.
+
 ## Chaining commands
 ```
 > filter img; filter a          - Run both, one after another
@@ -56,6 +75,47 @@ y / n                                     - Answer a yes/no prompt
 yes / no                                  - Type the answer instead
 Esc                                       - Cancel the prompt
 ```
+
+## Palette and debug output
+```
+> theme frost        - Default: cold blues, ice text
+> theme classic      - The old black/green terminal look
+> debug on|off       - Show/hide the floating debug window (hidden by default)
+> verbose on         - Mirror debug output into the focused pane console
+> info               - Layout tree, panes, recent keys, runtime state
+```
+
+## Detaching a pane console
+```
+⧉ button in the footer / > log detach   - Pull the console into its own window
+Drag its header                        - Move it
+Drag its corner or bottom edge         - Resize it
+⧉ dock button / > log attach           - Put it back in the pane
+```
+
+## If a shortcut does not fire
+```
+> keys          - Last 12 key events: raw key, code, modifiers, and what they ran
+```
+`Ctrl+b` works in every mode, including inside Control Mode. `Alt+Shift+B` can be
+stolen by the window manager — rebind it at `chrome://extensions/shortcuts`.
+
+## Command line editing (every input)
+```
+Up / Down       - Recall previous commands (Down past the newest restores your draft)
+Tab             - Complete the command name, then its arguments
+Tab Tab         - List the candidates in the console
+```
+Ctrl+b keys still apply: this is the input's own editing, in the pane console, the
+floating console and the `:` line, which all share one history.
+
+## Enlarging the console
+```
+Drag the two-line grip on the console's top edge - up to 90% of the pane
+Double-click the grip                          - Back to 140px
+> log size 320                                 - Set it exactly
+```
+The floating console resizes from its bottom-right corner or its bottom edge.
 
 ## Maximize a pane
 ```

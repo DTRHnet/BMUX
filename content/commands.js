@@ -324,6 +324,14 @@ const BMUX_KEYBINDINGS = {
     control: {
         '%': 'split-window -h',
         '"': 'split-window -v',
+        // Layout-independent aliases: some keyboards report the unshifted key
+        // while Shift is held, and plain digits/' work everywhere.
+        'Shift+Digit5': 'split-window -h',
+        'Digit5': 'split-window -h',
+        '5': 'split-window -h',
+        'Shift+Quote': 'split-window -v',
+        'Quote': 'split-window -v',
+        "'": 'split-window -v',
         'c': 'new-window',
         'x': 'kill-pane',
         'd': 'detach',
@@ -348,6 +356,14 @@ const BMUX_KEYBINDINGS = {
     prefix: {
         '%': 'split-window -h',
         '"': 'split-window -v',
+        // Layout-independent aliases: some keyboards report the unshifted key
+        // while Shift is held, and plain digits/' work everywhere.
+        'Shift+Digit5': 'split-window -h',
+        'Digit5': 'split-window -h',
+        '5': 'split-window -h',
+        'Shift+Quote': 'split-window -v',
+        'Quote': 'split-window -v',
+        "'": 'split-window -v',
         'c': 'new-window',
         'x': 'kill-pane',
         'd': 'detach',
@@ -373,6 +389,90 @@ const BMUX_KEYBINDINGS = {
 const BMUX_COMMANDS = {
 
     // --- Overlay commands (they manage the whole overlay) ---
+
+    'keys': {
+        scope: 'overlay',
+        description: 'Show the last key events and what they resolved to (diagnose shortcuts)',
+        usage: 'keys',
+        execute: function (api, args) {
+            const entries = api.client.recentKeys(12);
+            return ['Recent keys (newest last):', ...entries].join('\n');
+        }
+    },
+
+    'debug': {
+        scope: 'overlay',
+        description: 'Show, hide or toggle the floating debug window (hidden by default)',
+        usage: 'debug [on|off|toggle]',
+        execute: function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'toggle').toLowerCase();
+
+            if (action !== 'on' && action !== 'off' && action !== 'toggle') {
+                return 'Error: Usage: debug [on|off|toggle]';
+            }
+
+            const open = client.setDebugOpen(action === 'toggle' ? !client.debugOpen : action === 'on');
+            return open
+                ? 'Debug window shown (move it by its header, resize from its corner)'
+                : 'Debug window hidden; use `verbose on` to see debug output in the focused pane instead';
+        }
+    },
+
+    'verbose': {
+        scope: 'overlay',
+        description: 'Mirror debug output into the focused pane console',
+        usage: 'verbose [on|off|status]',
+        execute: function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `Verbose logging: ${client.verbose ? 'on' : 'off'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: verbose [on|off|status]';
+            }
+
+            const on = client.setVerbose(action === 'on');
+            return on
+                ? 'Verbose on: debug output is mirrored into the focused pane console'
+                : 'Verbose off';
+        }
+    },
+
+    'info': {
+        scope: 'overlay',
+        description: 'Print verbose diagnostics: layout, panes, keys and state',
+        usage: 'info [all|layout|panes|keys|state]',
+        execute: function (api, args) {
+            const section = (args[0] || 'all').toLowerCase();
+            const known = ['all', 'layout', 'panes', 'keys', 'state'];
+            if (known.indexOf(section) === -1) {
+                return `Error: Usage: info [${known.join('|')}]`;
+            }
+            return api.client.infoReport(section);
+        }
+    },
+
+    'theme': {
+        scope: 'overlay',
+        description: 'Switch the palette: frost (default) or classic black/green',
+        usage: 'theme [frost|classic]',
+        execute: function (api, args) {
+            const client = api.client;
+            const name = (args[0] || '').toLowerCase();
+
+            if (!name) return `Theme: ${client.theme} (usage: theme frost|classic)`;
+            if (name !== 'frost' && name !== 'classic') {
+                return 'Error: Usage: theme [frost|classic]';
+            }
+
+            client.setTheme(name);
+            return `Theme: ${name}`;
+        }
+    },
 
     'help': {
         scope: 'overlay',
@@ -745,6 +845,137 @@ const BMUX_COMMANDS = {
             const result = api.client.displayPanes();
             if (!result.ok) return `Error: ${result.message}`;
             return `Select a pane by number (1-${result.panes}) within 2s`;
+        }
+    },
+
+    'persist': {
+        scope: 'overlay',
+        description: 'Turn layout auto-restore on or off (off clears this tab snapshot)',
+        usage: 'persist [on|off|status]',
+        execute: async function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `Auto-restore: ${client.persistEnabled ? 'on' : 'off'} · ` +
+                    `this layout came from ${client.restoredFrom || 'a fresh start'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: persist [on|off|status]';
+            }
+
+            const result = await client.setPersistEnabled(action === 'on');
+            if (!result.ok) return 'Error: the background did not answer';
+
+            return result.enabled
+                ? 'Auto-restore on: this tab layout is saved as it changes'
+                : 'Auto-restore off: the tab snapshot was cleared and nothing more is written';
+        }
+    },
+
+    'inherit': {
+        scope: 'overlay',
+        description: 'Whether brand-new tabs start from the newest layout (on) or one pane (off)',
+        usage: 'inherit [on|off|status]',
+        execute: async function (api, args) {
+            const client = api.client;
+            const action = (args[0] || 'status').toLowerCase();
+
+            if (action === 'status') {
+                return `New tabs inherit the newest layout: ${client.persistInherit ? 'on' : 'off'}`;
+            }
+
+            if (action !== 'on' && action !== 'off') {
+                return 'Error: Usage: inherit [on|off|status]';
+            }
+
+            const result = await client.setPersistInherit(action === 'on');
+            if (!result.ok) return 'Error: the background did not answer';
+
+            return result.inherit
+                ? 'New tabs will inherit the newest layout, with their own page in the root pane'
+                : 'New tabs will start with a single pane';
+        }
+    },
+
+    'save-layout': {
+        scope: 'overlay',
+        description: 'Save the current layout under a name; named layouts survive restarts',
+        usage: 'save-layout [name]',
+        execute: async function (api, args) {
+            const name = args.join(' ').trim() || 'default';
+
+            const result = await api.client.saveNamedLayout(name);
+            if (!result.ok) return `Error: ${result.reason || 'could not save the layout'}`;
+
+            return `Saved layout "${result.name}" (${result.panes} pane(s))` +
+                `${result.origin ? ` for ${result.origin}` : ''}`;
+        }
+    },
+
+    'restore-layout': {
+        scope: 'overlay',
+        description: 'Apply a saved layout by name',
+        usage: 'restore-layout <name>',
+        execute: async function (api, args) {
+            const client = api.client;
+
+            if (!args[0]) {
+                const listed = await client.listNamedLayouts();
+                const names = (listed.layouts || []).map((entry) => entry.name);
+                return names.length
+                    ? `Error: Usage: restore-layout <name>. Saved: ${names.join(', ')}`
+                    : 'Error: Usage: restore-layout <name> (nothing saved for this site yet)';
+            }
+
+            const result = await client.restoreNamedLayout(args[0]);
+            if (!result.ok) {
+                const listed = await client.listNamedLayouts();
+                const names = (listed.layouts || []).map((entry) => entry.name);
+                return `Error: ${result.reason}${names.length ? `. Saved: ${names.join(', ')}` : ''}`;
+            }
+
+            return `Restored layout "${result.name}" (${result.panes} pane(s))`;
+        }
+    },
+
+    'list-layouts': {
+        scope: 'overlay',
+        description: 'List the layouts saved for this site',
+        usage: 'list-layouts',
+        execute: async function (api, args) {
+            const listed = await api.client.listNamedLayouts();
+            if (!listed.ok) return `Error: ${listed.reason}`;
+
+            if (!listed.layouts.length) {
+                return `No saved layouts for ${listed.origin || 'this site'}`;
+            }
+
+            const rows = listed.layouts.map((entry, index) => {
+                const when = entry.savedAt
+                    ? new Date(entry.savedAt).toISOString().replace('T', ' ').slice(0, 16)
+                    : 'unknown';
+                return `${index + 1}. ${entry.name} - ${entry.panes} pane(s) - ${when}`;
+            });
+
+            return [`Saved layouts for ${listed.origin || 'this site'}:`, ...rows].join('\n');
+        }
+    },
+
+    'delete-layout': {
+        scope: 'overlay',
+        description: 'Delete a saved layout, or all of them for this site',
+        usage: 'delete-layout <name|--all>',
+        execute: async function (api, args) {
+            if (!args[0]) return 'Error: Usage: delete-layout <name|--all>';
+
+            const result = await api.client.deleteNamedLayout(args[0]);
+            if (!result.ok) return `Error: ${result.reason || 'could not delete'}`;
+
+            return result.deleted
+                ? `Deleted ${result.deleted} layout(s)`
+                : 'Nothing to delete';
         }
     },
 
@@ -1362,8 +1593,8 @@ const BMUX_COMMANDS = {
 
     'log': {
         scope: 'pane',
-        description: 'Open, close, resize or clear this pane console (the scrollback under its input)',
-        usage: 'log [toggle|on|off|clear|size <px>]',
+        description: 'Open, close, resize, clear or detach this pane console',
+        usage: 'log [toggle|on|off|clear|size <px>|detach|attach]',
         execute: function (api, args) {
             const client = api.client;
             const pane = api.pane;
@@ -1399,7 +1630,18 @@ const BMUX_COMMANDS = {
                 return `Console height ${applied}px`;
             }
 
-            return 'Error: Usage: log [toggle|on|off|clear|size <px>]';
+            if (action === 'detach' || action === 'float') {
+                client.setPaneConsoleFloating(pane, true);
+                return 'Console detached: drag its header to move it, its corner to resize; ' +
+                    '`log attach` or the dock button puts it back';
+            }
+
+            if (action === 'attach' || action === 'dock') {
+                client.setPaneConsoleFloating(pane, false);
+                return 'Console docked back into the pane';
+            }
+
+            return 'Error: Usage: log [toggle|on|off|clear|size <px>|detach|attach]';
         }
     },
 

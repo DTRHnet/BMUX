@@ -38,3 +38,6 @@ coverage/
 
 # Local verification harness (jsdom; see CHANGELOG)
 .verify/
+
+# Workspace-local scratch space (TMPDIR for probes and test servers)
+.tmp/

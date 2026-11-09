@@ -66,10 +66,24 @@ const BMUX_FILTER_SCAN_MAX = 5000;
 // Digit-key shortcuts for prompt choices stop at 9.
 const BMUX_PROMPT_MAX_KEYS = 9;
 
+// Shell-style line editing: how many commands the shared history keeps.
+const BMUX_HISTORY_LIMIT = 200;
+
+// How many key events the `keys` diagnostic remembers.
+const BMUX_KEY_LOG = 20;
+
+// How tall a pane console may get, as a share of its pane.
+const BMUX_CONSOLE_MAX_SHARE = 0.9;
+
+// Layout persistence: debounce for saves, and how long to wait for the saved
+// layout before rendering a fresh one anyway.
+const BMUX_SAVE_DEBOUNCE = 400;
+const BMUX_RESTORE_TIMEOUT = 800;
+const SNAPSHOT_VERSION = 1;
+
 // Pane console: height when first opened, the drag limits, and scrollback cap.
 const BMUX_CONSOLE_HEIGHT = 140;
 const BMUX_CONSOLE_MIN_HEIGHT = 40;
-const BMUX_CONSOLE_MAX_RATIO = 0.7;
 const BMUX_CONSOLE_MAX_BLOCKS = 100;
 
 // Debounce for re-drawing boxes when the filtered page changes underneath them.
@@ -197,6 +211,58 @@ function splitCommandLine(line) {
 }
 
 /**
+ * Where the command being typed starts: the offset just after the last
+ * top-level `;`, so completion and history work on the segment under the caret.
+ */
+function lastSegmentStart(text) {
+    let quote = null;
+    let depth = 0;
+    let escaped = false;
+    let start = 0;
+
+    for (let i = 0; i < text.length; i++) {
+        const character = text[i];
+
+        if (escaped) {
+            escaped = false;
+            continue;
+        }
+        if (character === '\\') {
+            escaped = true;
+            continue;
+        }
+        if (quote) {
+            if (character === quote) quote = null;
+            continue;
+        }
+        if (character === '"' || character === "'") {
+            quote = character;
+            continue;
+        }
+        if (character === '[' || character === '(' || character === '{') depth++;
+        if ((character === ']' || character === ')' || character === '}') && depth > 0) depth--;
+
+        if (character === ';' && depth === 0) start = i + 1;
+    }
+
+    return start;
+}
+
+function longestCommonPrefix(values) {
+    if (!values.length) return '';
+    let prefix = values[0];
+
+    for (let i = 1; i < values.length; i++) {
+        while (prefix.length && values[i].slice(0, prefix.length) !== prefix) {
+            prefix = prefix.slice(0, -1);
+        }
+        if (!prefix) return '';
+    }
+
+    return prefix;
+}
+
+/**
  * Own-property lookup. Command names and key bindings are data, not
  * prototypes: "constructor" or "__proto__" must report "unknown", never resolve
  * to an inherited function.
@@ -206,25 +272,55 @@ function bmuxHasOwn(object, key) {
 }
 
 /**
- * The key a binding table is looked up with. Alt combinations are written as
- * "Alt+ArrowLeft" so keyboard and mouse resizing can share one table.
+ * Every name a binding table could use for this event, most specific first.
+ *
+ * `event.key` is layout-dependent and not always the symbol the user pressed:
+ * with Shift held, some platforms report `5` where others report `%`, and the
+ * same goes for `'` and `\"`. `event.code` is layout-independent, so the tables
+ * can carry a `Shift+Digit5` / `Shift+Quote` alias next to `%` / `\"` and both
+ * produce the same command.
  */
-function bmuxBindingKey(event) {
+function bmuxBindingKeys(event) {
+    const keys = [];
+    const add = (candidate) => {
+        if (!candidate) return;
+        if (keys.indexOf(candidate) === -1) keys.push(candidate);
+    };
+
     // The space bar reports " ", which is unreadable in a binding table.
     const key = event.key === ' ' ? 'Space' : event.key;
-    if (event.altKey && !event.ctrlKey && !event.metaKey) return `Alt+${key}`;
-    return key;
+    const code = event.code || '';
+    const plain = !event.altKey && !event.ctrlKey && !event.metaKey;
+
+    if (event.altKey && !event.ctrlKey && !event.metaKey) {
+        add(`Alt+${key}`);
+        add(code ? `Alt+${code}` : '');
+    } else if (plain) {
+        add(key);
+    }
+
+    if (event.shiftKey && code) add(`Shift+${code}`);
+    if (code) add(code);
+    if (event.shiftKey && key.length === 1) add(`Shift+${key}`);
+    if (key.length === 1) add(key.toLowerCase());
+
+    return keys;
 }
 
 /**
- * Resolve a key to the command line it runs, or null.
+ * Resolve a key event to the command line it runs, or null.
  * `mode` is 'control' or 'prefix'; the tables live in commands.js.
  */
-function bmuxKeyBinding(mode, key) {
+function bmuxKeyBinding(mode, event) {
     if (typeof BMUX_KEYBINDINGS === 'undefined') return null;
     const table = BMUX_KEYBINDINGS[mode];
     if (!table) return null;
-    return bmuxHasOwn(table, key) ? table[key] : null;
+
+    const keys = bmuxBindingKeys(event);
+    for (let i = 0; i < keys.length; i++) {
+        if (bmuxHasOwn(table, keys[i])) return table[keys[i]];
+    }
+    return null;
 }
 
 /**
@@ -397,6 +493,22 @@ class BMUXClient {
         this.filters = new Map();  // pane -> filter highlight state
         this.prompts = new Map();  // pane -> open prompt card
 
+        this.commandHistory = [];     // shared shell-style history for every input
+        this.keyLog = [];             // recent key events, for the `keys` command
+
+        this.rootPane = null;         // the pane that represents this tab's own page
+        this.restoredNote = '';       // why the restored layout looks the way it does
+
+        this.theme = 'frost';         // 'frost' (default) or 'classic'
+        this.debugOpen = false;       // the floating debug window is optional
+        this.verbose = false;         // mirror debug output into the focused pane
+
+        this.persistEnabled = true;   // auto-restore switch (from the background)
+        this.persistInherit = true;   // new tabs inherit the newest layout
+        this.restoring = false;       // true while a snapshot is being applied
+        this.restoredFrom = 'fresh';  // 'fresh' | 'session' | 'named'
+        this.saveTimer = null;
+
         this.ui = null;
         this.handles = [];
 
@@ -410,26 +522,67 @@ class BMUXClient {
         this.setupListeners();
         this.log("Initialized. waiting for Alt+Shift+B");
 
-        // If top, fetch initial state
+        // Restore the saved layout before the first pane is drawn, so nothing
+        // flashes: loadPersistedLayout() renders either the snapshot or a fresh
+        // window.
         if (this.isTop) {
-            this.fetchState();
+            this.loadPersistedLayout();
         }
     }
 
     log(msg) {
         console.log("[BMUX client]", msg);
+
         if (this.ui && this.ui.debug) {
             const line = document.createElement('div');
             line.textContent = `> ${msg}`;
             this.ui.debug.appendChild(line);
             this.ui.debug.scrollTop = this.ui.debug.scrollHeight;
         }
+
+        // With the debug window hidden there would be nowhere to read this, so
+        // verbose mode mirrors it into the focused pane's console instead.
+        if (this.verbose && this.ui) {
+            const pane = this.getActivePane();
+            if (pane) this.appendPaneOutput(pane, String(msg), 'result');
+        }
     }
 
-    isTypingTarget() {
-        const element = document.activeElement;
-        if (!element) return false;
-        return element.tagName === 'INPUT' || element.tagName === 'TEXTAREA';
+    /** Show or hide the floating debug window. */
+    setDebugOpen(open) {
+        this.debugOpen = !!open;
+        if (this.ui && this.ui.debugContainer) {
+            this.ui.debugContainer.classList.toggle('bmux-debug-hidden', !this.debugOpen);
+        }
+        this.scheduleSave();
+        return this.debugOpen;
+    }
+
+    /** Mirror debug output into the focused pane console, or stop doing that. */
+    setVerbose(on) {
+        this.verbose = !!on;
+        if (this.verbose) {
+            this.log('Verbose on: debug output is mirrored into the focused pane console');
+        }
+        this.scheduleSave();
+        return this.verbose;
+    }
+
+    /** 'frost' palette (default) or the original 'classic' black/green. */
+    setTheme(name) {
+        this.theme = String(name || '').toLowerCase() === 'classic' ? 'classic' : 'frost';
+        if (this.ui) this.ui.overlay.dataset.theme = this.theme;
+        this.log(`Theme: ${this.theme}`);
+        this.scheduleSave();
+        return this.theme;
+    }
+
+    isTypingTarget(event) {
+        const isField = (element) => !!element &&
+            (element.tagName === 'INPUT' || element.tagName === 'TEXTAREA');
+
+        if (isField(document.activeElement)) return true;
+        return isField(event && event.target);
     }
 
     /**
@@ -443,17 +596,12 @@ class BMUXClient {
         this.isControlMode = next;
 
         if (this.ui) {
-            if (next) {
-                this.ui.overlay.style.border = "5px solid #00aaff"; // Modern Blue
-                this.ui.statusLeft.textContent = " [CONTROL MODE] ";
-                this.ui.statusLeft.style.backgroundColor = "#00aaff";
-                this.ui.statusLeft.style.color = "#000";
-            } else {
-                this.ui.overlay.style.border = "none";
-                this.ui.statusLeft.textContent = " [NORMAL] ";
-                this.ui.statusLeft.style.backgroundColor = "transparent";
-                this.ui.statusLeft.style.color = "#fff";
-            }
+            // A quiet inset ring and a tinted status chip, not a five-pixel
+            // frame around the whole page.
+            this.ui.overlay.style.border = 'none';
+            this.ui.overlay.classList.toggle('bmux-control-active', next);
+            this.ui.statusLeft.classList.toggle('bmux-status-active', next);
+            this.ui.statusLeft.textContent = next ? 'CONTROL MODE' : 'NORMAL';
         }
 
         if (changed) {
@@ -494,6 +642,9 @@ class BMUXClient {
             <div id="bmux-handles"></div>
           </div>
 
+          <!-- Detached pane consoles float here -->
+          <div id="bmux-floating"></div>
+
           <!-- Draggable Debug Console -->
           <div id="bmux-debug-overlay">
              <div id="bmux-debug-header">Debug Console</div>
@@ -519,12 +670,15 @@ class BMUXClient {
           </div>
         `;
 
+        overlay.dataset.theme = this.theme;
+
         document.body.appendChild(overlay);
 
         // Cache Elements
         this.ui = {
             overlay: overlay,
             panes: overlay.querySelector('#bmux-panes'),
+            floating: overlay.querySelector('#bmux-floating'),
             handles: overlay.querySelector('#bmux-handles'),
             statusBar: overlay.querySelector('#bmux-status-bar'),
             statusLeft: overlay.querySelector('#bmux-status-left'),
@@ -566,18 +720,21 @@ class BMUXClient {
         this.ui.btnZoom.onclick = () => this.runCommandAndLog('resize-pane -Z');
         this.ui.btnLayout.onclick = () => this.runCommandAndLog('next-layout');
 
-        // Bind Debug Input
-        this.ui.debugInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const cmd = this.ui.debugInput.value.trim();
-                this.ui.debugInput.value = '';
-
-                if (cmd) {
-                    this.runLine(cmd);
-                }
-                e.stopPropagation();
-            }
+        // Bind the debug console input: history, completion and Enter.
+        this.bindCommandInput(this.ui.debugInput, {
+            onSubmit: (cmd) => this.runLine(cmd),
+            report: (text) => this.log(text)
         });
+
+        // The `:` line gets the same editing keys; its Enter is handled by the
+        // document key handler in handleKey().
+        this.bindCommandInput(this.ui.commandInput, {
+            report: (text) => this.log(text)
+        });
+
+        // The debug window is optional (`debug on|off|toggle`); it starts hidden
+        // and verbose mode sends its output to the focused pane instead.
+        this.ui.debugContainer.classList.toggle('bmux-debug-hidden', !this.debugOpen);
 
         // Make Debug Draggable, and resizable from its bottom-right corner
         this.makeDraggable(this.ui.debugContainer, this.ui.debugHeader);
@@ -588,12 +745,21 @@ class BMUXClient {
         this.ui.debugContainer.appendChild(debugGrip);
         this.makeResizable(this.ui.debugContainer, debugGrip);
 
-        // Initial Render
-        this.renderWindow();
+        const debugBottom = document.createElement('div');
+        debugBottom.className = 'bmux-debug-bottom';
+        debugBottom.title = 'Drag to change the console height';
+        this.ui.debugContainer.appendChild(debugBottom);
+        this.makeResizable(this.ui.debugContainer, debugBottom, { axis: 'y' });
+
+        // The first render happens in loadPersistedLayout(), after the saved
+        // layout has been read, so a restore never flashes an empty overlay.
     }
 
-    /** Resize a fixed-position panel by dragging a corner grip. */
-    makeResizable(element, grip) {
+    /** Resize a fixed-position panel by dragging a grip (corner, or height only). */
+    makeResizable(element, grip, options) {
+        const opts = options || {};
+        const verticalOnly = opts.axis === 'y';
+
         grip.addEventListener('mousedown', (event) => {
             if (event.button !== undefined && event.button !== 0) return;
             event.preventDefault();
@@ -604,10 +770,15 @@ class BMUXClient {
             const startWidth = element.offsetWidth;
             const startHeight = element.offsetHeight;
             const previousCursor = document.body.style.cursor;
-            document.body.style.cursor = 'nwse-resize';
+            document.body.style.cursor = verticalOnly ? 'ns-resize' : 'nwse-resize';
+
+            const shield = this.ui ? this.ui.dragShield : null;
+            if (shield) shield.className = verticalOnly ? 'active row' : 'active';
 
             const move = (moveEvent) => {
-                element.style.width = `${bmuxClamp(startWidth + (moveEvent.clientX - startX), 220, window.innerWidth - 40)}px`;
+                if (!verticalOnly) {
+                    element.style.width = `${bmuxClamp(startWidth + (moveEvent.clientX - startX), 220, window.innerWidth - 40)}px`;
+                }
                 element.style.height = `${bmuxClamp(startHeight + (moveEvent.clientY - startY), 140, window.innerHeight - 80)}px`;
             };
 
@@ -615,6 +786,7 @@ class BMUXClient {
                 document.removeEventListener('mousemove', move, true);
                 document.removeEventListener('mouseup', up, true);
                 document.body.style.cursor = previousCursor;
+                if (shield) shield.className = '';
             };
 
             document.addEventListener('mousemove', move, true);
@@ -686,34 +858,401 @@ class BMUXClient {
         // keeps every pane proportional to the new size. Filter boxes are in
         // document coordinates, so they are re-measured as well.
         window.addEventListener('resize', () => {
-            if (this.ui) this.renderLayout();
+            if (this.ui) this.renderLayout({ persist: false });
             Array.from(this.filters.keys()).forEach((pane) => this.refreshFilter(pane));
         });
+
+        // Leaving the page: saving on visibility change is the reliable hook (an
+        // MV3 tab can be torn down without a pagehide that finishes its work);
+        // pagehide stays as the backstop.
+        const saveOnExit = (reason) => {
+            if (this.saveTimer) clearTimeout(this.saveTimer);
+            this.saveTimer = null;
+            this.saveNow(reason);
+        };
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) saveOnExit('hidden');
+        });
+        window.addEventListener('pagehide', () => saveOnExit('pagehide'));
     }
 
-    fetchState() {
-        chrome.runtime.sendMessage({ command: 'get-state' }, (state) => {
-            this.log("State Fetched");
-            if (this.isTop) this.updateUI(state);
+    /**
+     * Ask the background something about persistence and wait (briefly) for the
+     * answer. Resolves null on timeout or when the background cannot be reached,
+     * so a dead service worker can never block the overlay.
+     */
+    persistRequest(message, timeoutMs) {
+        return new Promise((resolve) => {
+            let settled = false;
+            const finish = (value) => {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            };
+
+            const timer = timeoutMs ? setTimeout(() => finish(null), timeoutMs) : null;
+
+            try {
+                chrome.runtime.sendMessage(message, (reply) => {
+                    if (timer) clearTimeout(timer);
+                    const failed = chrome.runtime && chrome.runtime.lastError;
+                    finish(failed ? null : (reply || null));
+                });
+            } catch (e) {
+                if (timer) clearTimeout(timer);
+                finish(null);
+            }
         });
     }
 
+    /** Restore the tab's saved layout, or render a fresh window. */
+    async loadPersistedLayout() {
+        if (!this.isTop || !this.ui) return;
+
+        const reply = await this.persistRequest({ command: 'persist-load' }, BMUX_RESTORE_TIMEOUT);
+
+        if (reply && reply.inherit !== undefined) this.persistInherit = reply.inherit !== false;
+        if (reply && reply.enabled !== undefined) {
+            // Anything but an explicit false counts as on, so a corrupt stored
+            // value can never silently disable restoring.
+            this.persistEnabled = reply.enabled !== false;
+        }
+
+        if (reply && reply.snapshot) {
+            const applied = this.applySnapshot(reply.snapshot);
+            if (applied.ok) {
+                this.restoredFrom = reply.inheritedFrom ? 'inherited' : 'session';
+
+                if (reply.inheritedFrom) {
+                    this.restoredNote = `inherited from tab ${reply.inheritedFrom}`;
+                    this.log(`New tab: inherited the layout from tab ${reply.inheritedFrom} ` +
+                        `(${applied.panes} pane(s); this tab's page is in ${this.getPaneId(this.rootPane)})`);
+                } else {
+                    this.log(`Layout restored: ${applied.panes} pane(s)` +
+                        (this.restoredNote ? ` (${this.restoredNote})` : ''));
+                }
+                return;
+            }
+            this.log(`Saved layout ignored: ${applied.reason}`);
+        } else if (reply && reply.reason) {
+            this.log(`No saved layout: ${reply.reason}`);
+        }
+
+        this.renderWindow();
+    }
+
+    /** The current layout as a versioned, transport-safe snapshot. */
+    serializeLayout() {
+        if (!this.layout) return null;
+
+        const active = this.getActivePane();
+        const consoles = {};
+
+        this.getPanes().forEach((pane) => {
+            const meta = {
+                open: this.isPaneConsoleOpen(pane),
+                height: this.getPaneConsoleHeight(pane)
+            };
+
+            if (this.isPaneConsoleFloating(pane) && pane._bmuxFloat) {
+                meta.floating = true;
+                meta.floatRect = {
+                    left: pane._bmuxFloat.offsetLeft,
+                    top: pane._bmuxFloat.offsetTop,
+                    width: pane._bmuxFloat.offsetWidth,
+                    height: pane._bmuxFloat.offsetHeight
+                };
+            }
+
+            consoles[this.getPaneId(pane)] = meta;
+        });
+
+        const serializeNode = (node) => {
+            if (!node) return null;
+            if (node.kind === 'leaf') {
+                const pane = node.pane;
+                const data = { id: this.getPaneId(pane), url: this.getPaneUrl(pane) };
+                const custom = pane && pane.dataset ? pane.dataset.paneTitle : '';
+                if (custom) data.title = custom;
+                return { kind: 'leaf', pane: data };
+            }
+            return {
+                kind: 'split',
+                direction: node.direction,
+                ratio: Number(Number(node.ratio).toFixed(4)),
+                first: serializeNode(node.first),
+                second: serializeNode(node.second)
+            };
+        };
+
+        let origin = window.location.href;
+        try {
+            origin = window.location.origin === 'null' ? window.location.href : window.location.origin;
+        } catch (e) {
+            origin = window.location.href;
+        }
+
+        const root = this.rootPane && this.getPanes().indexOf(this.rootPane) !== -1
+            ? this.rootPane
+            : this.getPanes()[0];
+
+        return {
+            version: SNAPSHOT_VERSION,
+            savedAt: Date.now(),
+            origin: origin,
+            url: window.location.href,
+            rootPaneId: root ? this.getPaneId(root) : null,
+            activeId: active ? this.getPaneId(active) : null,
+            zoomedId: this.zoomedPane ? this.getPaneId(this.zoomedPane) : null,
+            nextPaneId: this.nextPaneId,
+            prefs: {
+                theme: this.theme,
+                debugOpen: this.debugOpen,
+                verbose: this.verbose
+            },
+            consoles: consoles,
+            layout: serializeNode(this.layout)
+        };
+    }
+
+    /** Rebuild the overlay from a snapshot. Never throws. */
+    applySnapshot(snapshot) {
+        if (!snapshot || snapshot.version !== SNAPSHOT_VERSION || !snapshot.layout) {
+            return { ok: false, reason: 'unsupported snapshot' };
+        }
+
+        this.restoring = true;
+        try {
+            this.clearPaneIndexes();
+            this.clearAllFilters();
+            this.cancelPrompts();
+            this.zoomedPane = null;
+            this.layoutName = null;
+            this.lastActivePane = null;
+            this.rects = new Map();
+
+            Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'))
+                .forEach((pane) => pane.remove());
+
+            const byId = new Map();
+
+            // The saved layout belongs to the page it was saved on. If this tab has
+            // since navigated elsewhere, its own page follows the tab: the root pane
+            // gets the current URL and the other panes keep theirs.
+            const currentUrl = window.location.href;
+            const savedUrl = typeof snapshot.url === 'string' ? snapshot.url : '';
+            const followed = !!savedUrl && savedUrl !== currentUrl;
+            const rootId = followed && snapshot.rootPaneId ? String(snapshot.rootPaneId) : null;
+
+            const build = (node) => {
+                if (!node) return null;
+
+                if (node.kind === 'leaf') {
+                    const data = node.pane || {};
+                    const isRoot = rootId !== null && String(data.id) === rootId;
+                    const pane = this.createPaneElement(isRoot ? currentUrl : (data.url || currentUrl));
+                    if (data.id) pane.dataset.paneId = String(data.id);
+                    if (data.title) pane.dataset.paneTitle = String(data.title);
+                    byId.set(pane.dataset.paneId, pane);
+                    this.ui.panes.appendChild(pane);
+                    return { kind: 'leaf', pane: pane };
+                }
+
+                if (node.kind !== 'split' || (node.direction !== 'row' && node.direction !== 'column')) {
+                    return null;
+                }
+
+                const first = build(node.first);
+                const second = build(node.second);
+                if (!first) return second;
+                if (!second) return first;
+
+                return {
+                    kind: 'split',
+                    direction: node.direction,
+                    ratio: bmuxClamp(Number(node.ratio) || 0.5, BMUX_MIN_SHARE, BMUX_MAX_SHARE),
+                    first: first,
+                    second: second
+                };
+            };
+
+            const tree = build(snapshot.layout);
+            if (!tree) {
+                this.restoring = false;
+                return { ok: false, reason: 'empty layout' };
+            }
+
+            this.layout = tree;
+
+            const prefs = snapshot.prefs || {};
+            if (prefs.theme) this.setTheme(prefs.theme);
+            if (prefs.verbose !== undefined) this.setVerbose(prefs.verbose);
+            if (prefs.debugOpen !== undefined) this.setDebugOpen(prefs.debugOpen);
+
+            const consoles = snapshot.consoles || {};
+            this.getPanes().forEach((pane) => {
+                const saved = consoles[this.getPaneId(pane)];
+                if (!saved) return;
+                if (saved.height) pane.dataset.consoleHeight = String(saved.height);
+                if (saved.open) this.setPaneConsoleOpen(pane, true);
+
+                if (saved.floating) {
+                    this.setPaneConsoleFloating(pane, true);
+                    const rect = saved.floatRect;
+                    if (rect && pane._bmuxFloat) {
+                        pane._bmuxFloat.style.left = `${Math.round(rect.left)}px`;
+                        pane._bmuxFloat.style.top = `${Math.round(rect.top)}px`;
+                        pane._bmuxFloat.style.width = `${Math.round(rect.width)}px`;
+                        pane._bmuxFloat.style.height = `${Math.round(rect.height)}px`;
+                    }
+                }
+            });
+
+            const highestId = this.getPanes().reduce((max, pane) => {
+                const number = parseInt(String(this.getPaneId(pane)).replace('%', ''), 10);
+                return Number.isFinite(number) ? Math.max(max, number) : max;
+            }, 0);
+
+            const savedNextId = parseInt(snapshot.nextPaneId, 10);
+            this.nextPaneId = Math.max(
+                Number.isFinite(savedNextId) ? savedNextId : 0,
+                highestId + 1,
+                this.nextPaneId
+            );
+
+            this.rootPane = (rootId !== null ? byId.get(rootId) : null) ||
+                byId.get(String(snapshot.rootPaneId || '')) ||
+                this.getPanes()[0];
+
+            if (followed) {
+                this.restoredNote = 'followed the page';
+                this.log(`Layout follows this tab's page: ${this.getPaneId(this.rootPane)} now shows ${currentUrl}`);
+            }
+
+            const active = snapshot.activeId ? byId.get(String(snapshot.activeId)) : null;
+            this.setActivePane(active || this.getPanes()[0]);
+
+            if (snapshot.zoomedId) {
+                const zoomed = byId.get(String(snapshot.zoomedId));
+                if (zoomed) this.zoomedPane = zoomed;
+            }
+
+            this.renderLayout();
+            this.restoredFrom = 'session';
+
+            return { ok: true, panes: this.getPanes().length };
+        } catch (error) {
+            return { ok: false, reason: error && error.message ? error.message : String(error) };
+        } finally {
+            this.restoring = false;
+        }
+    }
+
+    /** Debounced save of the current layout (session layer). */
+    scheduleSave() {
+        if (!this.isTop || !this.ui || this.restoring || !this.persistEnabled || !this.layout) return;
+        if (this.saveTimer) clearTimeout(this.saveTimer);
+        this.saveTimer = setTimeout(() => {
+            this.saveTimer = null;
+            this.saveNow();
+        }, BMUX_SAVE_DEBOUNCE);
+    }
+
+    /** Write the current layout now. */
+    saveNow(reason) {
+        if (!this.isTop || !this.persistEnabled) return Promise.resolve(null);
+
+        const snapshot = this.serializeLayout();
+        if (!snapshot) return Promise.resolve(null);
+
+        return this.persistRequest({ command: 'persist-save', snapshot: snapshot }, 1500)
+            .then((reply) => {
+                if (reason) this.log(`Layout saved (${reason})`);
+                return reply;
+            });
+    }
+
+    // --- persistence used by the commands ---
+
+    /** Whether brand-new tabs inherit the newest layout. */
+    setPersistInherit(inherit) {
+        this.persistInherit = !!inherit;
+        return this.persistRequest({ command: 'persist-set-inherit', inherit: !!inherit }, 1500)
+            .then((reply) => ({
+                ok: !!(reply && reply.status === 'ok'),
+                inherit: this.persistInherit
+            }));
+    }
+
+    setPersistEnabled(enabled) {
+        this.persistEnabled = !!enabled;
+        return this.persistRequest({ command: 'persist-set-enabled', enabled: !!enabled }, 1500)
+            .then((reply) => ({
+                ok: !!(reply && reply.status === 'ok'),
+                enabled: this.persistEnabled
+            }));
+    }
+
+    saveNamedLayout(name) {
+        const snapshot = this.serializeLayout();
+        if (!snapshot) return Promise.resolve({ ok: false, reason: 'nothing to save' });
+
+        return this.persistRequest({ command: 'layout-save', name: name, snapshot: snapshot }, 2000)
+            .then((reply) => reply || { ok: false, reason: 'no answer from the background' });
+    }
+
+    listNamedLayouts() {
+        return this.persistRequest({ command: 'layout-list' }, 2000).then((reply) => {
+            if (!reply) return { ok: false, reason: 'no answer from the background', layouts: [] };
+            return { ok: true, origin: reply.origin, layouts: reply.layouts || [] };
+        });
+    }
+
+    restoreNamedLayout(name) {
+        return this.persistRequest({ command: 'layout-load', name: name }, 2000).then((reply) => {
+            if (!reply) return { ok: false, reason: 'no answer from the background' };
+            if (!reply.snapshot) return { ok: false, reason: reply.reason || 'not found' };
+
+            const applied = this.applySnapshot(reply.snapshot);
+            if (!applied.ok) return { ok: false, reason: applied.reason };
+
+            this.restoredFrom = 'named';
+            return { ok: true, panes: applied.panes, name: reply.name || name };
+        });
+    }
+
+    deleteNamedLayout(name) {
+        return this.persistRequest({ command: 'layout-delete', name: name }, 2000)
+            .then((reply) => reply || { ok: false, reason: 'no answer from the background' });
+    }
+
+    /**
+     * Activation is one state, not two: showing BMUX also turns Control Mode on
+     * (the blue border), and hiding it turns Control Mode off. That is what the
+     * extension icon and Alt+Shift+B do; `detach` toggles the same thing.
+     */
     toggle() {
-        if (!this.isTop) return;
+        if (!this.isTop || !this.ui) return;
+
         this.isActive = !this.isActive;
         this.log(`Toggle: ${this.isActive}`);
+
         if (this.isActive) {
             this.ui.overlay.classList.remove('hidden');
             // Do not steal focus: keys must reach Control Mode, not a text field.
             if (document.activeElement && document.activeElement.blur) {
                 document.activeElement.blur();
             }
+            this.setControlMode(true);
             this.renderLayout();
-        } else {
-            this.clearPaneIndexes();
-            this.cancelPrompts();
-            this.ui.overlay.classList.add('hidden');
+            return;
         }
+
+        this.clearPaneIndexes();
+        this.cancelPrompts();
+        this.setControlMode(false);
+        this.ui.overlay.classList.add('hidden');
     }
 
     syncActivePaneFromFocus() {
@@ -726,6 +1265,46 @@ class BMUXClient {
         if (pane && this.ui.panes.contains(pane)) {
             this.setActivePane(pane);
         }
+    }
+
+    /** Remember what the last keys looked like (the `keys` command prints these). */
+    recordKey(event, mode) {
+        const entry = {
+            at: Date.now(),
+            key: String(event.key),
+            code: String(event.code || ''),
+            shift: !!event.shiftKey,
+            ctrl: !!event.ctrlKey,
+            alt: !!event.altKey,
+            meta: !!event.metaKey,
+            mode: mode || '',
+            binding: ''
+        };
+
+        this.keyLog.push(entry);
+        while (this.keyLog.length > BMUX_KEY_LOG) this.keyLog.shift();
+        return entry;
+    }
+
+    /** Recent key events, formatted for the `keys` command. */
+    recentKeys(limit) {
+        const entries = this.keyLog.slice(-(limit || BMUX_KEY_LOG));
+        if (!entries.length) return ['No keys seen yet.'];
+
+        return entries.map((entry, index) => {
+            const mods = [
+                entry.ctrl ? 'Ctrl' : '',
+                entry.shift ? 'Shift' : '',
+                entry.alt ? 'Alt' : '',
+                entry.meta ? 'Meta' : ''
+            ].filter(Boolean).join('+');
+
+            const shape = `${mods ? mods + '+' : ''}${entry.key === ' ' ? 'Space' : entry.key}` +
+                (entry.code ? ` [code ${entry.code}]` : '') +
+                (entry.mode ? ` · ${entry.mode}` : '');
+
+            return `${index + 1}. ${shape} → ${entry.binding || '(swallowed, no binding)'}`;
+        });
     }
 
     handleKey(e) {
@@ -747,7 +1326,7 @@ class BMUXClient {
         // primary one, y / n answer a yes/no prompt, Escape cancels. Typing in a
         // text field (the prompt's own input, the console, a pane input) is never
         // intercepted.
-        if (this.hasOpenPrompt() && !this.isTypingTarget()) {
+        if (this.hasOpenPrompt() && !this.isTypingTarget(e)) {
             if (this.handlePromptKey(e)) {
                 e.preventDefault();
                 e.stopPropagation();
@@ -757,7 +1336,7 @@ class BMUXClient {
 
         // display-panes picker: while the numbers are on screen, a digit selects
         // that pane and Escape cancels.
-        if (this.paneIndexPrompt && !this.isTypingTarget()) {
+        if (this.paneIndexPrompt && !this.isTypingTarget(e)) {
             if (/^[1-9]$/.test(e.key)) {
                 e.preventDefault(); e.stopPropagation();
                 const panes = this.getPanes();
@@ -784,30 +1363,18 @@ class BMUXClient {
             return;
         }
 
-        // CONTROL MODE LOGIC
-        if (this.isControlMode) {
-            // Typing in the console or a pane input keeps working in Control Mode
-            if (this.isTypingTarget()) {
-                return;
+        // LEGACY PREFIX (Ctrl+b) comes first: the prefix must work in every mode,
+        // including Control Mode, exactly like tmux.
+        if (e.ctrlKey && (e.key === 'b' || e.code === 'KeyB')) {
+            this.recordKey(e, 'prefix');
+            this.prefixPressed = true;
+            try {
+                chrome.runtime.sendMessage({ command: 'prefix-detected' });
+            } catch (error) {
+                // background asleep: the prefix still arms locally
             }
-
             e.preventDefault();
             e.stopPropagation();
-
-            this.log(`Control Key: ${e.key}`);
-
-            const line = bmuxKeyBinding('control', bmuxBindingKey(e));
-            if (line) {
-                this.dispatchLine(line);
-            }
-            return;
-        }
-
-        // LEGACY PREFIX LOGIC (Ctrl+b)
-        if (e.ctrlKey && e.key === 'b') {
-            this.prefixPressed = true;
-            chrome.runtime.sendMessage({ command: 'prefix-detected' });
-            e.preventDefault(); e.stopPropagation();
             clearTimeout(this.prefixTimeout);
             this.prefixTimeout = setTimeout(() => {
                 this.prefixPressed = false;
@@ -820,10 +1387,42 @@ class BMUXClient {
             e.stopPropagation();
             this.prefixPressed = false;
 
-            const line = bmuxKeyBinding('prefix', bmuxBindingKey(e));
-            if (line) {
-                this.dispatchLine(line);
+            const command = bmuxKeyBinding('prefix', e);
+            const entry = this.recordKey(e, 'prefix');
+            if (command) {
+                entry.binding = command;
+                this.dispatchLine(command);
+            } else {
+                this.log(`Unbound key after Ctrl+b: ${e.key}` +
+                    (e.code ? ` (code ${e.code})` : '') +
+                    (e.shiftKey ? ' with Shift' : ''));
             }
+            return;
+        }
+
+        // CONTROL MODE LOGIC
+        if (this.isControlMode) {
+            // Typing in the console or a pane input keeps working in Control Mode
+            if (this.isTypingTarget(e)) {
+                return;
+            }
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            this.log(`Control Key: ${e.key}`);
+
+            const command = bmuxKeyBinding('control', e);
+            const entry = this.recordKey(e, 'control');
+            if (command) {
+                entry.binding = command;
+                this.dispatchLine(command);
+            } else {
+                this.log(`Unbound key: ${e.key}` +
+                    (e.code ? ` (code ${e.code})` : '') +
+                    (e.shiftKey ? ' with Shift' : ''));
+            }
+            return;
         }
     }
 
@@ -847,6 +1446,7 @@ class BMUXClient {
         this.ui.commandInput.value = '';
         this.hideCommandMode();
         if (value && value.trim()) {
+            this.rememberCommand(value);
             this.runLine(value);
         }
     }
@@ -946,6 +1546,218 @@ class BMUXClient {
         return result;
     }
 
+    // --- command line editing: shared history and Tab completion ---
+
+    /** Remember a command in the shared history (consecutive duplicates collapse). */
+    rememberCommand(line) {
+        const text = (line == null ? '' : String(line)).trim();
+        if (!text) return;
+
+        const history = this.commandHistory;
+        if (history[history.length - 1] !== text) history.push(text);
+        while (history.length > BMUX_HISTORY_LIMIT) history.shift();
+    }
+
+    /**
+     * Wire Enter, ArrowUp/ArrowDown (history) and Tab (completion) onto a command
+     * input. `options.onSubmit(value)` runs the line; `options.report(text)` shows
+     * completions or a "no match" note. Without onSubmit, Enter is left to whoever
+     * already handles it (the `:` line).
+     */
+    bindCommandInput(input, options) {
+        const opts = options || {};
+
+        input.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter') {
+                if (!opts.onSubmit) return;
+
+                const value = input.value;
+                input.value = '';
+                input._bmuxHistory = null;
+                event.stopPropagation();
+
+                if (value && value.trim()) {
+                    this.rememberCommand(value);
+                    opts.onSubmit(value);
+                }
+                return;
+            }
+
+            if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+                if (this.recallHistory(input, event.key === 'ArrowUp' ? -1 : 1)) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                }
+                return;
+            }
+
+            if (event.key === 'Tab') {
+                event.preventDefault();
+                event.stopPropagation();
+                this.completeInput(input, opts.report);
+            }
+        });
+
+        // Typing (not a programmatic recall) starts a fresh place in history.
+        input.addEventListener('input', () => {
+            input._bmuxHistory = null;
+        });
+    }
+
+    /** Walk the shared history. Returns true when the key was used. */
+    recallHistory(input, step) {
+        const history = this.commandHistory;
+        if (!history.length) return false;
+
+        if (!input._bmuxHistory) {
+            input._bmuxHistory = { index: history.length, draft: input.value };
+        }
+
+        const state = input._bmuxHistory;
+        if (state.index >= history.length) state.draft = input.value;
+
+        const next = bmuxClamp(state.index + step, 0, history.length);
+        state.index = next;
+        input.value = next === history.length ? state.draft : history[next];
+
+        try {
+            input.setSelectionRange(input.value.length, input.value.length);
+        } catch (e) {
+            // some input types do not support selection
+        }
+
+        return true;
+    }
+
+    /** What could complete the segment of the line before the caret. */
+    completionFor(segment) {
+        const trailingSpace = /\s$/.test(segment);
+        const words = segment.trim().length ? segment.trim().split(/\s+/) : [];
+        const current = trailingSpace ? '' : (words.length ? words[words.length - 1] : '');
+        const prior = trailingSpace ? words : words.slice(0, -1);
+        const head = prior.length ? prior.join(' ') + ' ' : '';
+
+        let pool;
+        if (!prior.length) {
+            pool = Object.keys(BMUX_COMMANDS);
+        } else {
+            pool = this.argumentCandidates(prior[0], prior.slice(1));
+        }
+
+        const seen = {};
+        const candidates = pool
+            .filter((candidate) => candidate && candidate.toLowerCase().indexOf(current.toLowerCase()) === 0)
+            .filter((candidate) => {
+                if (seen[candidate]) return false;
+                seen[candidate] = true;
+                return true;
+            })
+            .sort();
+
+        return {
+            head: head,
+            current: current,
+            candidates: candidates,
+            common: longestCommonPrefix(candidates)
+        };
+    }
+
+    /** Argument vocabulary for a command, for Tab after the command name. */
+    argumentCandidates(command, args) {
+        const ids = this.getPanes().map((pane) => this.getPaneId(pane));
+        const numbers = this.getPanes().map((pane, index) => String(index + 1));
+
+        switch (command) {
+            case 'focus-pane':
+                return ['up', 'down', 'left', 'right'].concat(ids, numbers);
+            case 'kill-pane':
+            case 'swap-pane':
+                return ids.concat(numbers);
+            case 'resize-pane':
+                return ['-L', '-R', '-U', '-D', '-x', '-Z'];
+            case 'select-layout':
+                return typeof BMUX_LAYOUT_NAMES !== 'undefined' ? BMUX_LAYOUT_NAMES.slice() : [];
+            case 'log':
+                return ['toggle', 'on', 'off', 'clear', 'size'];
+            case 'control-mode':
+                return ['on', 'off', 'toggle'];
+            case 'persist':
+                return ['on', 'off', 'status'];
+            case 'cycle-pane':
+                return ['next', 'prev'];
+            case 'split-window':
+                return ['-h', '-v', '-l', '-b', '-d'];
+            case 'list-panes':
+                return ['-j', '--json'];
+            case 'capture-pane':
+                return ['-n'];
+            case 'delete-layout':
+                return ['--all'];
+            case 'filter': {
+                if (typeof BMUX_FILTER_PRESETS === 'undefined') return [];
+
+                const flags = ['-n', '-y', '-l', '-c', '--in', '--not-in', '--text',
+                    '--visible', '--unique', '--replace', '--presets'];
+                const presets = Object.keys(BMUX_FILTER_PRESETS);
+
+                // A second word after a preset completes that preset's variants.
+                if (args.length === 1) {
+                    const preset = BMUX_FILTER_PRESETS[args[0].toLowerCase()];
+                    if (preset && preset.variants) {
+                        return Object.keys(preset.variants).concat(flags);
+                    }
+                }
+
+                return presets.concat(flags);
+            }
+            default:
+                return [];
+        }
+    }
+
+    /** Tab: complete the segment under the caret, or list what could follow. */
+    completeInput(input, report) {
+        const value = input.value;
+        const caret = input.selectionStart == null ? value.length : input.selectionStart;
+        const before = value.slice(0, caret);
+        const after = value.slice(caret);
+
+        const segment = before.slice(lastSegmentStart(before));
+        const result = this.completionFor(segment);
+
+        if (!result.candidates.length) {
+            if (report && result.current) report(`No completion for "${result.current}"`);
+            return;
+        }
+
+        const typed = `${result.head}${result.current}`;
+        const tailStart = before.length - typed.length;
+
+        const replaceTail = (text) => {
+            input.value = before.slice(0, tailStart) + text + after;
+            const caretAt = tailStart + text.length;
+            try {
+                input.setSelectionRange(caretAt, caretAt);
+            } catch (e) {
+                // ignore
+            }
+        };
+
+        if (result.candidates.length === 1) {
+            replaceTail(`${result.head}${result.candidates[0]} `);
+            return;
+        }
+
+        if (result.common.length > result.current.length) {
+            replaceTail(`${result.head}${result.common}`);
+            return;
+        }
+
+        if (report) {
+            report(`Completions (${result.candidates.length}): ${result.candidates.join('  ')}`);
+        }
+    }
+
     // --- Pane primitives (used by commands.js through api.client) ---
 
     /** Panes in layout order (reading order of the split tree). */
@@ -1042,6 +1854,7 @@ class BMUXClient {
             pane.dataset.paneTitle = clean;
         }
         this.refreshPaneTitles();
+        this.scheduleSave();
     }
 
     /** Fractional rect of a pane within #bmux-panes ({ x, y, w, h } in 0..1). */
@@ -1092,6 +1905,7 @@ class BMUXClient {
 
         this.refreshPaneBadges();
         this.refreshStatus();
+        this.scheduleSave();
     }
 
     lastPane() {
@@ -1128,14 +1942,24 @@ class BMUXClient {
     /** Keep the per-pane maximize glyph in step with the zoom state. */
     refreshPaneControls() {
         this.getPanes().forEach((pane) => {
-            const button = pane.querySelector('.bmux-pane-max-btn');
-            if (!button) return;
-            const zoomed = this.isZoomed(pane);
-            button.textContent = zoomed ? '\u2921' : '\u2922';
-            button.title = zoomed
-                ? 'Restore the layout (Shift+z)'
-                : 'Maximize this pane (Shift+z)';
-            button.classList.toggle('bmux-pane-max-btn-active', zoomed);
+            const maxButton = pane.querySelector('.bmux-pane-max-btn');
+            if (maxButton) {
+                const zoomed = this.isZoomed(pane);
+                maxButton.textContent = zoomed ? '\u2921' : '\u2922';
+                maxButton.title = zoomed
+                    ? 'Restore the layout (Shift+z)'
+                    : 'Maximize this pane (Shift+z)';
+                maxButton.classList.toggle('bmux-pane-max-btn-active', zoomed);
+            }
+
+            const detachButton = pane.querySelector('.bmux-pane-detach-btn');
+            if (detachButton) {
+                const floating = this.isPaneConsoleFloating(pane);
+                detachButton.title = floating
+                    ? 'Dock this console back into the pane (log attach)'
+                    : 'Detach this console into its own window (log detach)';
+                detachButton.classList.toggle('bmux-pane-detach-btn-active', floating);
+            }
         });
     }
 
@@ -1290,8 +2114,13 @@ class BMUXClient {
         pane.style.height = `calc(${(rect.h * 100).toFixed(4)}% - ${2 * g}px)`;
     }
 
-    /** Recompute rectangles from the tree and apply them. */
-    renderLayout() {
+    /**
+     * Recompute rectangles from the tree and apply them. Every structural change
+     * lands here, so this is where the layout is persisted from — except during a
+     * restore, or when the caller says the render is cosmetic (a window resize).
+     */
+    renderLayout(opts) {
+        const options = opts || {};
         if (!this.ui) return;
 
         const { leaves, splits } = this.computeLayout();
@@ -1321,6 +2150,8 @@ class BMUXClient {
         this.refreshPaneControls();
         this.refreshStatus();
         this.refreshPromptStack();
+
+        if (options.persist !== false) this.scheduleSave();
     }
 
     /** One draggable handle per split boundary, positioned from the last render. */
@@ -2355,6 +3186,183 @@ class BMUXClient {
         return cleared;
     }
 
+    // --- detached (floating) pane console ---
+
+    isPaneConsoleFloating(pane) {
+        return !!(pane && pane.dataset && pane.dataset.consoleFloating === '1');
+    }
+
+    /**
+     * Move a pane's console out into its own movable window, or dock it back into
+     * the pane footer. The same DOM panel is moved, so the scrollback, the history
+     * and the input listeners survive the trip.
+     */
+    setPaneConsoleFloating(pane, floating) {
+        if (!this.ui || !this.ui.floating || !pane) return false;
+
+        const wantFloat = !!floating;
+        if (wantFloat === this.isPaneConsoleFloating(pane)) return wantFloat;
+
+        const output = this.paneConsole(pane);
+        if (!output) return false;
+
+        if (!wantFloat) {
+            const footer = pane.querySelector('.bmux-pane-footer');
+            if (footer && output.parentNode !== footer) footer.appendChild(output);
+
+            if (pane._bmuxFloat && pane._bmuxFloat.parentNode) {
+                pane._bmuxFloat.parentNode.removeChild(pane._bmuxFloat);
+            }
+            delete pane._bmuxFloat;
+            delete pane.dataset.consoleFloating;
+
+            this.refreshPaneControls();
+            this.scheduleSave();
+            return false;
+        }
+
+        const wrapper = document.createElement('div');
+        wrapper.className = 'bmux-floating-console';
+
+        const header = document.createElement('div');
+        header.className = 'bmux-floating-header';
+
+        const title = document.createElement('span');
+        title.className = 'bmux-floating-title';
+        title.textContent = `console · pane ${this.getPaneNumber(pane)} ${this.getPaneId(pane)}`;
+
+        const dock = document.createElement('button');
+        dock.type = 'button';
+        dock.className = 'bmux-floating-close';
+        dock.textContent = '\u29C9 dock';
+        dock.title = 'Dock this console back into its pane (log attach)';
+
+        header.appendChild(title);
+        header.appendChild(dock);
+        wrapper.appendChild(header);
+        wrapper.appendChild(output);
+
+        const grip = document.createElement('div');
+        grip.className = 'bmux-floating-grip';
+        grip.title = 'Drag to resize this console';
+        wrapper.appendChild(grip);
+
+        const bottom = document.createElement('div');
+        bottom.className = 'bmux-floating-bottom';
+        wrapper.appendChild(bottom);
+
+        this.ui.floating.appendChild(wrapper);
+        pane._bmuxFloat = wrapper;
+        pane.dataset.consoleFloating = '1';
+
+        this.setPaneConsoleOpen(pane, true);
+
+        const paneRect = pane.getBoundingClientRect();
+        const cascade = Math.max(0, this.ui.floating.childElementCount - 1) * 22;
+        wrapper.style.left = `${Math.round(bmuxClamp(paneRect.left + 28 + cascade, 0, Math.max(0, window.innerWidth - 470)))}px`;
+        wrapper.style.top = `${Math.round(bmuxClamp(paneRect.top + 44 + cascade, 0, Math.max(0, window.innerHeight - 300)))}px`;
+
+        dock.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.setPaneConsoleFloating(pane, false);
+        });
+        header.addEventListener('mousedown', (event) => this.startFloatingDrag(event, wrapper));
+        this.makeResizable(wrapper, grip);
+        this.makeResizable(wrapper, bottom, { axis: 'y' });
+
+        this.refreshPaneControls();
+        this.scheduleSave();
+        return true;
+    }
+
+    togglePaneConsoleFloating(pane) {
+        return this.setPaneConsoleFloating(pane, !this.isPaneConsoleFloating(pane));
+    }
+
+    /** Drag a floating console around by its header. */
+    startFloatingDrag(event, wrapper) {
+        if (event.button !== undefined && event.button !== 0) return;
+        if (event.target && event.target.classList && event.target.classList.contains('bmux-floating-close')) return;
+
+        event.preventDefault();
+        event.stopPropagation();
+
+        const startX = event.clientX;
+        const startY = event.clientY;
+        const startLeft = wrapper.offsetLeft;
+        const startTop = wrapper.offsetTop;
+
+        const shield = this.ui ? this.ui.dragShield : null;
+        if (shield) shield.className = 'active';
+
+        const move = (moveEvent) => {
+            wrapper.style.left = `${Math.round(bmuxClamp(startLeft + (moveEvent.clientX - startX), 0, Math.max(0, window.innerWidth - 80)))}px`;
+            wrapper.style.top = `${Math.round(bmuxClamp(startTop + (moveEvent.clientY - startY), 0, Math.max(0, window.innerHeight - 40)))}px`;
+        };
+
+        const up = () => {
+            document.removeEventListener('mousemove', move, true);
+            document.removeEventListener('mouseup', up, true);
+            if (shield) shield.className = '';
+            this.scheduleSave();
+        };
+
+        document.addEventListener('mousemove', move, true);
+        document.addEventListener('mouseup', up, true);
+    }
+
+    /** Verbose diagnostics for the `info` command. */
+    infoReport(section) {
+        const wanted = String(section || 'all').toLowerCase();
+        const lines = [];
+
+        if (wanted === 'all' || wanted === 'layout') {
+            const describe = (node, depth) => {
+                if (!node) return '(no layout)';
+                const indent = '  '.repeat(depth);
+                if (node.kind === 'leaf') {
+                    return `${indent}leaf ${this.getPaneId(node.pane)} ${this.getPaneUrl(node.pane)}`;
+                }
+                return [
+                    `${indent}split ${node.direction} ratio ${Number(node.ratio).toFixed(2)}`,
+                    describe(node.first, depth + 1),
+                    describe(node.second, depth + 1)
+                ].join('\n');
+            };
+            lines.push('== layout ==', describe(this.layout, 0));
+        }
+
+        if (wanted === 'all' || wanted === 'panes') {
+            lines.push('== panes ==');
+            this.getPanes().forEach((pane) => {
+                lines.push(`${this.getPaneNumber(pane)} ${this.getPaneId(pane)} · ${this.getPaneSizeLabel(pane)}` +
+                    `${this.isZoomed(pane) ? ' · zoomed' : ''}` +
+                    `${this.isPaneConsoleFloating(pane) ? ' · console floating' :
+                        (this.isPaneConsoleOpen(pane) ? ' · console open' : '')}` +
+                    ` · ${this.getPaneTitle(pane)}`);
+            });
+        }
+
+        if (wanted === 'all' || wanted === 'keys') {
+            lines.push('== keys ==', ...this.recentKeys(10));
+        }
+
+        if (wanted === 'all' || wanted === 'state') {
+            lines.push('== state ==', ...[
+                `theme: ${this.theme}`,
+                `verbose: ${this.verbose ? 'on' : 'off'}`,
+                `debug window: ${this.debugOpen ? 'open' : 'hidden'}`,
+                `auto-restore: ${this.persistEnabled ? 'on' : 'off'} (layout from ${this.restoredFrom})`,
+                `control mode: ${this.isControlMode ? 'on' : 'off'} · active: ${this.isActive ? 'yes' : 'no'}`,
+                `panes: ${this.getPanes().length} · zoomed: ${this.zoomedPane ? this.getPaneId(this.zoomedPane) : 'no'}`,
+                `filters: ${this.filters.size} · prompts: ${this.prompts.size} · history: ${this.commandHistory.length}`
+            ]);
+        }
+
+        return lines.join('\n');
+    }
+
     // --- display-panes ---
 
     displayPanes() {
@@ -2472,6 +3480,10 @@ class BMUXClient {
         this.clearPaneIndexes();
         this.clearFilter(target);
         this.cancelPrompt(target, 'its pane was killed');
+        if (target._bmuxFloat && target._bmuxFloat.parentNode) {
+            target._bmuxFloat.parentNode.removeChild(target._bmuxFloat);
+        }
+        delete target._bmuxFloat;
         if (this.zoomedPane === target) this.zoomedPane = null;
         if (this.lastActivePane === target) this.lastActivePane = null;
 
@@ -2480,6 +3492,8 @@ class BMUXClient {
         target.remove();
 
         this.layoutName = null;
+
+        if (this.rootPane === target) this.rootPane = siblingPane;
 
         if (wasActive && siblingPane) {
             this.setActivePane(siblingPane);
@@ -2506,6 +3520,7 @@ class BMUXClient {
         this.clearPaneIndexes();
         this.clearAllFilters();
         this.cancelPrompts();
+        if (this.ui && this.ui.floating) this.ui.floating.textContent = '';
         this.zoomedPane = null;
         this.layoutName = null;
         this.lastActivePane = null;
@@ -2517,6 +3532,7 @@ class BMUXClient {
         const pane = this.createPaneElement(window.location.href);
         this.ui.panes.appendChild(pane);
         this.layout = bmuxLeaf(pane);
+        this.rootPane = pane;
 
         this.setActivePane(pane);
         this.renderLayout();
@@ -2569,6 +3585,13 @@ class BMUXClient {
         consoleButton.textContent = '\u25B8';
         consoleButton.title = "Show this pane's console (log toggle)";
 
+        // Detach the console into its own movable window, or dock it again.
+        const detachButton = document.createElement('button');
+        detachButton.className = 'bmux-pane-detach-btn';
+        detachButton.type = 'button';
+        detachButton.textContent = '\u29C9';
+        detachButton.title = 'Detach this console into its own window (log detach)';
+
         // Per-pane maximize/restore: the on-screen form of Ctrl+b, Shift+z.
         const maxButton = document.createElement('button');
         maxButton.className = 'bmux-pane-max-btn';
@@ -2585,6 +3608,7 @@ class BMUXClient {
         cmdContainer.appendChild(title);
         cmdContainer.appendChild(status);
         cmdContainer.appendChild(consoleButton);
+        cmdContainer.appendChild(detachButton);
         cmdContainer.appendChild(maxButton);
         cmdContainer.appendChild(badge);
 
@@ -2620,6 +3644,12 @@ class BMUXClient {
             });
         });
 
+        detachButton.addEventListener('click', (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            this.togglePaneConsoleFloating(pane);
+        });
+
         grip.addEventListener('mousedown', (event) => this.startConsoleResize(event, pane));
         grip.addEventListener('dblclick', () => this.setPaneConsoleHeight(pane, BMUX_CONSOLE_HEIGHT));
 
@@ -2632,16 +3662,12 @@ class BMUXClient {
             this.cancelPrompt(pane, 'the pane navigated');
         });
 
-        // Bind command input
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                const cmdText = input.value.trim();
-                input.value = '';
-                e.stopPropagation();
-
-                if (cmdText) {
-                    this.runPaneCommand(pane, cmdText, output);
-                }
+        // Bind the pane command input: history, completion and Enter.
+        this.bindCommandInput(input, {
+            onSubmit: (cmdText) => this.runPaneCommand(pane, cmdText),
+            report: (text) => {
+                this.appendPaneOutput(pane, text, 'result');
+                this.setPaneConsoleOpen(pane, true);
             }
         });
 
@@ -2672,12 +3698,22 @@ class BMUXClient {
 
     // --- pane console (the scrollback under each pane's input) ---
 
+    /** The pane's console panel, wherever it currently lives (footer or float). */
+    paneConsole(pane) {
+        if (!pane || !pane.querySelector) return null;
+
+        const inline = pane.querySelector('.bmux-pane-output');
+        if (inline) return inline;
+
+        return pane._bmuxFloat ? pane._bmuxFloat.querySelector('.bmux-pane-output') : null;
+    }
+
     isPaneConsoleOpen(pane) {
         return !!(pane && pane.dataset && pane.dataset.consoleOpen === '1');
     }
 
     setPaneConsoleOpen(pane, open) {
-        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        const output = this.paneConsole(pane);
         if (!output) return false;
 
         pane.dataset.consoleOpen = open ? '1' : '0';
@@ -2698,6 +3734,7 @@ class BMUXClient {
             if (log) log.scrollTop = log.scrollHeight;
         }
 
+        this.scheduleSave();
         return !!open;
     }
 
@@ -2712,21 +3749,30 @@ class BMUXClient {
 
     /** Set the console height in px, clamped to the pane. Returns the applied px. */
     setPaneConsoleHeight(pane, px) {
-        const output = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output') : null;
+        const output = this.paneConsole(pane);
         if (!output) return 0;
 
+        // While detached the window owns the size, not the panel.
+        if (this.isPaneConsoleFloating(pane) && pane._bmuxFloat) {
+            const applied = Math.round(bmuxClamp(Number(px) || BMUX_CONSOLE_HEIGHT, 80, window.innerHeight - 80));
+            pane._bmuxFloat.style.height = `${applied}px`;
+            return applied;
+        }
+
         const paneHeight = pane.getBoundingClientRect ? (pane.getBoundingClientRect().height || 0) : 0;
-        const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_RATIO) : 600;
+        const max = paneHeight ? Math.max(BMUX_CONSOLE_MIN_HEIGHT, paneHeight * BMUX_CONSOLE_MAX_SHARE) : 600;
         const applied = Math.round(bmuxClamp(Number(px) || BMUX_CONSOLE_HEIGHT, BMUX_CONSOLE_MIN_HEIGHT, max));
 
         pane.dataset.consoleHeight = String(applied);
         output.style.height = `${applied}px`;
+        this.scheduleSave();
         return applied;
     }
 
     /** Append one block to a pane's scrollback, keeping the newest in view. */
     appendPaneOutput(pane, text, kind) {
-        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        const output = this.paneConsole(pane);
+        const log = output ? output.querySelector('.bmux-pane-output-log') : null;
         if (!log) return false;
 
         const block = document.createElement('div');
@@ -2745,7 +3791,8 @@ class BMUXClient {
     }
 
     clearPaneConsole(pane) {
-        const log = pane && pane.querySelector ? pane.querySelector('.bmux-pane-output-log') : null;
+        const output = this.paneConsole(pane);
+        const log = output ? output.querySelector('.bmux-pane-output-log') : null;
         if (!log) return false;
         log.textContent = '';
         return true;
@@ -2765,6 +3812,9 @@ class BMUXClient {
         const previousCursor = document.body.style.cursor;
         document.body.style.cursor = 'row-resize';
 
+        const shield = this.ui ? this.ui.dragShield : null;
+        if (shield) shield.className = 'active row';
+
         const move = (moveEvent) => {
             this.setPaneConsoleHeight(pane, startHeight + (startY - moveEvent.clientY));
         };
@@ -2773,6 +3823,7 @@ class BMUXClient {
             document.removeEventListener('mousemove', move, true);
             document.removeEventListener('mouseup', up, true);
             document.body.style.cursor = previousCursor;
+            if (shield) shield.className = '';
             this.log(`Console height: ${this.getPaneConsoleHeight(pane)}px`);
         };
 
@@ -2780,12 +3831,6 @@ class BMUXClient {
         document.addEventListener('mouseup', up, true);
     }
 
-    updateUI(state) {
-        if (!this.ui) return;
-        if (state && state.activeSessionId) {
-            // Sync UI
-        }
-    }
 }
 
 window.bmux = new BMUXClient();

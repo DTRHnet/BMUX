@@ -1,12 +1,18 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.4.0**
+**Version 0.5.0**
 
 A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.4.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.5.0:** your layout survives a reload. Splits, ratios, URLs, titles,
+> focus, zoom and console state are saved per tab and restored on load, named
+> layouts can be saved with `save-layout` / `restore-layout`, and `persist off`
+> switches all of it off. The layout *follows the page* when the tab navigates
+> elsewhere, and a brand-new tab inherits the newest layout.
+>
 > **New in 0.4.0:** commands chain with `;` (`filter img; filter a`), commands can
 > ask questions you **click** (cards with buttons, digits or `y`/`n`), `filter`
 > draws then narrows in rounds (*inside a container*, *text contains*, *visible
@@ -29,6 +35,38 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 
 ---
 
+## 📸 Screenshots
+
+Real captures: Chromium 150 running the unpacked extension against
+[dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders.
+
+**Activated: three panes on dtrh.net.** The frost palette, Control Mode's quiet
+inset ring and its `CONTROL MODE` chip, and per-pane footers with the title,
+`[number id]` badge and the console / detach / maximize buttons.
+
+![BMUX activated on dtrh.net with three panes](docs/images/01-activation.png)
+
+**`filter links` on the changelog pane.** Every match is boxed with a numbered tab;
+the hovered one is named in the pane's status line
+(`FILTER: links - A.shrink-0.font-mono.text-sm "dtrh.net" · 1/13`), and the refine
+card offers to narrow the result down.
+
+![filter boxing the links on dtrh.net, with a hovered match named and the refine card](docs/images/02-filter.png)
+
+**A detached console.** `log detach` moves that pane's console — scrollback
+included — into its own window: drag the header to move it, the corner to resize,
+`⧉ dock` to put it back. The panes keep running underneath.
+
+![A pane console detached into its own floating window](docs/images/03-console.png)
+
+**The classic palette.** `theme classic` on the same layout (with the debug window
+and the docked pane console open) — the original black/green terminal is one
+command away, and `theme frost` brings the ice palette back.
+
+![The classic black and green palette on the same three-pane layout](docs/images/04-theme-classic.png)
+
+---
+
 ## 🚀 Quick Start
 
 ### Installation
@@ -41,7 +79,9 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 
 ### Basic Usage
 
-1. **Activate BMUX**: Press `Alt+Shift+B` or click the extension icon
+1. **Activate BMUX**: Press `Alt+Shift+B` or click the extension icon — either one
+   turns it on (overlay + Control Mode, with a quiet blue ring). Press it again to
+   turn it off.
 2. **Split Horizontally**: Press `%` (Control Mode) or click `Split H`
 3. **Split Vertically**: Press `"` (Shift+') or click `Split V`
 4. **Resize**: drag the boundary between panes with the mouse, or press
@@ -113,6 +153,46 @@ A Chrome/Firefox extension inspired by TMUX that transforms your browser into a 
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
 
+### 💾 Sessions that survive a reload
+The layout of the tab you are in is saved as it changes and put back when the
+page loads:
+
+- **What comes back**: the split tree and its ratios, every pane's URL, custom
+  titles, the focused pane, the maximized pane, and each pane console's open state
+  and height.
+- **Where it lives**: `chrome.storage.session`, keyed by tab id — survives a
+  reload or navigation, dies with the browser, never synced.
+- **The layout follows the page.** Because the snapshot belongs to the *tab* and
+  not to the address, navigating somewhere else with the overlay on puts the new
+  page in the root pane and leaves every other pane showing what it was showing —
+  the old site is never dragged back. A plain reload restores everything, root
+  pane included.
+- **A new tab inherits the newest layout** (on by default): same splits, ratios,
+  titles and console state, with the new tab's own page in the root pane.
+  `inherit off` makes new tabs start as a single pane again.
+- **Restored before the first pane is drawn**, so you never see an empty overlay
+  flash.
+- **Named layouts** go to `chrome.storage.local` and survive restarts:
+
+```
+> save-layout work        # 2 pane(s) saved for https://example.com
+> restore-layout work     # back to those panes, titles and sizes
+> list-layouts            # what is saved for this site
+> delete-layout work      # or --all
+> persist off             # stop saving this tab, and clear its snapshot
+> persist status          # on/off, and where the current layout came from
+> inherit status          # does a new tab inherit the newest layout?
+> inherit off             # new tabs start with one pane again
+```
+
+- **Restoring recreates panes**, so the pages load fresh — scroll position and
+  in-page state cannot be carried over. Inheritance copies the *shape*: the root
+  pane is repointed at the new tab's own URL and the other panes keep their
+  addresses.
+- Snapshots are validated (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep,
+  ≤ 64 KB) before they are stored or applied; a bad one is ignored, never partly
+  restored.
+
 ### ⛓️ Chained commands
 `;` runs commands one after another, from the console, the `:` line, a pane input
 or a key binding:
@@ -127,6 +207,18 @@ or a key binding:
 - A failing segment does not stop the chain, and each gets its own echo.
 - `\;` is a literal semicolon; a `;` inside quotes or `[] () {}` does not split,
   so `filter a[href="x;y"]` stays one command.
+
+### 🔧 Debugging without a permanent window
+The floating debug window is **optional and hidden by default** — the pane console
+is the terminal now. When you want BMUX's own trace, either show the window or
+mirror it into the pane you are looking at:
+
+```
+> debug on            # show the floating debug window (debug off / toggle)
+> verbose on          # mirror debug output into the focused pane console
+> info                # layout tree, panes, recent keys, runtime state
+> info layout|panes|keys|state
+```
 
 ### ❓ Prompts you can click
 When a command needs an answer, a card appears above the pane's footer:
@@ -150,6 +242,19 @@ form of `Ctrl+b`, `Shift+z`), click `⤡` to restore. Clicking another pane's `�
 moves the maximize there. Keyboard (`z`, `Shift+z`), the toolbar `Zoom` button and
 the pane buttons share one state.
 
+### 🧊 A frost palette, and a calmer Control Mode
+Every terminal surface uses cold blues, ice text and one ice-cyan accent — defined
+as CSS variables at the top of `content/styles.css`, so it is one place to tune.
+Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather
+than a five-pixel blue frame around the page. `theme classic` restores the old
+black/green terminal look:
+
+```
+> theme classic      # black background, green text
+> theme frost        # back to the default palette
+> theme              # what is active now
+```
+
 ### 💻 Per-pane console you can actually read
 The console under each pane's input is a scrollback, not a flash message:
 
@@ -158,10 +263,28 @@ The console under each pane's input is a scrollback, not a flash message:
 - It **stays open** — the five-second auto-collapse is gone.
 - A toggle button in the footer (`▸` / `▾`), the `l` key, or `log toggle` opens
   and closes it whenever you like.
-- **Drag its top edge** to make it taller (up to 70% of the pane; double-click to
+- **Drag its top edge** to make it taller (up to 90% of the pane; double-click to
   reset; `log size 240` works too). The height and open state survive splits,
   layout changes and zoom.
 - `clear` empties the scrollback.
+- **Detachable**: `log detach` (or the `⧉` button in the footer) pulls the console
+  out into its own window — drag the header to move it, the corner to resize,
+  `⧉ dock` or `log attach` to put it back. The scrollback comes with it, and the
+  detached console is saved with the layout.
+- **Drag its top edge** (the two-line grip) to make it as tall as 90% of the pane;
+  double-click the grip to reset it to 140px, or type `log size 320`.
+
+**Line editing works like a shell** — in the pane console, the floating console and
+the `:` line:
+
+| Key | Effect |
+|-----|--------|
+| `Up` / `Down` | Recall previous commands (`Down` past the newest restores your draft) |
+| `Tab` | Complete the command name, then its arguments (layouts, flags, presets, pane ids, directions…) |
+
+An unambiguous `Tab` completes and adds a space; an ambiguous one fills in the
+common prefix, and a second `Tab` lists the candidates. History is shared across all
+inputs and keeps the last 200 commands.
 
 ### 🔎 Filter highlighting
 `filter` inspects a same-origin pane and *shows* you what matched:
@@ -309,6 +432,17 @@ These act on the whole overlay.
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
 | `escape` | What `Esc` does: clear filter highlights, else leave Control Mode | `> escape` |
+| `persist [on\|off\|status]` | Auto-restore for this tab; `off` also clears its snapshot | `> persist status` |
+| `inherit [on\|off\|status]` | Whether a new tab starts from the newest layout (default on) | `> inherit off` |
+| `keys` | Print the last key events and what they resolved to (shortcut diagnostics) | `> keys` |
+| `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
+| `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
+| `verbose [on\|off\|status]` | Mirror debug output into the focused pane console | `> verbose on` |
+| `theme [frost\|classic]` | Switch the palette | `> theme classic` |
+| `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
+| `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
+| `list-layouts` | Saved layouts for this site | `> list-layouts` |
+| `delete-layout <name\|--all>` | Remove saved layouts | `> delete-layout work` |
 | `yes` / `no` | Answer the open prompt (`y` / `n` are aliases) | `> yes` |
 
 ### Pane Commands
@@ -329,7 +463,7 @@ for the console and `:` line.
 | `rename-pane <title\|->` | Title shown in the pane footer; `-` clears it | `> rename-pane Docs` |
 | `url [new-url]` | Show or change pane URL | `> url github.com` |
 | `reload` | Reload the pane | `> reload` |
-| `log [toggle\|on\|off\|clear\|size px]` | Show, hide, resize or clear this pane's console | `> log size 240` |
+| `log [toggle\|on\|off\|clear\|size px\|detach\|attach]` | Show, hide, resize, clear, or float this pane's console | `> log detach` |
 | `clear` | Empty the pane console scrollback | `> clear` |
 
 Bad input never throws: an unknown command, an unknown pane, a missing argument,
@@ -377,6 +511,13 @@ scripting:
 | `:` | `command-prompt` |
 | `Esc` | Exit Control Mode (or cancel `display-panes`) |
 
+`%`, `Shift+5` and `5` all split horizontally (`"`, `Shift+'` and `'` vertically) —
+the tables carry layout-independent aliases, because keyboards disagree about which
+character a shifted digit or quote reports. `Ctrl+b` also works *inside* Control
+Mode, so mixing the two is safe. If a shortcut does not fire, run `keys`: it lists
+the last dozen key events with their raw `key`, `code` and modifiers, and the command
+each one resolved to.
+
 **Legacy (Ctrl+b prefix)** — the same command set, after `Ctrl+b`:
 
 1. Press `Ctrl+b`
@@ -397,6 +538,8 @@ a command line, so keys are not a second code path.
 | Drag a pane console's top edge | Resize that console (double-click resets it) |
 | Drag the debug console's corner | Resize the floating console |
 | Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
+| Click a pane's `⧉` button | Detach that console into its own window (or dock it) |
+| Drag a detached console's header | Move that window |
 
 ---
 
@@ -449,10 +592,8 @@ BMUX/
 │   ├── main.js            # Overlay DOM, layout engine, focus, dispatcher
 │   ├── commands.js        # Command registry + key bindings (source of truth)
 │   └── styles.css         # Glassmorphism UI, split handles, drag shield
-├── popup/
-│   ├── index.html         # Extension icon popup
-│   └── script.js          # Popup controls
 └── docs/                  # Documentation
+    ├── images/              # Screenshots used by this README
     ├── ADDING_COMMANDS.md
     ├── COMMAND_USAGE.md
     ├── CROSS_ORIGIN.md
@@ -496,16 +637,33 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - ✅ Stores state locally in browser
 - ✅ Open source - fully auditable code
 
+### What BMUX Stores Locally
+- The layout of each tab (split tree, pane URLs, custom titles, focus, zoom,
+  console state) in `chrome.storage.session` — cleared when the browser closes.
+- Named layouts you explicitly saved, per site origin, in `chrome.storage.local`.
+- The auto-restore switch, and whether a new tab inherits the newest layout.
+- **Never `sync`**, never uploaded. `persist off` clears the current tab's
+  snapshot; `delete-layout --all` removes a site's named layouts. Both are
+  plaintext in your own browser profile, like history.
+
 ### What BMUX Does NOT Do
 - ❌ Track your browsing
 - ❌ Send data over network
 - ❌ Inject ads or modify content
 - ❌ Access sites you don't explicitly load
 
+### Activation
+Clicking the toolbar icon or pressing `Alt+Shift+B` turns BMUX on — overlay plus
+Control Mode in one step — and the same action turns it off. There is no popup; the
+icon is the button. If your window manager or another extension has taken
+`Alt+Shift+B`, rebind it at `chrome://extensions/shortcuts`; `Ctrl+b` works
+regardless.
+
 ### Permissions Explained
 - **`declarativeNetRequest`** - Remove iframe-blocking headers
 - **`<all_urls>`** - Apply rules to any site you load
-- **`tabs`, `storage`** - Manage panes and save state
+- **`tabs`** - Know which tab a layout belongs to (and relay keys from panes)
+- **`storage`** - Save layouts (`session` for the tab, `local` for named ones)
 
 See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 
@@ -518,9 +676,17 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.1.0)
-- ⏳ **No sessions or persistence** - the layout lives in the page, so a reload
-  starts over
+### Current Version (0.5.0)
+- ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
+  position, form input and in-page state are lost on restore
+- ⏳ **Not persisted**: prompts, filter boxes, focus history and console
+  scrollback (transient UI); console open/height is
+- ⏳ **A new tab inherits the newest layout from another tab**, so it copies the
+  shape (fresh pages), not the live pages; only one layout is offered
+- ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
+  lost (named layouts remain)
+- ⏳ **`Alt+Shift+B` can be taken** by the window manager or another extension;
+  rebind it at `chrome://extensions/shortcuts` and use `keys` to see what arrived
 - ⏳ **No multiple windows / layout tabs** - `new-window` resets the overlay
 - ⏳ **No floating panes** - every pane takes layout space
 - ⏳ **No `break-pane` / `join-pane`**
@@ -576,10 +742,17 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Filters accumulate across commands (`--replace` to reset)
 
 ### Version 0.5.0
+- [x] Per-tab layout restore (split tree, ratios, URLs, titles, focus, zoom, consoles)
+- [x] Named layouts in `chrome.storage.local` (`save-layout` / `restore-layout` / `list-layouts` / `delete-layout`)
+- [x] `persist [on|off|status]` off switch that also clears the snapshot
+- [x] Layout follows the page on navigation; new tabs inherit the newest layout (`inherit`)
+- [x] Snapshot validation (version, tree shape, ratios, ≤ 12 panes, ≤ 32 deep, ≤ 64 KB)
+- [x] Background owns persistence, tab-close cleanup and startup pruning
+
+### Version 0.6.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Multiple windows / layout tabs
-- [ ] Session persistence (save and restore layouts, titles, URLs)
 - [ ] Broadcasting input to all panes
 - [ ] Pane drag-and-drop reordering
 - [ ] Touch/pointer-based resizing
@@ -627,4 +800,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.4.0 | Last Updated: November 2026
+Version 0.5.0 | Last Updated: November 2026

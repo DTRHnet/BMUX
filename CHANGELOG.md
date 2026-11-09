@@ -5,6 +5,200 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-11-09
+
+The layout survives a reload, and named layouts can be saved and restored.
+Persistence finally exists, is validated, and can be switched off.
+
+### Added
+
+- **Per-tab layout restore.** The layout of the current tab is saved as it changes
+  and restored on the next load: the split tree with its ratios, each pane's URL,
+  custom titles, which pane was focused, which was maximized, and each pane
+  console's open state and height.
+  - stored in `chrome.storage.session` under `layout:tab:<tabId>`, so it survives
+    a reload or navigation and dies with the browser;
+  - saved on a 400 ms debounce from every structural change, plus immediately when
+    the tab is hidden or unloaded;
+  - restored **before the first pane is drawn**, so the overlay never flashes an
+    empty layout, with an 800 ms ceiling if the service worker is asleep;
+  - pane ids and the id counter are restored, so old and new panes never collide.
+- **Named layouts** in `chrome.storage.local`, per site origin, explicitly saved:
+  - `save-layout [name]`, `restore-layout <name>`, `list-layouts`,
+    `delete-layout <name|--all>`;
+  - they survive browser restarts, and at most 30 are kept per origin (oldest
+    dropped first).
+- **A calmer frost palette.** Every terminal surface (pane console, floating
+  console, debug window, prompt cards, toolbar, status bar) now uses cold blues and
+  ice text with one ice-cyan accent, defined as CSS variables at the top of
+  `content/styles.css`. Control Mode is no longer a five-pixel frame around the
+  page: it is a one-pixel inset ring plus a tinted `CONTROL MODE` chip in the
+  status bar. `theme classic` restores the old black/green terminal look and
+  `theme frost` brings the palette back; the choice is saved with the layout.
+- **The debug window is optional.** It starts **hidden**; `debug on|off|toggle`
+  (and the preference, saved per tab) shows it. With it hidden, `verbose on`
+  mirrors debug output into the focused pane's console instead, so nothing is
+  invisible.
+- **`info [all|layout|panes|keys|state]`** prints verbose diagnostics — the layout
+  tree, every pane with its size/console/zoom state, the recent key log, and the
+  runtime state (theme, verbose, debug window, auto-restore, filters, prompts,
+  history). This is the command-line answer to "where do I see what BMUX is
+  doing", now that the debug window is not always on screen.
+- **Detachable pane console.** Any pane's console can be pulled out into its own
+  window and put back:
+  - `log detach` / `log attach`, or the `⧉` button in the pane footer;
+  - the window moves by dragging its header and resizes from its corner or bottom
+    edge (same drag shield as everything else), and its `⧉ dock` button puts it
+    back in the pane;
+  - the *same* panel is moved, so the scrollback, history and input listeners
+    survive the trip;
+  - the detached state and window rectangle are saved with the layout, so a reload
+    brings the floating console back.
+- **Activation is one state.** Clicking the extension icon (or pressing
+  `Alt+Shift+B`) now turns BMUX *on*: the overlay appears with Control Mode
+  already active, so the blue border and the keys are live immediately. Pressing
+  it again hides the overlay and leaves Control Mode. The popup is gone — the icon
+  is the button — and `detach` (`d`) toggles the same state.
+- **Keyboard shortcuts that survive layout differences.** `event.key` is not the
+  same on every keyboard: with Shift held, some report `%` and others report `5`
+  (likewise `''` / `"`). Key lookup now tries the character, the `Shift+<code>`
+  form, the bare `code`, and the lowercase character, and both key tables carry
+  `Shift+Digit5` / `Digit5` / `5` and `Shift+Quote` / `Quote` / `'` aliases. `%`,
+  `Shift+5`, `5`, `"` and `'` all split.
+- **`Ctrl+b` works in every mode**, including inside Control Mode (tmux behaviour)
+  — the prefix is checked before the Control Mode branch, so mixing the two can no
+  longer swallow the second key.
+- **`keys` command**, plus a log line for any key that resolves to nothing:
+  `Unbound key: … (code …) with Shift`. `keys` prints the last dozen events with
+  their raw `key`, `code`, modifiers, the mode they were read in, and the command
+  they resolved to — so a shortcut that does not fire can be diagnosed instead of
+  guessed at.
+- **The pane console resizes like a pane**: a visible two-line grip on its top edge
+  (12 px grab area, double-click resets), draggable to 90% of the pane, with a drag
+  shield so the pointer cannot slip onto the iframe mid-drag. The floating console
+  gained a bottom edge grip next to its corner grip.
+- **Command line editing in every input.** The pane console, the floating debug
+  console and the `:` line now share one history and one completion engine:
+  - `Up` / `Down` recall the previous commands (`Down` past the newest restores
+    whatever you were typing); consecutive duplicates collapse, and the last 200
+    commands are kept;
+  - `Tab` completes the command name, then that command's arguments — layout
+    names, resize flags, `log` actions, focus directions, pane ids and numbers,
+    filter presets and their variants, and so on;
+  - an unambiguous `Tab` completes and adds a space, an ambiguous one fills in the
+    common prefix, and pressing `Tab` again lists the candidates in the console;
+  - completion works on the segment under the caret, so `list-panes; list-p<Tab>`
+    completes the second command;
+  - history is shared between all three inputs, so a command typed in a pane can
+    be recalled in the floating console.
+
+- **The layout follows the page.** The tab snapshot is keyed by tab id, so it
+  outlives the address it was built on. When the page underneath changes, the root
+  pane takes the new URL instead of the stale one and every other pane keeps what
+  it was showing; a plain reload still restores the root pane's own URL, because
+  the rule only fires when the tab really moved somewhere else. Switching sites
+  with the overlay on no longer drags the old site back into the layout.
+- **`persist [on|off|status]`** — the auto-restore switch. `off` clears this tab's
+  snapshot and stops all writes; named layouts are untouched because they were
+  explicit saves. `status` also says where the current layout came from
+  (`fresh`, `session` or `named`).
+- **New tabs inherit the newest layout** (`inherit [on|off|status]`, on by
+  default). A tab with no snapshot of its own asks the background for the newest
+  one saved by another tab and adopts its shape — splits, ratios, titles, consoles —
+  with the *new* tab's own page replacing the old root URL. Other panes keep their
+  addresses. `inherit off` makes new tabs start with a single pane again; the
+  switch also gates offering a snapshot to other tabs.
+- **Validation** in the background: snapshots are checked whole before being
+  stored or applied — version, tree shape, split ratios in range, URL strings, at
+  most 12 panes, depth ≤ 32, ≤ 64 KB. A rejected snapshot is dropped, never
+  partly applied.
+- **Housekeeping**: closing a tab deletes its snapshot, and on browser startup any
+  session layout whose tab no longer exists is pruned.
+
+### Changed
+
+- **The background service worker is now a real component**: it relays command
+  lines (unchanged), owns all persistence, and knows which tab is asking. The dead
+  `STATE` / `loadState` / `saveState` / `createSession` / `get-state` /
+  `new-session` machinery — which was written once on install and read by nobody —
+  is gone.
+- The popup is removed: `action` no longer declares `default_popup`, so clicking the
+  icon runs `action.onClicked` and activates BMUX. `popup/` is deleted; the icon
+  and the hotkey are the two ways in.
+- `unlimitedStorage` was dropped from the manifest: snapshots are a few KB, so the
+  default quota is ample. Fewer permissions, same behaviour.
+- Content scripts never touch `chrome.storage` directly: `chrome.storage.session`
+  is not readable from them without `setAccessLevel`, and the background already
+  knows the tab id.
+- `fetchState` / `updateUI` — the code that logged "State Fetched" and did nothing
+  — are gone.
+
+### Fixed
+
+- A keydown aimed at a text field was swallowed when that field was not the
+  document's `activeElement` (a hidden debug window, a synthetic event): the
+  Control Mode handler now also looks at the event target, so typing in any BMUX
+  input is never intercepted.
+- A pane console given a height taller than its pane could not actually grow that
+  far: the iframe flex item refused to shrink (`min-height: auto`), so the panel was
+  squeezed back. The iframe now has `min-height: 0` and the panel `flex: 0 0 auto`.
+- Dragging a console's resize grip stalled when the pointer crossed the pane's
+  iframe; console and floating-console resizing now use the same drag shield as the
+  split handles.
+- Reloading a page no longer destroys your layout.
+- A corrupt, unsupported or oversized stored layout can no longer break startup:
+  it is ignored, logged, and a fresh single pane is rendered.
+- A pane id collision after restoring into a page with more panes than before is
+  impossible: the counter is restored to at least the highest id seen.
+
+### Notes
+
+- **Restoring recreates panes, so pages load fresh.** Scroll position, form input
+  and in-page JS state cannot be carried over — that is a browser constraint, not a
+  shortcut.
+- **What is not persisted**: prompts, filter boxes, focus history and console
+  scrollback (transient UI). Console open/height *is* persisted.
+- Stored layouts contain plaintext URLs and titles of pages you opened, in your
+  own browser profile (never `sync`, never uploaded). `persist off` clears the tab
+  snapshot; `delete-layout` removes named ones.
+- Extension reload/update clears `storage.session`, so the tab layout is lost —
+  named layouts remain.
+- On a browser without `storage.session`, the tab layer falls back to
+  `storage.local` with a 6 hour expiry.
+
+### Docs
+
+- README leads with four real screenshots captured against
+  [dtrh.net](https://www.dtrh.net/) — activation and a three-pane frost layout,
+  `filter links` with boxes, a hovered match and the refine card, a detached
+  console, and the classic palette for comparison. `docs/images/` holds them.
+- README, QUICKSTART, COMMAND_USAGE, ADDING_COMMANDS and IMPLEMENTATION were
+  re-checked against the code: every one of the 42 commands is documented in both
+  the README tables and the command guide, and the stale "thick blue border",
+  "70% console" and popup wording is gone.
+
+### Verification
+
+- `node --check` clean; all files kept CRLF; `manifest.json` parses.
+- jsdom: **811 checks** pass, with the real `background/main.js` loaded as a second
+  window and wired to in-memory `storage.session` / `storage.local`, so the tests
+  exercise the shipped persistence path end to end: round trip (ratios, titles,
+  zoom, active pane, ids, consoles), reload via a second content window, named
+  layouts (save/list/restore/delete, origin scoping, surviving a reload), the off
+  switch, corrupt/junk/unsupported/malformed snapshots, pane/depth/ratio/version
+  caps, tab-close cleanup, startup pruning, exit saves, and debounce coalescing —
+  plus the two newer rules: a snapshot taken on one URL whose root pane is
+  repointed at another when the tab navigates, and a fresh tab adopting the newest
+  snapshot with its own page in the root pane.
+- Chromium 150 with the extension unpacked: **121 checks** pass, including a real
+  `page.reload()` restoring two panes at a 30/70 split with the custom title and
+  the maximize state, pages loading fresh after restore, `save-layout work` →
+  `new-window` → `restore-layout work`, `persist off` → reload → one pane, a real
+  navigation to another page leaving the other panes intact, and a second tab
+  inheriting the layout with its own page in the root pane.
+- Not verified: a real browser restart (the harness cannot restart Chromium), the
+  `storage.session` fallback path on a browser that lacks it, and touch input.
+
 ## [0.4.0] - 2026-11-09
 
 Commands can be chained, commands can ask questions you can click, filters narrow
@@ -486,7 +680,7 @@ every entry point shares.
 
 ---
 
-## Planned for 0.5.0
+## Planned for 0.6.0
 
 - Floating panes (a pane that overlays the layout instead of taking space)
 - `break-pane` / `join-pane`

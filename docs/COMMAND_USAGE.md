@@ -30,9 +30,21 @@ result in the debug console:
 | `Zoom` | `resize-pane -Z` |
 | `Layout` | `next-layout` |
 
+### Pane footer buttons
+Each pane footer carries three small buttons, all of which run the equivalent
+command:
+
+| Button | Runs |
+|--------|------|
+| `▸` / `▾` | `log toggle` — open or close that pane's console |
+| `⧉` | `log detach` / `log attach` — float that console in its own window, or dock it |
+| `⤢` / `⤡` | `resize-pane -Z` — maximize that pane, or restore the layout |
+
 ### Debug console (floating window, `$` prompt)
 Runs any command against the **active pane** (blue border) and keeps a scrollback
-of every line and result. Drag it by its header.
+of every line and result. Drag it by its header, resize it from its corner or bottom
+edge — and note it is **hidden by default** now (`debug on|off`), with `verbose on`
+mirroring its output into the focused pane instead.
 
 ```
 $ list-panes
@@ -79,6 +91,7 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
 | `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
 | `l` | `log toggle` (this pane's console) | same |
+| `keys` | *(command)* list the last key events and their resolution | same |
 | `q` | `display-panes` | same |
 | `o` | `cycle-pane next` | same |
 | `;` | `last-pane` | same |
@@ -90,6 +103,31 @@ and relayed to the top frame as a command line (`relay-line` → `execute-line`)
 
 Typing always wins: while a console or pane input has focus, Control Mode passes
 keystrokes through to it instead of running bindings.
+
+### Editing the line: history and completion
+
+All three command inputs (a pane's console, the floating debug console and the `:`
+line) share one editor:
+
+| Key | Effect |
+|-----|--------|
+| `Enter` | Run the line (`;` chains are split here) |
+| `Up` | Recall the previous command |
+| `Down` | Go forward again; past the newest, restore what you were typing |
+| `Tab` | Complete the command name, then that command's arguments |
+| `Tab` (ambiguous) | Fill in the common prefix; a second `Tab` lists the candidates |
+
+- **History** keeps the last 200 commands, drops consecutive duplicates, and is
+  shared by all inputs — run something in a pane, recall it in the floating
+  console. It lives in the page (not persisted across reloads).
+- **Completion** is command-aware: layout names for `select-layout`, flags for
+  `resize-pane` and `split-window`, actions for `log`, `persist`, `inherit`,
+  `control-mode` and `cycle-pane`, directions plus pane ids/numbers for `focus-pane`, presets and
+  their variants for `filter`, `--all` for `delete-layout`, and so on.
+- Completion works on the segment under the caret, so
+  `list-panes; list-p<Tab>` completes the second command.
+- Ambiguous candidates are listed in the console (`Completions (5): …`), and a
+  token with no candidates reports `No completion for "…"`.
 
 ---
 
@@ -176,7 +214,144 @@ drag is logged, e.g. `Resize: row ratio 0.33`.
 
 ---
 
-## 5. Overlay commands
+## 5. Persistence
+
+The layout of the tab you are in is saved as it changes, and restored the next time
+the page loads. There is nothing to type for that; the commands are for the
+explicit cases.
+
+### What survives what
+
+| Thing | Survives | Where |
+|-------|----------|-------|
+| Split tree and ratios, pane URLs, custom titles, focus, maximize, console open/height | page reload, in-page navigation | `chrome.storage.session` (`layout:tab:<tabId>`) |
+| Named layouts (`save-layout`) | browser restart, extension update | `chrome.storage.local` |
+| Prompts, filter boxes, focus history, console scrollback | nothing (transient UI) | — |
+
+Restoring **recreates the panes**, so each page loads fresh: scroll position, form
+input and in-page JavaScript state cannot be carried over.
+
+### `debug [on|off|toggle]`
+The floating debug window is optional and starts hidden. `debug on` shows it (drag
+its header to move, its corner to resize); `debug off` hides it. The preference is
+saved with the layout.
+
+### `verbose [on|off|status]`
+Mirrors everything BMUX logs — command traces, key handling, filter steps — into
+the **focused pane's console**, so you can watch BMUX work without the debug window
+on screen. `verbose status` reports the current mode.
+
+### `info [all|layout|panes|keys|state]`
+Prints verbose diagnostics: the layout tree with its ratios, every pane with its
+size and console/zoom state, the recent key log, and the runtime state (theme,
+verbose, debug window, auto-restore and where the layout came from, filters,
+prompts, history length).
+
+```
+> info layout
+== layout ==
+split row ratio 0.30
+  leaf %1 https://example.com/docs
+  split column ratio 0.55
+    leaf %2 https://example.com/
+    leaf %3 https://example.com/blog
+```
+
+### `theme [frost|classic]`
+`frost` (default) uses cold blues and ice text; `classic` is the original black
+background with green text. Bare `theme` reports the active palette. The choice is
+stored with the layout.
+
+### `keys`
+Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the
+mode they were read in, and the command each resolved to. Use it when a shortcut
+does not fire — an unbound key also logs `Unbound key: … (code …) with Shift`.
+
+```
+> keys
+Recent keys (newest last):
+1. Ctrl+b [code KeyB] · prefix → (swallowed, no binding)
+2. Shift+% [code Digit5] · prefix → split-window -h
+3. F9 [code F9] · control → (swallowed, no binding)
+```
+
+### `persist [on|off|status]`
+`on` and `off` control the automatic per-tab saving. `off` also clears the current
+tab's snapshot (named layouts stay — they were explicit saves). `status` reports
+the mode and where the current layout came from (`fresh`, `session`, `named`,
+`inherit` or `followed the page`).
+
+A saved layout belongs to the **tab**, so it survives navigation: when the page
+underneath changes, the root pane takes the new address and the other panes keep
+what they were showing. Reloading restores the layout exactly as it was.
+
+```
+> persist status
+Auto-restore: on · this layout came from session
+> persist off
+Auto-restore off: the tab snapshot was cleared and nothing more is written
+```
+
+### `inherit [on|off|status]`
+Whether a **new tab** starts from the newest layout in the browser. On by default:
+a tab with nothing saved adopts another tab's splits, ratios, titles and consoles,
+with its own page in the root pane; the other panes keep their addresses. `off`
+makes new tabs open with a single pane. The switch also gates offering a snapshot
+to other tabs.
+
+```
+> inherit status
+New tabs inherit the newest layout: on
+> inherit off
+New tabs now start with a single pane
+```
+
+### `save-layout [name]`
+Saves the current layout for this site's origin under `name` (default `default`).
+Names are single words without `:` — `save-layout work`, not `save-layout my work`.
+At most 30 are kept per origin; the oldest is dropped.
+
+```
+> save-layout work
+Saved layout "work" (2 pane(s)) for https://example.com
+```
+
+### `restore-layout <name>`
+Applies a saved layout. If the name is unknown it tells you the names that exist.
+
+```
+> restore-layout work
+Restored layout "work" (2 pane(s))
+> restore-layout nope
+Error: no layout named "nope". Saved: work
+```
+
+### `list-layouts`
+Lists this site's saved layouts with pane count and save time.
+
+```
+> list-layouts
+Saved layouts for https://example.com:
+1. work - 2 pane(s) - 2026-11-09 20:37
+```
+
+### `delete-layout <name|--all>`
+Deletes one layout, or every layout for this site.
+
+### Snapshots are validated
+Every snapshot is checked whole before it is stored or applied: version, tree
+shape, split ratios inside 1–99%, URL strings, at most 12 panes, depth at most 32,
+at most 64 KB. A snapshot that fails is dropped and logged; the overlay renders a
+fresh single pane instead of half-applying it.
+
+### Housekeeping
+Closing a tab deletes its snapshot, and on browser startup any session layout whose
+tab no longer exists is pruned. Where `chrome.storage.session` is unavailable the
+tab layer falls back to `chrome.storage.local` with a 6 hour expiry.
+
+---
+
+## 6. Overlay commands
 
 Overlay commands manage the whole overlay. They work with or without a pane.
 
@@ -324,7 +499,7 @@ What `Esc` runs. It clears filter highlights if any are on screen, otherwise it
 leaves Control Mode. It exists as a command so a key pressed inside a pane frame —
 which cannot see the top frame's filter state — resolves to the same behaviour.
 
-### `log [toggle|on|off|clear|size <px>]`
+### `log [toggle|on|off|clear|size <px>|detach|attach]`
 Opens, closes, resizes or empties the active pane's console (the scrollback under
 its input). `l` in Control Mode is the same as `log toggle`.
 
@@ -335,7 +510,13 @@ Console height 240px
 Console closed
 ```
 
-Heights are clamped to 40px and to 70% of the pane.
+Heights are clamped to 40px and to 90% of the pane.
+
+`log detach` pulls that pane's console out into its own movables window (drag the
+header, resize from the corner or bottom edge); `log attach` — or the `⧉ dock`
+button on the window, or the `⧉` button in the pane footer — puts it back. The same
+panel is moved, so the scrollback and history come with it, and the detached state
+is saved with the layout.
 
 ### `help`
 Lists every command, grouped into overlay commands and pane commands, with each
@@ -344,7 +525,7 @@ Hidden aliases (`y`, `n`) are left out.
 
 ---
 
-## 6. Pane commands
+## 7. Pane commands
 
 Pane commands act on one pane: the pane whose input you typed into, or the active
 pane when run from the console or the `:` line.
@@ -586,7 +767,7 @@ Clears the pane's output area and prints nothing.
 
 ---
 
-## 7. Active pane context
+## 8. Active pane context
 
 The debug console and the `:` line always act on the **active pane**:
 
@@ -607,7 +788,7 @@ Ways to change it:
 
 ---
 
-## 8. Error handling
+## 9. Error handling
 
 The dispatcher never throws at you; every failure comes back as text.
 
@@ -642,7 +823,7 @@ Error: <message from the command>
 
 ---
 
-## 9. Workflow examples
+## 10. Workflow examples
 
 ### Sidebar layout by command
 
@@ -710,7 +891,7 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 10. Tips
+## 11. Tips
 
 1. **`list-panes` first** whenever focus or sizes surprise you.
 2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with
@@ -727,12 +908,12 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 
 ---
 
-## 11. Where commands live
+## 12. Where commands live
 
 | File | Responsibility |
 |------|----------------|
 | `content/commands.js` | Every command (`BMUX_COMMANDS`), each with `scope`, `description`, `usage`, `execute(api, args)`, plus `BMUX_KEYBINDINGS` |
 | `content/main.js` | Overlay DOM, layout tree and rendering, mouse resizing, focus model, and the dispatcher that parses a line and calls `execute` with `api = { client, pane, log }` |
-| `background/main.js` | State and message relay; forwards a command line from a pane frame to the top frame |
+| `background/main.js` | Message relay, and all layout persistence (session snapshots per tab, named layouts per origin) with validation, pruning and tab-close cleanup |
 
 To add a command, see [`ADDING_COMMANDS.md`](ADDING_COMMANDS.md).

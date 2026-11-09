@@ -17,8 +17,11 @@ Located in the browser extension icon menu, you can:
 - Works across all tabs and iframes
 
 ### 3. **Control Mode**
-When activated (via `Alt+Shift+B` or popup button):
-- Thick blue border appears around the overlay
+Activation is one state: clicking the toolbar icon (`chrome.action.onClicked`) or
+pressing `Alt+Shift+B` shows the overlay *and* enters Control Mode; doing it again
+hides the overlay and leaves Control Mode. There is no popup. When activated:
+- A quiet one-pixel inset ring around the overlay (`.bmux-control-active`) and a
+  tinted `CONTROL MODE` chip in the status bar — not a thick blue frame
 - Status bar shows `[CONTROL MODE]` with blue background
 - All keyboard input is captured by BMUX, except while a console or pane input
   has focus (typing always wins)
@@ -145,12 +148,30 @@ default):
   `data-console-height`, so they survive splits, layout changes, zoom and
   swapping (panes are never recreated).
 - The panel's top edge is a grip: `startConsoleResize` converts the vertical drag
-  into a height clamped to 40px … 70% of the pane, and double-click resets it.
+  into a height clamped to 40px … 90% of the pane, and double-click resets it.
 - `log toggle|on|off|clear|size <px>` and the `l` key are the command-line and
   keyboard equivalents; `clear` empties the scrollback.
 - There is no auto-collapse: a command opens the console and leaves it open.
 
-### 12. **Filter presets and confirmation**
+### 12. **Command line editing**
+`bindCommandInput(input, { onSubmit, report })` is shared by the pane consoles, the
+floating console and the `:` line. It owns Enter (submit), `ArrowUp`/`ArrowDown`
+(history) and `Tab` (completion), and resets the history cursor on a real `input`
+event so typing starts a fresh place in it.
+
+- History is one array on the client (`commandHistory`, 200 entries, consecutive
+  duplicates collapsed), so every input recalls the same commands. Each input
+  keeps its own cursor and draft in `input._bmuxHistory`.
+- `completionFor(segment)` reads the vocabulary from the registry
+  (`BMUX_COMMANDS`, `BMUX_LAYOUT_NAMES`, `BMUX_FILTER_PRESETS`) plus a small
+  per-command argument table (`argumentCandidates`), and completes the last token of
+  the segment found by `lastSegmentStart` — which understands `;`, quotes and
+  `[] () {}`, so chained lines complete the right command.
+- One candidate replaces the token and adds a space; several fill in the common
+  prefix; if the prefix does not grow, the candidates are listed through the
+  input's `report` callback (pane console or debug console).
+
+### 13. **Filter presets and confirmation**
 `BMUX_FILTER_PRESETS` in `content/commands.js` maps a word to a selector plus
 optional variants, and a variant may carry a `test(element, doc, view)` predicate
 for things CSS cannot express (`links internal` resolves each `href` against the
@@ -165,7 +186,7 @@ status line, attaches a `keydown` listener to the pane document so `y` / `n` /
 `resolveFilterConfirm(accept)` is what the `yes` / `no` commands (and the hidden
 `y` / `n` aliases) call, and `filter -y` bypasses the prompt entirely.
 
-### 13. **Command chains**
+### 14. **Command chains**
 `splitCommandLine` splits a line on top-level semicolons (`;` outside quotes and
 `[] () {}`; `\;` is literal) and `runLine` executes the segments one after
 another, awaiting each. Every entry point (debug console, `:` line, pane input,
@@ -176,7 +197,7 @@ Because segments are awaited, a command that raises a prompt blocks the rest of
 the chain until the prompt is answered — which is what makes
 `filter links; list-panes` show the refined result in the second segment.
 
-### 14. **Prompts**
+### 15. **Prompts**
 `ask(pane, { question, details, choices })` returns a promise and renders a card
 above that pane's footer:
 
@@ -196,13 +217,103 @@ above that pane's footer:
 `api.ask` / `api.askText` expose it to commands, and `answerOpenPrompt` is what the
 `yes` / `no` commands call.
 
-### 15. **Per-pane maximize**
+### 16. **Per-pane maximize**
 Every pane footer carries a `⤢` / `⤡` button. A click runs `resize-pane -Z` for
 that pane through the dispatcher, so the pane button, `z` / `Shift+z`, and the
 toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 `refreshPaneControls` syncs the glyphs from the render path.
 
-### 16. **Modern UI Design**
+### 17. **Layout persistence**
+Two layers, both written by `background/main.js` (the content script never touches
+`chrome.storage` — `storage.session` is not readable from a content script without
+`setAccessLevel`, and only the background knows the tab id):
+
+| Layer | Key | Lifetime |
+|-------|-----|----------|
+| `storage.session` | `layout:tab:<tabId>` | reload / navigation of that tab; dies with the browser |
+| `storage.local` | `layout:named:<origin>:<name>` | explicit saves; survives restarts |
+| `storage.local` | `persist:enabled` | the auto-restore switch |
+| `storage.local` | `persist:inherit` | whether a new tab adopts the newest layout |
+
+Messages the content script uses: `persist-load`, `persist-save`, `persist-clear`,
+`persist-set-enabled`, `persist-set-inherit`, `layout-save`, `layout-list`,
+`layout-load`, `layout-delete`. Every reply carries the origin and tab id; nothing is stored by the
+content script.
+
+**Write path.** `renderLayout()` ends with `scheduleSave()` (400 ms debounce);
+`setActivePane`, `renamePane` and the console setters save explicitly;
+`visibilitychange -> hidden` and `pagehide` save immediately, because an MV3 tab can
+be torn down without a later debounce firing. A save is skipped while
+`this.restoring` is set, when the switch is off, and when there is no layout.
+
+**Read path.** `init()` builds the UI but renders no panes; `loadPersistedLayout()`
+asks for the tab's snapshot (800 ms ceiling if the worker is asleep) and either
+`applySnapshot()`s it or calls `renderWindow()`. `applySnapshot` rebuilds the tree
+from data — one pane per leaf, an `id -> element` map for the active/zoomed pane,
+consoles restored, `nextPaneId` at least the highest restored id — inside a
+`restoring` barrier so saves cannot recurse, with `try/finally` so the barrier is
+always cleared.
+
+**Follow the page.** A snapshot records which pane was the root (`rootPaneId`). When
+the reloaded `window.location.href` differs from the snapshot's `url`, `applySnapshot`
+repoints the root pane at the current address and leaves every other pane's URL
+alone — the tab's layout survives navigation without resurrecting the page you left.
+A plain reload matches, so nothing changes; `restoredNote` reads `followed the page`.
+
+**Inheritance.** With `persist:inherit` on, `persist-load` returns
+`inheritedFrom: <tabId>` when the asking tab has no snapshot of its own: the
+background picks the newest valid snapshot from another tab (`newestOtherLayout`),
+and the content script applies it through the same `rootPaneId` path, so the new
+tab shows its own page in the root pane and the copied panes keep theirs. When the
+switch is off, no snapshot is offered to other tabs.
+
+**Validation.** The background validates every snapshot whole (version, node kinds,
+directions, ratios in 1–99%, URL strings, ≤ 12 panes, depth ≤ 32, ≤ 64 KB) before
+storing and again before handing one back; a rejected snapshot is deleted and
+reported as "no snapshot", never partly applied.
+
+**Housekeeping.** `tabs.onRemoved` deletes that tab's key; `onStartup`/`onInstalled`
+prune session keys for tabs that no longer exist; where `storage.session` is
+missing the tab layer falls back to `local` with a 6 hour expiry.
+
+### 18. **Key resolution and diagnostics**
+`bmuxBindingKeys(event)` returns every name a table could use for one keystroke,
+most specific first: `Alt+<key>`/`Alt+<code>` when Alt is held, otherwise `<key>`,
+then `Shift+<code>`, `<code>`, `Shift+<key>` and the lowercase character.
+`bmuxKeyBinding(mode, event)` walks that list against `BMUX_KEYBINDINGS[mode]`, so a
+keyboard that reports `5` (or `%`) for Shift+5 hits the same command; both tables
+carry explicit `Shift+Digit5`/`Digit5`/`5` and `Shift+Quote`/`Quote`/`'` aliases.
+
+`handleKey` checks the `Ctrl+b` prefix **before** Control Mode, so the prefix works in
+every mode. Each handled key is recorded by `recordKey` (raw key, code, modifiers,
+mode, resolved command; the last 20 are kept), an unbound key logs
+`Unbound key: ...`, and the `keys` command prints that log — which is how a shortcut
+that silently does nothing can be identified.
+
+### 19. **Palette, optional debug window and detached consoles**
+- The palette lives in CSS custom properties on `#bmux-overlay` (`--bmux-bg*`,
+  `--bmux-text*`, `--bmux-accent*`), with a `[data-theme="classic"]` block
+  restoring the black/green look. `setTheme()` sets the attribute; Control Mode is
+  `.bmux-control-active` (a one-pixel inset ring) plus `.bmux-status-active` on the
+  status chip — no inline border.
+- The debug window carries `.bmux-debug-hidden` unless `debugOpen`; `debug` toggles
+  it. `verbose` makes `log()` mirror into the focused pane's console, which is what
+  makes the window genuinely optional. `info` renders `infoReport()`, built from the
+  same primitives (`getPanes`, `getPaneSizeLabel`, `recentKeys`, prefs).
+- `setPaneConsoleFloating(pane, true)` moves the pane's `.bmux-pane-output` element
+  into a `.bmux-floating-console` in `#bmux-floating` (header with a dock button,
+  corner and bottom-edge grips); docking moves the same element back into the
+  footer. Because it is the same node the scrollback, listeners and history
+  survive. `pane._bmuxFloat` holds the wrapper, so killing the pane removes it.
+  `paneConsole(pane)` is the single lookup used by every console method, so `log`,
+  `clear` and output appends work whether the panel is docked or floating.
+- The snapshot grew `prefs { theme, debugOpen, verbose }` and, per console,
+  `floating` + `floatRect`, all restored by `applySnapshot`.
+- `isTypingTarget(event)` now checks the event target as well as
+  `document.activeElement`, so a keydown aimed at a BMUX input is never swallowed by
+  Control Mode (this is what made a hidden debug input unusable).
+
+### 20. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -222,14 +333,14 @@ toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 2. Navigate to the BMUX folder and select it
 
 ### Basic Workflow
-1. **Activate BMUX**: `Alt+Shift+B`, the toolbar, or the popup
+1. **Activate BMUX**: `Alt+Shift+B` or the toolbar icon
 2. **Split**: `%` / `"`, the `Split H`/`Split V` buttons, or
    `split-window -h -l 30%`
 3. **Resize**: drag a boundary, or `Alt+arrow` / `resize-pane -R 5`
 4. **Arrange**: `select-layout main-vertical`, `swap-pane 1 2`, `rotate-window`
 5. **Focus**: click, arrows, `q` + digit, `focus-pane %2`, `o` / `;`
 6. **Zoom**: `z`
-7. **Exit**: `d`, `Detach`, or the popup
+7. **Exit**: `d`, `Detach`, or the toolbar icon again
 
 ## Architecture
 
@@ -238,14 +349,12 @@ toolbar `Zoom` button all change one piece of state (`zoomedPane`);
 BMUX/
 ├── manifest.json          # Extension configuration (v0.1.0)
 ├── background/
-│   └── main.js           # Service worker (global state & message relay)
+│   └── main.js           # Service worker (relay + layout persistence)
 ├── content/
 │   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher
 │   ├── commands.js       # Command registry + key bindings (source of truth)
 │   └── styles.css        # UI, split handles, drag shield
-└── popup/
-    ├── index.html        # Extension icon popup
-    └── script.js         # Popup button handlers
+└── (no popup: the toolbar icon activates BMUX directly)
 ```
 
 `manifest.json` loads `content/commands.js` before `content/main.js`, so the
@@ -253,9 +362,10 @@ registry and key bindings exist before the client is constructed.
 
 ### Message Flow
 
-**Popup Button Click:**
-1. `popup/script.js` sends `toggle-bmux` or `toggle-control-mode` to the tab →
-2. `content/main.js` toggles the overlay or Control Mode
+**Toolbar icon:**
+1. `chrome.action.onClicked` in the background →
+2. `content/main.js` receives `toggle-bmux`: show the overlay and enter Control Mode,
+   or hide it and leave Control Mode
 
 **Global Hotkey:**
 1. Browser triggers `toggle-bmux-mode` →
@@ -268,6 +378,13 @@ registry and key bindings exist before the client is constructed.
    in Control Mode →
 2. `content/main.js` resolves the key through `BMUX_KEYBINDINGS` →
 3. `runCommand()` looks the command up in `BMUX_COMMANDS` and calls `execute`
+
+**Persistence:**
+1. The content script changes the layout (or the tab is hidden/unloaded) ->
+2. `scheduleSave()` / `saveNow()` sends `persist-save { snapshot }` ->
+3. The background validates it and writes `layout:tab:<sender.tab.id>` ->
+4. On the next load the content script asks `persist-load` and applies the answer
+   before its first render
 
 **In-Mode Commands (inside a pane's iframe):**
 1. User presses a key while focus is in a pane's iframe →
@@ -297,7 +414,8 @@ to `content/commands.js` only.
 1. **First Load**: If extension doesn't activate, reload the page once after installing
 2. **Iframe Sandbox**: Some sites block iframes (e.g., Google, Facebook)
 3. **Hotkey Conflicts**: If `Alt+Shift+B` is taken, change in `chrome://extensions/shortcuts`
-4. **No persistence**: the layout lives in the page, so a reload starts over
+4. **Restored panes load fresh**: a page cannot be cloned live, so scroll
+   position, form input and in-page state are lost on restore
 5. **No multiple windows / layout tabs**: `new-window` resets the overlay
 6. **No floating panes, break/join pane, or input broadcasting**
 7. **Mouse only**: resizing requires a pointer; touch is not handled
@@ -316,7 +434,7 @@ to `content/commands.js` only.
 4. Verify content script loaded: Look for "BMUX Client Loading..." in console
 
 ### "Keyboard shortcuts don't work"
-1. Check if Control Mode is active (blue border, `[CONTROL MODE]` in the status bar)
+1. Check if Control Mode is active (inset ring, `CONTROL MODE` chip in the status bar)
 2. Click the page body once: while a console or pane input has focus, typing goes
    there on purpose
 3. Verify hotkey isn't conflicting: `chrome://extensions/shortcuts`
