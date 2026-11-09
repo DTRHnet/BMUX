@@ -27,17 +27,15 @@
 #bmux-panes {
   flex: 1;
   position: relative;
-  display: flex;
   width: 100%;
   height: 100%;
   overflow: hidden;
-  padding: 10px;
-  /* Gap around panes */
-  gap: 10px;
-  /* Gap between panes (flex/grid) */
+  /* Panes are absolutely positioned from the split tree, so there is no flex
+     layout to fight with and no gap property to keep in sync with the model. */
 }
 
 .bmux-pane {
+  position: absolute;
   box-sizing: border-box;
   border-radius: 8px;
   /* Soft corners */
@@ -46,7 +44,6 @@
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
   display: flex;
   flex-direction: column;
-  position: relative;
   border: 1px solid #333;
 }
 
@@ -97,20 +94,88 @@
   outline: none;
 }
 
+/* Pane console: the scrollback under a pane's input. Closed by default; opened
+   by running a command, by its toggle button, or with `log on`. It stays open
+   and scrolls, and its top edge can be dragged to make it taller. */
 .bmux-pane-output {
-  max-height: 150px;
+  position: relative;
+  display: none;
+  flex-direction: column;
+  height: 140px;
+  min-height: 40px;
+  background: #141414;
+  border-top: 1px solid #333;
+}
+
+.bmux-pane-output.open {
+  display: flex;
+}
+
+.bmux-pane-output-grip {
+  position: absolute;
+  top: -3px;
+  left: 0;
+  right: 0;
+  height: 7px;
+  cursor: row-resize;
+  z-index: 2;
+}
+
+.bmux-pane-output-grip:hover {
+  background: rgba(0, 170, 255, 0.35);
+}
+
+.bmux-pane-output-log {
+  flex: 1;
   overflow-y: auto;
   padding: 5px 8px;
-  background: #1a1a1a;
   color: #0f0;
   font-family: 'Consolas', monospace;
   font-size: 10px;
   white-space: pre-wrap;
-  display: none;
+  word-break: break-word;
 }
 
-.bmux-pane-output.visible {
-  display: block;
+.bmux-pane-output-block {
+  margin-bottom: 6px;
+}
+
+.bmux-pane-output-block:last-child {
+  margin-bottom: 0;
+}
+
+.bmux-pane-output-command {
+  color: #00aaff;
+}
+
+/* Console toggle in the pane footer */
+.bmux-pane-console-btn {
+  background: transparent;
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: #9fb4c7;
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 5px;
+  margin-left: 8px;
+  cursor: pointer;
+}
+
+.bmux-pane-console-btn:hover {
+  border-color: #00aaff;
+  color: #ffffff;
+}
+
+/* Resize grip for the floating debug console */
+.bmux-debug-grip {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 50%, #555 50%);
+  border-bottom-right-radius: 8px;
 }
 
 
@@ -140,6 +205,37 @@
 .bmux-btn:hover {
   background: #00aaff;
   color: white;
+  border-color: #00aaff;
+}
+
+/* Directional focus buttons (focus-pane up|down|left|right), pushed to the
+   right end of the toolbar so they read as pane navigation, not window actions. */
+.bmux-nav-group {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.bmux-btn-nav {
+  min-width: 52px;
+}
+
+/* Pane footer badge: "[number id]", e.g. "[2 %2]" */
+.bmux-pane-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: #8fd4ff;
+  background: #101820;
+  border: 1px solid #345;
+  border-radius: 4px;
+}
+
+.bmux-pane.active .bmux-pane-badge {
+  color: #ffffff;
+  background: #00aaff;
   border-color: #00aaff;
 }
 
@@ -233,4 +329,132 @@
   width: 100%;
   font-family: inherit;
   outline: none;
+}
+/* --------------------------------------------------------------------------
+   Layout: split handles, pane titles, display-panes numbers
+   -------------------------------------------------------------------------- */
+
+/* The layer that carries the draggable split boundaries. It sits above the
+   panes so a boundary can be grabbed even over an iframe, but the layer itself
+   is click-through except on the handles. */
+#bmux-handles {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 3;
+}
+
+.bmux-split-handle {
+  position: absolute;
+  pointer-events: auto;
+  border-radius: 3px;
+  background: transparent;
+  transition: background 0.12s;
+}
+
+/* A visible hairline, so the boundary is discoverable without hovering. */
+.bmux-split-handle::after {
+  content: '';
+  position: absolute;
+  background: rgba(0, 170, 255, 0.35);
+  border-radius: 2px;
+}
+
+.bmux-split-handle:hover,
+.bmux-split-handle:active {
+  background: rgba(0, 170, 255, 0.25);
+}
+
+.bmux-split-handle.bmux-handle-column {
+  cursor: col-resize;
+}
+
+.bmux-split-handle.bmux-handle-column::after {
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+}
+
+.bmux-split-handle.bmux-handle-row {
+  cursor: row-resize;
+}
+
+.bmux-split-handle.bmux-handle-row::after {
+  left: 0;
+  right: 0;
+  top: 3px;
+  height: 2px;
+}
+
+/* Per-pane status segment: names the hovered filter match, e.g.
+   "FILTER: .card - DIV.card "Product" · 3/12". */
+.bmux-pane-status {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 42%;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: #ffd600;
+}
+
+.bmux-pane-status.bmux-pane-status-hovering {
+  color: #00ff88;
+}
+
+/* Pane title in the footer: auto from the page, or set with rename-pane */
+.bmux-pane-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 45%;
+  margin-left: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #9fb4c7;
+  font-size: 10px;
+}
+
+/* display-panes: big numbers over each pane, pick one with the keyboard */
+.bmux-pane-index {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+  font-family: 'Consolas', monospace;
+  font-size: 64px;
+  font-weight: bold;
+  text-shadow: 0 0 12px rgba(0, 170, 255, 0.9);
+  pointer-events: none;
+  z-index: 4;
+}
+
+/* Full-overlay shield shown only while a split boundary is being dragged: it
+   keeps the pointer off the pane iframes, which would otherwise swallow the
+   mousemove/mouseup events that drive the drag. */
+#bmux-drag-shield {
+  position: fixed;
+  inset: 0;
+  display: none;
+  background: transparent;
+  z-index: 2147483647;
+}
+
+#bmux-drag-shield.active {
+  display: block;
+}
+
+#bmux-drag-shield.active.column {
+  cursor: col-resize;
+}
+
+#bmux-drag-shield.active.row {
+  cursor: row-resize;
 }

@@ -1,3 +1,181 @@
+# BMUX Version 0.3.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.3.0
+**Release Date**: November 9, 2026
+**Status**: Console and filter-usability release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Pane console | Persistent scrollback with a scrollbar, toggle button, drag-to-resize, `log` command and `l` key; no more five-second auto-collapse |
+| Debug console | Resizable from its bottom-right corner, still draggable |
+| Filter presets | `filter links internal`, `images large`, `tables rows`, `media video`, `prices`, `comments`, … plus `filter --presets` |
+| Confirmation | Presets and result sets over 25 ask first: `yes` / `no` (or `y` / `n` / `Esc`), with `filter -y` to skip |
+| Zoom | `Shift+z` toggles zoom, the tmux `prefix + Z` binding |
+
+## Why these three
+
+1. **The pane console was write-once.** It showed one result, hid itself after
+   five seconds and could not be reopened. It is now a scrollback that stays open,
+   scrolls, toggles from the footer, and resizes by dragging its top edge — the
+   height and open state per pane.
+2. **`filter` needed vocabulary.** `filter links internal` now works because a
+   preset can carry a predicate (`href` resolved against the pane's origin, with
+   a base-URI fallback), which no selector can express alone. Presets and big
+   results ask for a yes/no answer before drawing, so a stray `filter div` no
+   longer paints a thousand boxes.
+3. **tmux muscle memory.** `Ctrl+b` then `Shift+z` maximizes the focused pane and
+   the same chord restores the layout, exactly like tmux (Control Mode `Shift+z`
+   too; `z` still works).
+
+## Verification
+
+- 558 jsdom checks and 65 checks in Chromium 150 with the extension loaded
+  unpacked, including: the console opening on a command and still being open after
+  5.3s, a real grip drag making it taller, `log off`/`log on` preserving the
+  scrollback, a preset asking before drawing with `yes` boxing it, `filter -y
+  links internal` boxing only the on-site link, and `Shift+z` maximizing and
+  restoring the pane.
+- Not verified: touch input, cross-origin panes, and the 15-second prompt timeout
+  in a real browser.
+
+## Breaking changes
+
+None. `clear` now empties the pane console scrollback rather than the old output
+line, and `filter` asks before large queries; both are documented.
+
+---
+
+# BMUX Version 0.2.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.2.0
+**Release Date**: November 9, 2026
+**Status**: Visual filter release
+**License**: MIT
+
+---
+
+## Highlights
+
+**`filter` now shows you what it found.** Every match gets a box inside the pane,
+a numbered tab, and a name in the pane's status line while you hover it.
+
+| Area | What shipped |
+|------|--------------|
+| Highlighting | `filter <selector>` boxes every match: outline, wash, corner ticks, index tab |
+| Naming | Hover a match -> `FILTER: .card - DIV#alpha.card "Product card" · 1/2` in the pane footer, box turns green |
+| Live | Debounced MutationObserver re-queries and redraws when the page changes |
+| Limits | `filter -n <max>` (default 200, ceiling 1000), `filter -l` lists only |
+| Clearing | `Esc` (top frame, inputs, or with focus inside the pane) and `filter -c` |
+| Keys | New `escape` command, so keys relayed from a pane frame behave the same |
+
+## How it is drawn
+
+The boxes are sibling overlays appended to the pane document by the top frame:
+one `[data-bmux-filter-layer]` with a `[data-bmux-filter]` per match, positioned in
+document coordinates, `pointer-events: none`, styled by an injected `<style>`.
+Nothing is wrapped, moved or restyled on the page itself, so the page's layout is
+untouched; boxes scroll with the content and are removed as a unit.
+
+Same-origin only: a cross-origin pane cannot be measured or written into, and
+`filter` says so instead of pretending.
+
+## Verification
+
+- 481 jsdom checks and 49 checks in Chromium 150 with the extension loaded
+  unpacked, including a real `filter .box` on a live page, real hover naming
+  (`· 1/2` then `· 2/2`), Escape from console focus and from inside the pane, and
+  `filter -c`.
+- Not verified: cross-origin panes, touch input, and the MutationObserver refresh
+  in a real browser (jsdom only).
+
+## Breaking changes
+
+None. `filter` without a selector is now a usage error, and its output wording
+changed; the command still exists with the same name and scope.
+
+---
+
+# BMUX Version 0.1.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.1.0
+**Release Date**: November 9, 2026
+**Status**: Layout engine and pane management release
+**License**: MIT
+
+---
+
+## Highlights
+
+**Percentage splits, mouse resizing, zoom, layouts and real pane management** -
+on top of a layout engine that never reparents a pane.
+
+| Area | What shipped |
+|------|--------------|
+| Layout engine | Binary split tree with ratios; absolutely positioned panes; fractional rectangles |
+| Splitting | `split-window -h/-v` with `-l <size>`, `-p <size>`, `-b` (new pane first), `-d` (keep focus) |
+| Resizing | Mouse-draggable boundaries with double-click reset; `resize-pane -L/-R/-U/-D`, `-x <size>` |
+| Zoom | `resize-pane -Z`; other panes keep running while hidden |
+| Layouts | `even-horizontal`, `even-vertical`, `main-vertical`, `main-horizontal`, `tiled`, `next-layout` |
+| Pane management | Real `kill-pane` (last pane refused), `swap-pane`, `rotate-window`, `display-panes` |
+| Pane identity | Ids `%N` (fixed), layout-order numbers, `[number id]` badges, titles, `list-panes -j` |
+| Focus | Toolbar buttons, arrows with wrap-around, click-to-focus (including inside iframes), `cycle-pane`, `last-pane` |
+| Commands | 25 commands in one registry (`content/commands.js`) shared by toolbar, console, `:` line, pane inputs, keys and the relay |
+| Inspection | `source`, `filter`, `capture-pane`, `url`, `reload` per pane |
+
+## The important one: pages are never reloaded by layout changes
+
+Until 0.0.1, splitting reparented the pane's iframe into a new flex container -
+and moving an iframe in the DOM reloads it, so splitting reloaded the page you
+were looking at. In 0.1.0 the layout is data:
+
+```
+split(row, 0.3) --> leaf(%1)         30% wide
+                \-> split(column) --> leaf(%2) 55% of the remainder
+                                   \-> leaf(%3) 45% of the remainder
+```
+
+Panes are absolutely positioned children of `#bmux-panes` and are never moved.
+Splitting, applying a layout preset, swapping, rotating or zooming therefore keeps
+every page alive - which is verified in the test harness by a marker set on the
+pane iframe's `window` that survives all of those operations.
+
+## Verification
+
+- `node --check` on every changed script; all files kept CRLF line endings.
+- 439 jsdom checks (dispatcher, key tables, layout maths, mouse drag, layouts,
+  kill/resize/zoom, bad input, relay, and the no-reload guarantee).
+- 36 checks with the extension loaded unpacked in Chromium 150 (headless):
+  real mouse drag on a split handle, `z` zoom, `Space` layout cycling,
+  `main-vertical`, `swap-pane`, `Alt+Arrow` resizing, `rename-pane`,
+  `capture-pane`, killing panes down to the last one, arrow focus, and no
+  console/page errors.
+- Not covered: the `Alt+Shift+B` global hotkey (not synthesizable from DevTools),
+  the popup buttons, `Ctrl+b` in a real browser, `chrome.storage`, and
+  cross-origin panes.
+
+## Breaking changes
+
+None: every 0.0.1 command still exists with the same meaning, and the extension
+still loads as an unpacked MV3 extension with the same permissions.
+
+## Known gaps
+
+Floating panes, `break-pane`/`join-pane`, multiple windows, session persistence
+and input broadcasting are not implemented yet; see CHANGELOG.md for the roadmap.
+
+---
+
 # BMUX Version 0.0.1 - Release Summary
 
 ## 📦 Release Information

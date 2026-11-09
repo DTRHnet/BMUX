@@ -1,138 +1,305 @@
-# BMUX - Adding New Pane Commands
+# BMUX - Adding Commands
 
 ## Overview
 
-BMUX uses a simple, extensible command system for pane-level commands. Each pane has a command input at the bottom (like TMUX) where users can type commands.
+Every BMUX command is defined once, in `content/commands.js`, in the
+`BMUX_COMMANDS` object. That registry is the single source of truth:
 
-## Command Structure
+- the toolbar buttons run command lines,
+- the debug console, the `:` line and each pane's input parse whatever you type,
+- Control Mode and `Ctrl+b` keys are mapped to command lines in `BMUX_KEYBINDINGS`.
 
-All commands are defined in `content/commands.js` in the `BMUX_COMMANDS` object.
+`content/main.js` holds no command definitions, no help text and no
+key-to-action switch. It parses a line, looks the name up (own-property lookup, so
+`constructor` is not a command), and calls `execute` with an `api` object.
 
-### Command Definition Format
+```
+typed line / button / key
+      │
+      ▼
+content/main.js  runCommand(line)
+      │  BMUX_COMMANDS[name].execute(api, args)
+      ▼
+content/commands.js  the command
+```
+
+## Command shape
 
 ```javascript
 'command-name': {
-    description: 'What this command does',
+    scope: 'overlay',                 // 'overlay' or 'pane'
+    description: 'What this does',    // one line, shown by help
     usage: 'command-name [arguments]',
-    execute: async function(pane, args) {
-        // pane: DOM element of the pane (.bmux-pane)
-        // args: array of command arguments
-        
-        // Your command logic here
-        
-        // Return a string to display in the output
-        return 'Command result message';
+    execute: async function (api, args) {
+        // api.client : the top-frame BMUXClient (layout, pane and overlay primitives)
+        // api.pane   : the pane this command was invoked for, or the active pane
+        // api.log    : append a line to the debug console
+        // args       : array of arguments, already split on whitespace
+
+        return 'Text to display';
     }
 }
 ```
 
-## Adding a New Command
+Rules that keep commands consistent with the rest of BMUX:
 
-### Step 1: Define the Command
+1. **`scope: 'overlay'`** for commands that manage the whole overlay. They must
+   work when there is no pane at all.
+2. **`scope: 'pane'`** for commands that act on one pane. Check `api.pane` first
+   and return an error string if it is missing.
+3. **Return a string.** It is displayed by whichever entry point ran the command.
+   Returning `''` (or nothing) means "no output".
+4. **Never throw for bad input.** Return an error or usage line. The dispatcher
+   catches throws, but a clear message is better than `Error: undefined`.
+5. **`usage` starts with the command name**, because `help` prints it verbatim.
+6. **Add `hidden: true`** for a command that exists for scripting or aliases and
+   should not appear in `help` (`y` and `n` are hidden aliases of `yes` / `no`).
+6. **Do not move pane elements in the DOM.** Reparenting an iframe reloads the
+   page inside it. Use the layout primitives (`api.client.splitWindow`,
+   `killPane`, `applyLayout`, `swapPanes`, `rotatePanes`, `setPaneSize`,
+   `zoomPane`) instead of touching the DOM structure.
+7. **Do not restyle the page inside a pane.** Anything you draw for the user
+   (like the `filter` boxes) should be sibling overlays you own and clean up:
+   `filterPane` appends one `[data-bmux-filter-layer]` to the pane document and
+   `clearFilter` takes it away. Never wrap or mutate the page's own elements.
 
-Open `content/commands.js` and add your command to the `BMUX_COMMANDS` object:
+### Drawing an overlay into a pane
+
+`filter` is the worked example: `filterPane` creates a layer plus one box per
+match in the pane's document, positions each box in document coordinates
+(`getBoundingClientRect() + scroll`), styles them through an injected `<style>`,
+and attaches `mousemove`/`mouseleave`/`keydown` listeners to that document so the
+pane's status line can follow the pointer and `Esc` can clear the overlay. The
+listeners are stored on the state object and removed by `clearFilter`, and the
+whole state is dropped when the pane navigates (`iframe` load), is killed, or the
+overlay resets.
+
+## Adding a pane command
 
 ```javascript
-const BMUX_COMMANDS = {
-    // ... existing commands ...
-    
-    'newcommand': {
-        description: 'Description of what your command does',
-        usage: 'newcommand <required-arg> [optional-arg]',
-        execute: async function(pane, args) {
-            // Validate arguments
-            if (args.length === 0) {
-                return 'Error: Please provide required arguments';
-            }
-            
-            // Access the iframe in this pane
-            const iframe = pane.querySelector('iframe');
-            if (!iframe || !iframe.contentDocument) {
-                return 'Error: Unable to access iframe content';
-            }
-            
-            // Perform operations
-            const result = doSomething(iframe, args);
-            
-            // Return result
-            return `Success: ${result}`;
+'elements': {
+    scope: 'pane',
+    description: 'Count elements matching a selector',
+    usage: 'elements <selector>',
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
+        if (args.length === 0) {
+            return 'Error: Usage: elements <selector>';
+        }
+
+        const iframe = pane.querySelector('iframe');
+        if (!iframe) return 'Error: No iframe found';
+
+        const doc = safeGetIframeDocument(iframe);   // helper in commands.js
+        if (!doc) return 'Error: Cross-origin content';
+
+        let found;
+        try {
+            found = doc.querySelectorAll(args[0]);
+        } catch (e) {
+            return `Error: Invalid selector "${args[0]}"`;
+        }
+
+        return `Found ${found.length} element(s) matching ${args[0]}`;
+    }
+}
+```
+
+That is the whole change: the command is now available from the console, the `:`
+line, every pane input, and `help`.
+
+## Adding an overlay command
+
+Overlay commands use the client primitives rather than touching the DOM:
+
+```javascript
+'spread-panes': {
+    scope: 'overlay',
+    description: 'Give every pane the same share of its parent split',
+    usage: 'spread-panes',
+    execute: function (api) {
+        const client = api.client;
+        const panes = client.getPanes();
+        if (panes.length < 2) return 'Error: Split first';
+
+        panes.forEach((pane) => client.setPaneSize(pane, 1 / panes.length));
+        return `Evened out ${panes.length} panes`;
+    }
+}
+```
+
+### Client primitives available on `api.client`
+
+**Panes and identity**
+
+| Method | Returns |
+|--------|---------|
+| `getPanes()` | Array of pane elements in layout order |
+| `getActivePane()` | The pane with the `active` class, or the first pane |
+| `getPaneId(pane)` | The pane's id string, e.g. `%2` |
+| `getPaneNumber(pane)` | The pane's 1-based layout number |
+| `getPaneUrl(pane)` | The pane's current URL (cross-origin safe) |
+| `getPaneTitle(pane)` | Custom title, else page title, else URL |
+| `renamePane(pane, title)` | Set or clear (`-`) the footer title |
+| `getPaneRect(pane)` | Fractional rect `{ x, y, w, h }` in 0..1 |
+| `getPaneSizeLabel(pane)` | Human size, e.g. `30%x100%` |
+| `findPaneByToken(token)` | Pane from `2` or `%2`, or `null` |
+| `setActivePane(pane)` | Focus a pane, refresh badges and status bar |
+| `lastPane()` / `cyclePane(step)` | Previous pane / next or previous pane |
+| `isZoomed(pane)` | Whether that pane is zoomed |
+
+**Layout operations** (these never reload a page)
+
+| Method | Returns |
+|--------|---------|
+| `splitWindow(direction, opts)` | `{ ok, pane }`; `opts = { size, before, keepFocus, url }` |
+| `killPane(pane)` | `{ ok, pane }` or `{ ok: false, message }` (last pane refused) |
+| `resizePane(pane, direction, percent)` | Moves the adjacent boundary |
+| `setPaneSize(pane, share)` | Sets the pane's share of its parent split |
+| `zoomPane(pane)` | Toggle zoom; `{ ok, zoomed }` |
+| `applyLayout(name)` | `even-horizontal`, `even-vertical`, `main-vertical`, `main-horizontal`, `tiled` |
+| `nextLayout()` | Cycle to the next preset |
+| `swapPanes(a, b)` | Trade two panes' positions |
+| `rotatePanes(reverse)` | Move every pane one slot |
+| `displayPanes()` | Show pane numbers for two seconds |
+| `filterPane(pane, selector, { max })` | Box matches inside a same-origin pane; returns `{ ok, matched, shown }` |
+| `refreshFilter(pane)` | Re-measure and redraw that pane's boxes |
+| `clearFilter(pane)` / `clearAllFilters()` | Remove the boxes and the status line |
+| `hasActiveFilters()` | Whether any pane is currently boxed |
+| `setPaneStatus(pane, text, mode)` | Write the pane's status segment (`'filtering'`/`'hovering'`) |
+| `collectFilterMatches(pane, selector, test)` | Query a pane (plus an optional predicate) without drawing; `{ ok, doc, elements }` |
+| `requestFilterConfirm(pane, selector, opts)` | Ask for a yes/no answer before drawing |
+| `resolveFilterConfirm(accept)` | Answer that prompt (what `yes` / `no` call) |
+| `hasPendingConfirm()` | Whether a prompt is waiting |
+| `appendPaneOutput(pane, text, kind)` | Append a block to a pane console (`'command'` or `'result'`) |
+| `setPaneConsoleOpen(pane, open)` / `togglePaneConsole(pane)` | Open, close or toggle the pane console |
+| `clearPaneConsole(pane)` | Empty the pane console scrollback |
+| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 70% of the pane) |
+| `describeElement(element)` | `TAG#id.class "snippet"` for a matched element |
+| `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
+| `newWindow()` | Reset to a single pane |
+| `toggle()` | Hide or show the overlay |
+| `setControlMode(on)` | Set Control Mode |
+| `showCommandMode()` / `hideCommandMode()` | Open/close the `:` line |
+| `log(message)` | Append to the debug console |
+
+## Adding a filter preset
+
+Presets live in `BMUX_FILTER_PRESETS` in `content/commands.js` and are pure data:
+
+```javascript
+const BMUX_FILTER_PRESETS = {
+    // ...
+    'cards': {
+        selector: '.card, article',
+        description: 'cards and article blocks',
+        variants: {
+            // A variant may narrow the selector...
+            'tall': { description: 'cards taller than 400px', selector: '.card', test: (el) => el.offsetHeight > 400 },
+            // ...or change it outright.
+            'links': { description: 'links inside cards', selector: '.card a[href]' }
         }
     }
 };
 ```
 
-### Step 2: Test the Command
+`filter cards tall` then means "a `.card` taller than 400px", which no single CSS
+selector expresses. A `test(element, doc, view)` predicate runs inside the pane
+document, and returning `false` (or throwing) simply drops the element. Add the
+preset, reload, and both `filter cards` and `filter --presets` pick it up.
 
-1. Reload the extension
-2. Refresh your page
-3. Activate BMUX
-4. In any pane's command input (bottom of pane), type: `newcommand arg1 arg2`
-5. Press Enter
+## Adding a key binding
 
-### Step 3: Document the Command
+Keys are data, not code. Add an entry to `BMUX_KEYBINDINGS` in
+`content/commands.js`:
 
-Your command will automatically appear in the `help` command output.
+```javascript
+const BMUX_KEYBINDINGS = {
+    control: {
+        // ...
+        'v': 'split-window -v -l 70%'
+    },
+    prefix: {
+        // ...
+        'v': 'split-window -v -l 70%'
+    }
+};
+```
 
-## Built-in Commands
+`control` is used in Control Mode (Alt+Shift+B), `prefix` after `Ctrl+b`. The value
+is a command line, so it can carry arguments. Alt combinations are written
+`Alt+ArrowLeft`; the space bar is written `Space`. Keys that are not listed are
+swallowed by Control Mode, which is what stops the page from seeing them. Typing
+in a console or pane input always takes precedence over bindings.
 
-### help
-- **Description**: List all available commands
-- **Usage**: `help`
-- **Returns**: Full list of commands with descriptions
+## Built-in commands
 
-### source
-- **Description**: Show page source code in console
-- **Usage**: `source`
-- **Returns**: Logs HTML source to console
+Overlay scope:
 
-### filter
-- **Description**: Filter and display specific HTML elements
-- **Usage**: `filter <css-selector>`
-- **Example**: `filter div`, `filter .className`, `filter #myId`
-- **Returns**: List of matching elements (also logs to console)
+| Command | Description |
+|---------|-------------|
+| `help` | List every command, grouped by scope |
+| `list-panes [-j]` | Number, id, size, marker, title, URL |
+| `focus-pane <n\|%id\|dir>` | Focus by number, id, or direction (wraps) |
+| `last-pane` | Focus the previous pane |
+| `cycle-pane [next\|prev]` | Next / previous pane in layout order |
+| `split-window [-h\|-v] [-l size] [-b] [-d]` | Split the active pane |
+| `kill-pane [target]` | Close a pane (last pane refused) |
+| `resize-pane [-L\|-R\|-U\|-D n] [-x size] [-Z]` | Resize or zoom |
+| `select-layout <name>` / `next-layout` | Layout presets |
+| `swap-pane <a> [b]` / `rotate-window [-r]` | Reorder panes |
+| `display-panes` | Show numbers, pick with a digit |
+| `new-window` | Reset the overlay to one pane |
+| `detach` | Hide or show the overlay |
+| `control-mode [on\|off\|toggle]` | Enter or leave Control Mode |
+| `command-prompt` | Open the `:` line |
 
-### url
-- **Description**: Show or change the current pane URL
-- **Usage**: `url [new-url]`
-- **Examples**:
-  - `url` - Show current URL
-  - `url https://example.com` - Navigate to URL
+Pane scope:
 
-### reload
-- **Description**: Reload the current pane
-- **Usage**: `reload`
-
-### clear
-- **Description**: Clear the command output
-- **Usage**: `clear`
+| Command | Description |
+|---------|-------------|
+| `source` | Show the pane's HTML in a console view |
+| `restore` | Return from console view to browser view |
+| `filter <selector\|preset> [-n max] [-y]` / `filter -l` / `filter -c` / `filter --presets` | Box matches in the pane, name them on hover, list only, clear, or list the preset vocabulary |
+| `yes` / `no` (`y` / `n` hidden) | Answer a filter confirmation prompt |
+| `log [toggle\|on\|off\|clear\|size px]` | Open, close, resize or clear the pane console |
+| `capture-pane [-n lines]` | Print the pane's visible text |
+| `rename-pane <title\|->` | Set or clear the footer title |
+| `url [new-url]` | Show or change the pane URL |
+| `reload` | Reload the pane |
+| `clear` | Clear the pane's output area |
 
 ## Accessing Pane Contents
 
-### Get the Iframe
+### Get the iframe
 
 ```javascript
 const iframe = pane.querySelector('iframe');
 ```
 
-### Access Iframe Document (same-origin only)
+### Access the iframe document (same-origin only)
+
+Use the helpers already in `content/commands.js` — never touch
+`iframe.contentDocument` directly, or you will throw on cross-origin frames:
 
 ```javascript
-const doc = iframe.contentDocument;
-if (!doc) {
-    return 'Error: Cross-origin restriction (cannot access content)';
-}
+const doc = safeGetIframeDocument(iframe);   // null when cross-origin
+if (!doc) return 'Error: Cross-origin restriction';
+
+const url = safeGetIframeUrl(iframe);        // falls back to the src attribute
+if (!isIframeAccessible(iframe)) { /* ... */ }
 ```
 
-### Query Elements in the Page
+### Query elements in the page
 
 ```javascript
 const elements = doc.querySelectorAll('.some-class');
-elements.forEach(el => {
-    console.log(el.textContent);
-});
+elements.forEach(el => console.log(el.textContent));
 ```
 
-### Execute Scripts in the Pane
+### Execute scripts in the pane
 
 ```javascript
 iframe.contentWindow.eval('alert("Hello from BMUX!")');
@@ -140,173 +307,170 @@ iframe.contentWindow.eval('alert("Hello from BMUX!")');
 
 ## Common Patterns
 
-### Form Field Extraction
+### Form field extraction
 
 ```javascript
 'extract-forms': {
+    scope: 'pane',
     description: 'Extract all form fields from the page',
     usage: 'extract-forms',
-    execute: async function(pane, args) {
-        const iframe = pane.querySelector('iframe');
-        if (!iframe || !iframe.contentDocument) {
-            return 'Error: Cannot access page content';
-        }
-        
-        const forms = iframe.contentDocument.querySelectorAll('form');
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
+        const doc = safeGetIframeDocument(pane.querySelector('iframe'));
+        if (!doc) return 'Error: Cannot access page content';
+
+        const forms = doc.querySelectorAll('form');
         let output = `Found ${forms.length} form(s)\n\n`;
-        
+
         forms.forEach((form, i) => {
             output += `Form ${i}:\n`;
-            const inputs = form.querySelectorAll('input, textarea, select');
-            inputs.forEach(input => {
+            form.querySelectorAll('input, textarea, select').forEach((input) => {
                 output += `  - ${input.name || input.id}: ${input.type}\n`;
             });
         });
-        
+
         return output;
     }
 }
 ```
 
-### Data Scraping
+### Data scraping
 
 ```javascript
 'scrape': {
-    description: 'Scrape specific data from the page',
+    scope: 'pane',
+    description: 'Scrape text from matching elements',
     usage: 'scrape <selector>',
-    execute: async function(pane, args) {
-        if (args.length === 0) {
-            return 'Error: Provide a CSS selector';
-        }
-        
-        const iframe = pane.querySelector('iframe');
-        const doc = iframe.contentDocument;
-        const elements = doc.querySelectorAll(args[0]);
-        
-        const data = Array.from(elements).map(el => el.textContent.trim());
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+        if (args.length === 0) return 'Error: Provide a CSS selector';
+
+        const doc = safeGetIframeDocument(pane.querySelector('iframe'));
+        if (!doc) return 'Error: Cannot access page content';
+
+        const data = Array.from(doc.querySelectorAll(args[0])).map((el) => el.textContent.trim());
         console.log('Scraped data:', data);
-        
-        return `Scraped ${data.length} items. Check console.`;
+        return `Scraped ${data.length} items. Check the console.`;
     }
 }
 ```
 
-### Auto-fill Forms
+### Layout scripting
+
+Overlay commands make multi-pane layouts scriptable, without reloading anything:
 
 ```javascript
-'autofill': {
-    description: 'Auto-fill a form field',
-    usage: 'autofill <field-name> <value>',
-    execute: async function(pane, args) {
-        if (args.length < 2) {
-            return 'Error: autofill <field-name> <value>';
+'study': {
+    scope: 'overlay',
+    description: 'Wide reading pane plus a stack of notes panes',
+    usage: 'study',
+    execute: function (api) {
+        const client = api.client;
+        const panes = client.getPanes();
+
+        if (panes.length < 3) {
+            client.splitWindow('horizontal', { size: 0.6 });
+            client.splitWindow('vertical', { size: 0.5 });
         }
-        
-        const [fieldName, ...valueParts] = args;
-        const value = valueParts.join(' ');
-        
-        const iframe = pane.querySelector('iframe');
-        const input = iframe.contentDocument.querySelector(
-            `input[name="${fieldName}"], input#${fieldName}`
-        );
-        
-        if (!input) {
-            return `Error: Field "${fieldName}" not found`;
-        }
-        
-        input.value = value;
-        return `Set ${fieldName} = ${value}`;
+
+        client.applyLayout('main-vertical');
+        client.renamePane(client.getPanes()[0], 'Reading');
+        return 'Study layout ready';
     }
 }
 ```
 
-## Error Handling
-
-Always handle potential errors:
+### Reporting on the layout
 
 ```javascript
-execute: async function(pane, args) {
+'sizes': {
+    scope: 'overlay',
+    description: 'Show every pane size as JSON',
+    usage: 'sizes',
+    execute: function (api) {
+        const client = api.client;
+        return JSON.stringify(client.getPanes().map((pane) => ({
+            id: client.getPaneId(pane),
+            title: client.getPaneTitle(pane),
+            size: client.getPaneSizeLabel(pane),
+            zoomed: client.isZoomed(pane)
+        })), null, 2);
+    }
+}
+```
+
+## Error handling
+
+```javascript
+execute: async function (api, args) {
     try {
-        // Your logic
-        return 'Success';
+        return doWork(api, args);
     } catch (e) {
         return `Error: ${e.message}`;
     }
 }
 ```
 
-## Async Operations
+The dispatcher also catches throws and turns them into `Error: <message>`, so a
+bug reports itself in the console instead of breaking the input.
 
-Commands can be `async` and use `await`:
+## Async operations
+
+Commands may be `async`; the dispatcher awaits them:
 
 ```javascript
-execute: async function(pane, args) {
-    const iframe = pane.querySelector('iframe');
-    
-    // Wait for something
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Fetch external data
+execute: async function (api, args) {
     const response = await fetch('https://api.example.com/data');
-    const data = await response.json();
-    
-    return `Fetched: ${JSON.stringify(data)}`;
+    return `Fetched ${(await response.json()).length} items`;
 }
 ```
 
-## Logging vs. Returning
+## Logging vs. returning
 
-- **Return**: Shows output in the pane's command output area
-- **console.log()**: Logs to browser DevTools console
-- Use both for comprehensive feedback
+- **Return**: displayed by the entry point that ran the command (console
+  scrollback, or the pane's output area).
+- **`api.log(msg)`**: append to the debug console directly.
+- **`console.log()`**: browser DevTools only.
 
-```javascript
-execute: async function(pane, args) {
-    const data = extractData(pane);
-    
-    console.log('Full data:', data); // For developers
-    return `Extracted ${data.length} items`; // For users
-}
-```
+## Verifying a change
 
-## Best Practices
+1. `node --check content/commands.js`
+2. Reload the extension in `chrome://extensions`, then refresh the page.
+3. Open the overlay and run the command from the debug console (`$`), the `:` line
+   and a pane's input (`>`) — all three should behave the same.
+4. Run `help`: the new command must appear with its usage line.
+5. Check a bad argument: it should return a message, not throw, and it must not
+   change the layout or move focus.
+6. If the command changes the layout, check that the pages in the panes are still
+   alive (their iframes must not be recreated).
 
-1. **Always validate arguments** before processing
-2. **Handle cross-origin errors** gracefully
-3. **Provide clear error messages**
-4. **Use consistent naming** (lowercase, hyphenated)
-5. **Document complex commands** with examples
-6. **Log detailed data** to console for debugging
-7. **Return concise messages** to users
-
-## Command Template
-
-Copy this template when creating new commands:
+## Command template
 
 ```javascript
 'my-command': {
+    scope: 'pane',
     description: 'One-line description of what this does',
     usage: 'my-command <required> [optional]',
-    execute: async function(pane, args) {
-        // Validate arguments
+    execute: async function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
         if (args.length === 0) {
-            return `Error: Usage: ${this.usage}`;
+            return 'Error: Usage: my-command <required> [optional]';
         }
-        
-        // Get iframe
+
         const iframe = pane.querySelector('iframe');
-        if (!iframe || !iframe.contentDocument) {
-            return 'Error: Cannot access page content (cross-origin)';
-        }
-        
+        if (!iframe) return 'Error: No iframe found';
+
+        const doc = safeGetIframeDocument(iframe);
+        if (!doc) return 'Error: Cross-origin content';
+
         try {
-            // Your logic here
-            const result = performOperation(iframe, args);
-            
-            // Log details for debugging
-            console.log('[my-command] Result:', result);
-            
-            // Return user-friendly message
+            const result = doWork(doc, args);
+            console.log('[my-command] result:', result);
             return `Success: ${result}`;
         } catch (e) {
             return `Error: ${e.message}`;
@@ -315,4 +479,5 @@ Copy this template when creating new commands:
 }
 ```
 
-Happy coding! Your new commands will be automatically available to all panes.
+Happy coding! A new command is available from every entry point and listed by
+`help` as soon as it is in `BMUX_COMMANDS`.

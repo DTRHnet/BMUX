@@ -1,216 +1,629 @@
 # BMUX Command Usage Guide
 
-## Two Ways to Run Commands
+Every command in BMUX is defined once, in `content/commands.js`. The toolbar, the
+debug console, the `:` line, each pane's input and the key bindings all run those
+same commands through one dispatcher, so a command behaves identically wherever
+you type it.
 
-### 1. **Per-Pane Input** (Bottom of each pane)
-Located at the bottom of each pane with a green `>` prompt.
-
-**What it affects**: Only that specific pane  
-**Commands available**: All commands work here  
-**Output location**: Shows in expandable output area below the input
-
-**Example workflow**:
 ```
-> source          # Transforms THIS pane to console view
-> restore         # Restores THIS pane back to browser
-> filter div      # Filters elements in THIS pane
-> url google.com  # Changes THIS pane's URL
+command line ──► content/main.js runCommand() ──► BMUX_COMMANDS[name].execute(api, args)
 ```
 
-### 2. **Global Debug Console** (Floating window)
-The draggable debug console in the top-right corner.
+---
 
-**What it affects**: The currently active pane (blue border)  
-**Commands available**: All commands work here too  
-**Output location**: Shows in the debug console itself  
+## 1. Entry points
 
-**Example workflow**:
+### Toolbar buttons
+Each button runs the command it is named after and logs both the line and its
+result in the debug console:
+
+| Button | Runs |
+|--------|------|
+| `Split H` | `split-window -h` |
+| `Split V` | `split-window -v` |
+| `New Window` | `new-window` |
+| `Detach` | `detach` |
+| `Up` | `focus-pane up` |
+| `Down` | `focus-pane down` |
+| `Left` | `focus-pane left` |
+| `Right` | `focus-pane right` |
+| `Zoom` | `resize-pane -Z` |
+| `Layout` | `next-layout` |
+
+### Debug console (floating window, `$` prompt)
+Runs any command against the **active pane** (blue border) and keeps a scrollback
+of every line and result. Drag it by its header.
+
 ```
-$ help           # Shows all commands in debug console
-$ source         # Transforms the ACTIVE pane to console view
-$ filter div     # Filters elements in the ACTIVE pane
+$ list-panes
+$ split-window -h -l 30%
 ```
 
-## Command Differences
+### `:` command line (Control Mode)
+Press `:` in Control Mode and type a command. Same dispatcher, same commands.
+`Enter` runs it, `Esc` closes the line and leaves Control Mode on.
 
-### `source` Command
+```
+: select-layout main-vertical
+```
 
-**Before**: Logged HTML to browser console only  
-**Now**: Transforms the pane into a terminal-style console view
+### Per-pane input (`>` prompt, bottom of each pane)
+Runs any command with **that pane** as the context, and appends the command line
+and its result to that pane's console (the scrollback under the input). Overlay
+commands work here too — they just act on the whole overlay.
 
-**Usage**:
+The console opens when a command produces output and stays open: it scrolls,
+keeps the last 100 blocks, has a toggle button (`▸` / `▾`) in the footer, and its
+top edge can be dragged to resize it (double-click resets, `log size 240` sets it
+from the command line).
+
 ```
 > source
+> url example.com
+> focus-pane 2
 ```
 
-**What happens**:
-1. Iframe is hidden
-2. Pane becomes a green-text console showing HTML source
-3. Can scroll through the entire source code
-4. Syntax highlighting (HTML tags shown as `&lt;` and `&gt;`)
+### Keys
+Control Mode and the `Ctrl+b` prefix map keys to command lines through
+`BMUX_KEYBINDINGS` in `content/commands.js`:
 
-**To return to browser view**:
+| Key | Control Mode | After `Ctrl+b` |
+|-----|--------------|----------------|
+| `%` | `split-window -h` | same |
+| `"` | `split-window -v` | same |
+| `c` | `new-window` | same |
+| `x` | `kill-pane` | same |
+| `d` | `detach` | same |
+| `:` | `command-prompt` | same |
+| `←` `→` `↑` `↓` | `focus-pane left/right/up/down` | same |
+| `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
+| `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
+| `l` | `log toggle` (this pane's console) | same |
+| `q` | `display-panes` | same |
+| `o` | `cycle-pane next` | same |
+| `;` | `last-pane` | same |
+| `Space` | `next-layout` | same |
+| `Esc` | `control-mode off` | — |
+
+Keys pressed while the focus is inside a pane's iframe are resolved in that frame
+and relayed to the top frame as a command line (`relay-line` → `execute-line`).
+
+Typing always wins: while a console or pane input has focus, Control Mode passes
+keystrokes through to it instead of running bindings.
+
+---
+
+## 2. Mouse
+
+| Action | Result |
+|--------|--------|
+| Click a pane body or footer | Focus that pane |
+| Click inside a pane's iframe | Focus that pane (works cross-origin, via the window blur/`activeElement` sync) |
+| Drag the boundary between two panes | Resize that split |
+| Double-click a boundary | Reset that split to 50/50 |
+| Hover a boxed match (after `filter`) | Names it in that pane's status line |
+| Drag a pane console's top edge | Resize that console (minimum 40px, max 70% of the pane) |
+| Double-click a pane console's edge | Reset its height to 140px |
+| Drag the floating console's corner | Resize the floating console |
+
+Handles are 8 px wide with a hairline marker and a `col-resize`/`row-resize`
+cursor. While dragging, a shield covers the overlay so the pointer cannot slip
+onto an iframe (iframes swallow mouse events, which would stall the drag). Every
+drag is logged, e.g. `Resize: row ratio 0.33`.
+
+---
+
+## 3. Overlay commands
+
+Overlay commands manage the whole overlay. They work with or without a pane.
+
+### `list-panes [-j|--json]`
+Prints every pane: number, id, size, active/zoom marker, title and URL.
+
 ```
-> restore
-```
-
-### `help` Command
-
-**Where it works**:
-- ✅ Global debug console (shows output in console)
-- ✅ Per-pane input (shows output below pane)
-
-**Example in Debug Console**:
-```
-$ help
-> Command help output appears in debug console scrollback
-```
-
-**Example in Pane Input**:
-```
-> help
-> Command help appears in pane output area
-```
-
-## Complete Command List
-
-### Viewing Commands
-- `source` - Transform pane to console showing HTML source
-- `filter <selector>` - Show elements matching CSS selector
-- `url` - Show current URL
-- `restore` - Return from console view to browser view
-
-### Navigation Commands
-- `url <new-url>` - Navigate pane to new URL
-- `reload` - Reload the pane
-
-### Utility Commands
-- `help` - List all available commands
-- `clear` - Clear command output
-
-## Console View Mode
-
-When you run `source`, the pane transforms into a console:
-
-**Visual Changes**:
-- Black background (`#1a1a1a`)
-- Green text (`#0f0`)
-- Monospaced font (Consolas/Monaco)
-- Scrollable content
-- HTML escaped (safe viewing)
-
-**Header shows**:
-```
-HTML SOURCE (25430 chars)
-```
-
-**To exit console view**:
-```
-> restore
+$ list-panes
+Panes:
+1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
+2 %2   50%x100%            GitHub - https://github.com/
 ```
 
-**Note**: The iframe is still there (just hidden), so `restore` brings it back instantly.
+- **Number** – layout order, top-to-bottom and left-to-right, 1..n. Recomputed
+  after every structural change, so it can change.
+- **Id** – `%1`, `%2`, … assigned once when the pane is created and never reused.
+- **Size** – the pane's share of the overlay (width x height).
+- **Marker** – `[ACTIVE]`, `[ZOOM]`, or blank.
 
-## Active Pane Context
+`-j` prints the same data as JSON with fractional geometry, for scripts:
 
-The **debug console** always operates on the **active pane**:
-
-**Active pane indicators**:
-- Blue glowing border
-- Has `.active` class
-- Most recently clicked/split
-
-**To change active pane**:
-- Click inside another pane
-- Split (new pane becomes active)
-
-**Debug console behavior**:
 ```
-$ source         # Affects pane with blue border
-[Split to new pane - now that's active]
-$ url google.com # Affects the NEW pane
+$ list-panes -j
+[
+  { "number": 1, "id": "%1", "title": "Docs", "active": true, "zoomed": false,
+    "size": { "x": 0, "y": 0, "w": 0.5, "h": 1 }, "url": "https://example.com/docs" }
+]
 ```
 
-## Best Practices
+### `focus-pane <number|%id|up|down|left|right>`
+Focuses a pane, and that pane gets the blue border and the `[ACTIVE]` marker.
 
-### For Quick Commands
-Use **per-pane input** when:
-- Working with a specific pane
-- Want output to stay with that pane
-- Don't want to track which pane is active
+```
+$ focus-pane 2        # by number
+$ focus-pane %2       # by id (same pane)
+$ focus-pane right    # move focus one pane right
+```
 
-### For Global Control
-Use **debug console** when:
-- Want persistent scrollback
-- Running multiple commands quickly
-- Need to see command history
+Directional moves are geometric and **wrap**: the target is the nearest pane whose
+centre lies in that direction, with a penalty for drifting off-axis. When nothing
+lies that way, focus moves to the pane furthest on the opposite side.
 
-### Console View Workflow
+With two panes side by side and focus on the right one:
 
-1. **Inspect source**:
-   ```
-   > source
-   [Scroll through HTML]
-   > restore
-   ```
+```
+$ focus-pane right
+Focus right: pane 1/2 (wrapped)
+```
 
-2. **Extract specific elements**:
-   ```
-   > filter .product-name
-   [View matching elements]
-   > filter img
-   [View all images]
-   ```
+Wrapping examples:
 
-3. **Switch between views**:
-   ```
-   > source
-   [Examine HTML structure]
-   > restore
-   [Back to browser]
-   > filter form input
-   [Check form fields]
-   ```
+| Layout | From | Command | Result |
+|--------|------|---------|--------|
+| two panes, side by side | right pane | `focus-pane right` | left pane |
+| two panes, stacked | bottom pane | `focus-pane down` | top pane |
+| 2×2 grid | bottom-right | `focus-pane down` | top-right |
+| single pane | — | any direction | `Error: Only one pane: split first` |
 
-## Error Handling
+### `last-pane` / `cycle-pane [next|prev]`
+`last-pane` returns to the pane that was active before; `cycle-pane` walks panes
+in layout order and wraps.
 
-**Cross-origin content**:
+### `split-window [-h|-v] [-l <size>] [-b] [-d]`
+Splits the active pane. The new pane clones the active pane's URL.
+
+| Flag | Meaning |
+|------|---------|
+| `-h` / `horizontal` | New pane beside (default) |
+| `-v` / `vertical` | New pane below |
+| `-l <size>` / `-p <size>` | Size of the new pane: `30%`, `30` or `0.3` (10–90%) |
+| `-b` | New pane goes first (left/top) |
+| `-d` | Keep focus on the pane being split |
+
+```
+$ split-window -h -l 30%
+Split horizontal: 30/70
+```
+
+The pane being split is **not** reloaded: the layout tree changes, the iframe
+stays put.
+
+### `kill-pane [number|%id]`
+Closes a pane and gives its space to its neighbour. Focus moves to the survivor.
+
+```
+$ kill-pane 2
+Killed pane 2 (%2). Focus is on pane 1 (%1).
+$ kill-pane
+Error: Cannot kill the last pane
+```
+
+### `resize-pane [-L|-R|-U|-D <percent>] [-x <size>] [-Z]`
+Moves the split boundary next to the pane in the pressed direction, sets the
+pane's share, or toggles zoom.
+
+```
+$ resize-pane -R 10      # move the boundary right by 10% of the overlay
+$ resize-pane -U 5       # ... up by 5% (needs a stacked split)
+$ resize-pane -x 25%     # the pane now takes 25% of its parent split
+$ resize-pane -Z         # zoom / unzoom
+```
+
+Boundaries are clamped to 5–95%. If the layout has no split on that axis, the
+command says so (`No stacked split to resize`).
+
+### `select-layout <name>` / `next-layout`
+Rebuilds the layout from the same panes. **No page is reloaded.**
+
+| Name | Result |
+|------|--------|
+| `even-horizontal` | Equal columns |
+| `even-vertical` | Equal rows |
+| `main-vertical` | First pane 60% wide on the left, the rest stacked |
+| `main-horizontal` | First pane 60% tall on top, the rest side by side |
+| `tiled` | Grid, `ceil(sqrt(n))` columns |
+
+`next-layout` cycles: even-horizontal → main-vertical → even-vertical →
+main-horizontal → tiled.
+
+### `swap-pane <a> [b]` / `rotate-window [-r|--reverse]`
+Reorders panes without touching the DOM, so every page keeps running.
+`swap-pane` with one target swaps it with the active pane; `rotate-window` moves
+every pane one slot along the layout (forwards: each pane moves to the next slot).
+
+### `display-panes`
+Shows each pane's number over it for two seconds. Press a digit to focus that
+pane; `Escape` cancels.
+
+### `new-window`
+Resets the overlay to a single pane showing the current page. This discards the
+current layout (and reloads that one page, because the pane is new).
+
+### `detach`
+Hides or shows the overlay. Reports `Detached` or `Attached`.
+
+### `control-mode [on|off|toggle]`
+Turns Control Mode on, off, or toggles it. `Escape` in Control Mode is this
+command with `off`.
+
+### `command-prompt`
+Opens the `:` command line. Bound to `:` in both key tables.
+
+### `escape`
+What `Esc` runs. It clears filter highlights if any are on screen, otherwise it
+leaves Control Mode. It exists as a command so a key pressed inside a pane frame —
+which cannot see the top frame's filter state — resolves to the same behaviour.
+
+### `log [toggle|on|off|clear|size <px>]`
+Opens, closes, resizes or empties the active pane's console (the scrollback under
+its input). `l` in Control Mode is the same as `log toggle`.
+
+```
+> log size 240
+Console height 240px
+> log off
+Console closed
+```
+
+Heights are clamped to 40px and to 70% of the pane.
+
+### `help`
+Lists every command, grouped into overlay commands and pane commands, with each
+one's description and usage. Generated from the registry, so it cannot go stale.
+Hidden aliases (`y`, `n`) are left out.
+
+---
+
+## 4. Pane commands
+
+Pane commands act on one pane: the pane whose input you typed into, or the active
+pane when run from the console or the `:` line.
+
+### `source`
+Transforms that pane into a terminal-style console view of the page's HTML.
+
+```
+> source
+Console view active. Use 'restore' to return.
+```
+
+The iframe is hidden, not removed, so `restore` brings it straight back. The view
+shows `HTML SOURCE (25430 chars)` as a header. Cross-origin content cannot be read:
+
 ```
 > source
 Error: Cross-origin content
 URL: https://github.com/...
 ```
-Nothing breaks - just can't access external site's DOM.
 
-**No active pane (debug console only)**:
-```
-$ help
-Error: No active pane
-```
-Create a pane first by activating BMUX.
+### `restore`
+Returns the pane from the console view to the browser view.
+`Already in browser view` if it was not in console view.
 
-**Unknown command**:
+### `filter <selector> [-n <max>] | filter -l <selector> | filter -c`
+Finds elements with a CSS selector and **boxes them inside the pane**, then names
+each one in the pane's status line as you pass over it.
+
+```
+> filter .card
+=== 2 match(es): ".card" ===
+
+[1] DIV#alpha.card "Product card"
+[2] DIV.card "Beta card"
+
+Boxed 2 of 2 match(es). Hover one to name it in the pane status line; Esc or "filter -c" clears.
+```
+
+What you see:
+
+- One **box per match**: 2px amber outline, a light wash, and 7px corner ticks so
+  even a tiny or zero-height element is findable. Each box carries a numbered tab
+  matching the list above.
+- **Hover a match** and the pane footer's status segment names it:
+
+  ```
+  FILTER: .card - DIV#alpha.card "Product card" · 1/2
+  ```
+
+  That box turns green. Move off a match and the segment reverts to
+  `FILTER: .card · 2 match(es)`.
+- The overlay is drawn as sibling elements in the pane's own document, in
+  document coordinates: it scrolls with the page, and the page's layout is not
+  touched (nothing is wrapped, moved or given attributes).
+- A `MutationObserver` re-queries the selector and redraws when the page changes,
+  so matches added or removed after the filter was applied appear and disappear.
+  Pages that move elements without mutating the DOM (CSS transitions) need the
+  filter re-run.
+
+Options:
+
+| Form | Meaning |
+|------|---------|
+| `filter <selector>` | Box every match (up to 200) |
+| `filter <preset> [variant]` | Preset query, e.g. `filter links internal` |
+| `filter --presets` | List the preset vocabulary |
+| `filter -n <max>` | Cap the boxes, e.g. `filter -n 50 .card` (ceiling 1000) |
+| `filter -l <target>` | List matches only, draw nothing |
+| `filter -y <target>` | Skip the confirmation prompt |
+| `filter -c` / `--clear` | Remove the boxes and the status line |
+
+### Filter presets
+
+A preset word expands into a selector, and a variant can narrow it with a
+predicate that CSS cannot express on its own ("internal" means the link resolves
+to *this document's* origin, including `#anchor` and `/path`):
+
+```
+> filter links              # every a[href]
+> filter links internal     # links that stay on this site
+> filter links external     # links that leave it
+> filter links empty        # links with no text
+> filter images large       # img wider than 200px
+> filter images noalt       # img with no alt text
+> filter images broken      # img that failed to load
+> filter text main          # paragraphs inside the main content
+> filter tables rows        # every table row
+> filter media video        # videos and player embeds
+```
+
+| Preset | Selector | Variants |
+|--------|----------|----------|
+| `links` | `a[href]` | `internal`, `external`, `empty` |
+| `images` | `img` | `large`, `noalt`, `broken` |
+| `headings` | `h1`…`h6` | — |
+| `text` | `p, li, td, th, dd, blockquote` | `main` |
+| `inputs` | `input, select, textarea` | — |
+| `buttons` | `button, input[type=submit], [role=button]` | — |
+| `tables` | `table` | `rows`, `cells` |
+| `media` | `img, video, audio, iframe, canvas, picture` | `video` |
+| `prices` | `[data-price], .price, .product-price, [itemprop=price], .amount` | — |
+| `comments` | `.comment, .comment-body, .reply, [data-comment], #comments li` | — |
+| `authors` | `.byline, [rel=author], [itemprop=author], .author` | — |
+| `dates` | `time, [datetime], .date, .published` | — |
+| `articles` | `article` | `headlines` |
+| `forms` | `form` | — |
+| `code` | `pre, code` | — |
+| `main` | `main, article, #content, .post-content, [role=main]` | — |
+
+`filter --presets` prints the same table from the registry, so it cannot go stale.
+
+### Confirming big or preset queries
+
+A preset, or any filter matching more than 25 elements, asks before drawing:
+
+```
+> filter links
+=== 2 match(es): links (a[href]) ===
+
+[1] A "internal link"
+[2] A "external link"
+
+2 match(es) for links. Box them? Type "yes" / "no" (or press y / n; Esc cancels, "filter -y" skips this prompt).
+> yes
+Boxed 2 of 2 match(es) for links
+```
+
+- `yes` / `no` answer it (the hidden aliases `y` / `n` do the same), so it works
+  from the console, a pane input, or the keyboard.
+- `y` / `n` / `Esc` answer it directly when the focus is not in a text field —
+  including with the focus clicked inside the page.
+- An unanswered prompt times out after 15 seconds and draws nothing.
+- `filter -y links` skips the prompt entirely, for scripts.
+
+Clearing:
+
+- **`Esc`** clears the highlights before anything else consumes Escape — from the
+  top frame, from the debug console or a pane input, and with the focus clicked
+  inside the pane (a second `Esc` then leaves Control Mode as usual).
+- **`filter -c`** clears them from the command surface.
+
+Same-origin only: a cross-origin pane cannot be measured or written into, so the
+command reports which URL blocked it and draws nothing. An invalid selector is
+reported instead of throwing.
+
+```
+> filter ???
+Error: Invalid selector "???"
+> filter #nothing
+No elements match "#nothing"
+```
+
+### `capture-pane [-n <lines>]`
+Prints the pane's visible text (same-origin only), last `n` lines first — default
+40.
+
+```
+> capture-pane -n 3
+=== Docs (3/48 lines) ===
+
+Installation
+Run the extension
+Open a page
+```
+
+### `rename-pane <title|->`
+Sets the title shown in the pane footer. `-` clears it back to the automatic
+title (page `<title>` when same-origin, otherwise the URL).
+
+```
+> rename-pane Docs
+Pane 1 is now "Docs"
+> rename-pane -
+Title cleared: pane 1 shows "example.com/docs"
+```
+
+### `url [new-url]`
+Shows the pane's URL, or navigates it.
+
+```
+> url
+Current URL: https://example.com/
+> url https://example.org
+Navigating to: https://example.org
+```
+
+### `reload`
+Reloads the pane. Cross-origin panes are reloaded by reassigning `src`.
+
+### `clear`
+Clears the pane's output area and prints nothing.
+
+---
+
+## 5. Active pane context
+
+The debug console and the `:` line always act on the **active pane**:
+
+- Blue glowing border
+- Has the `.active` class
+- Shown in the status bar as `pane 2 %2 · 30%x100%`
+- Its footer has a per-pane status segment, used by `filter` to name the element
+  under the pointer
+
+Ways to change it:
+
+- Click a pane's body or footer, or inside its iframe
+- `focus-pane <target>`, the `Up`/`Down`/`Left`/`Right` buttons, or arrow keys
+- `display-panes` (`q`) then a digit
+- `cycle-pane` / `last-pane` (`o` / `;`)
+- Split (the new pane becomes active, unless `-d`)
+- Kill the focused pane (focus moves to its neighbour)
+
+---
+
+## 6. Error handling
+
+The dispatcher never throws at you; every failure comes back as text.
+
+**Unknown command**
 ```
 > notacommand
-Unknown: notacommand. Type "help" for commands.
+Error: Unknown command "notacommand". Type "help" for commands.
+```
+Names that exist only on `Object.prototype` are rejected the same way, so
+`constructor`, `__proto__` and `hasOwnProperty` are unknown commands, not commands.
+
+**No pane**
+```
+> capture-pane
+Error: No pane to capture
 ```
 
-## Tips
+**Bad arguments** — reported, and the layout and focus are left alone:
+```
+> focus-pane 99
+Error: No pane "99". Type "list-panes" to see the panes.
+> split-window -l 5%
+Error: Size must be between 10% and 90%
+> resize-pane -U 5      (in a side-by-side layout)
+Error: No stacked split to resize (the layout has no horizontal boundary)
+```
 
-1. **Use `help` in debug console** to keep the list visible while you work
-2. **Use `source` in a split pane** to compare HTML with rendered view
-3. **Use `restore` anytime** - the iframe never truly goes away
-4. **Commands are case-sensitive** - use lowercase
-5. **Debug console scrolls** - earlier commands stay visible
+**Command failed internally**
+```
+Error: <message from the command>
+```
 
-## Keyboard Shortcuts
+---
 
-**In any pane input or debug console**:
-- `Enter` - Execute command
-- `Escape` - (In pane input) Does nothing yet
-- `Escape` - (In Control Mode) Exits Control Mode
+## 7. Workflow examples
 
-**Remember**:
-- Pane inputs: Green `>` prompt
-- Debug console: Green `$` prompt
-- Both execute the same commands!
+### Sidebar layout by command
+
+```
+$ split-window -h -l 30%        # 30% sidebar on the left
+$ rename-pane Docs              # title it
+$ focus-pane 2                  # into the main pane
+$ url https://github.com        # load something else there
+$ list-panes                    # check numbers, sizes, titles
+```
+
+### Diagnose "which pane has focus?"
+
+```
+$ list-panes
+Panes:
+1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
+2 %2   50%x100%            GitHub - https://github.com/
+$ focus-pane left
+Focus left: pane 1/2
+$ list-panes
+Panes:
+1 %1   50%x100%            Docs - https://example.com/docs
+2 %2   50%x100%   [ACTIVE] GitHub - https://github.com/
+```
+
+### Four-pane workspace
+
+```
+$ split-window -h
+$ split-window -v
+$ focus-pane 1
+$ split-window -v
+$ select-layout tiled        # 2x2 grid, nothing reloaded
+$ rename-pane Notes
+```
+
+### Compare two pages side by side
+
+```
+$ split-window -h -l 50%
+$ focus-pane 2
+$ url https://example.org
+$ focus-pane 1
+$ url https://example.com
+$ swap-pane 1 2              # if you want the other order
+```
+
+### Read a pane without leaving the keyboard
+
+```
+$ focus-pane 2
+$ capture-pane -n 20         # last 20 lines of visible text
+$ source                     # or browse the HTML
+$ restore
+```
+
+### Zoom while you read, then get the layout back
+
+```
+$ resize-pane -Z             # focused pane fills the overlay
+$ ...read...
+$ resize-pane -Z             # layout restored, all pages still loaded
+```
+
+---
+
+## 8. Tips
+
+1. **`list-panes` first** whenever focus or sizes surprise you.
+2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with
+   their pane, so scripts should use ids.
+3. **Everything that reorders the layout keeps your pages alive** — split,
+   `select-layout`, `swap-pane`, `rotate-window`, zoom. Only `new-window` (and
+   `reload`) reload.
+4. **Drag boundaries** instead of typing sizes when you are already using the
+   mouse; double-click resets a split to 50/50.
+5. **Every move is logged** in the debug console, e.g.
+   `Focus right: pane 1/2 (wrapped)` or `Resize: row ratio 0.33`.
+6. **Commands are case-sensitive** — use lowercase.
+7. **`Escape`** closes the `:` line; a second `Escape` leaves Control Mode.
+
+---
+
+## 9. Where commands live
+
+| File | Responsibility |
+|------|----------------|
+| `content/commands.js` | Every command (`BMUX_COMMANDS`), each with `scope`, `description`, `usage`, `execute(api, args)`, plus `BMUX_KEYBINDINGS` |
+| `content/main.js` | Overlay DOM, layout tree and rendering, mouse resizing, focus model, and the dispatcher that parses a line and calls `execute` with `api = { client, pane, log }` |
+| `background/main.js` | State and message relay; forwards a command line from a pane frame to the top frame |
+
+To add a command, see [`ADDING_COMMANDS.md`](ADDING_COMMANDS.md).

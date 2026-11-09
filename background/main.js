@@ -101,14 +101,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             sendResponse({ status: 'ok', msg: 'Split handled by client' });
             break;
 
-        case 'relay-to-top':
-            // Relay message back to the same tab, but specifically to the logic handling top frame
-            // The content script in the top frame listens for 'execute-key'.
+        case 'relay-line':
+            // A key pressed in a pane's iframe resolves to a command line there
+            // (see BMUX_KEYBINDINGS), but only the top frame owns the overlay, so
+            // the line is relayed back to the tab and executed there.
+            // The relay carries a command line, not an action name, so the
+            // background never needs to know what commands exist.
             if (sender.tab && sender.tab.id) {
                 chrome.tabs.sendMessage(sender.tab.id, {
-                    command: 'execute-key',
-                    action: request.action,
-                    params: request.params
+                    command: 'execute-line',
+                    line: request.line
                 });
             }
             sendResponse({ status: 'relayed' });
