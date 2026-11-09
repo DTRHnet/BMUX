@@ -1,138 +1,203 @@
-# BMUX - Adding New Pane Commands
+# BMUX - Adding Commands
 
 ## Overview
 
-BMUX uses a simple, extensible command system for pane-level commands. Each pane has a command input at the bottom (like TMUX) where users can type commands.
+Every BMUX command is defined once, in `content/commands.js`, in the
+`BMUX_COMMANDS` object. That registry is the single source of truth:
 
-## Command Structure
+- the toolbar buttons run command lines,
+- the debug console, the `:` line and each pane's input parse whatever you type,
+- Control Mode and `Ctrl+b` keys are mapped to command lines in `BMUX_KEYBINDINGS`.
 
-All commands are defined in `content/commands.js` in the `BMUX_COMMANDS` object.
+`content/main.js` holds no command definitions, no help text and no
+key-to-action switch. It parses a line, looks the name up (own-property lookup, so
+`constructor` is not a command), and calls `execute` with an `api` object.
 
-### Command Definition Format
+```
+typed line / button / key
+      │
+      ▼
+content/main.js  runCommand(line)
+      │  BMUX_COMMANDS[name].execute(api, args)
+      ▼
+content/commands.js  the command
+```
+
+## Command shape
 
 ```javascript
 'command-name': {
-    description: 'What this command does',
+    scope: 'overlay',                 // 'overlay' or 'pane'
+    description: 'What this does',    // one line, shown by help
     usage: 'command-name [arguments]',
-    execute: async function(pane, args) {
-        // pane: DOM element of the pane (.bmux-pane)
-        // args: array of command arguments
-        
-        // Your command logic here
-        
-        // Return a string to display in the output
-        return 'Command result message';
+    execute: async function (api, args) {
+        // api.client : the top-frame BMUXClient (pane/overlay primitives)
+        // api.pane   : the pane this command was invoked for, or the active pane
+        // api.log    : append a line to the debug console
+        // args       : array of arguments, already split on whitespace
+
+        return 'Text to display';
     }
 }
 ```
 
-## Adding a New Command
+Rules that keep commands consistent with the rest of BMUX:
 
-### Step 1: Define the Command
+1. **`scope: 'overlay'`** for commands that manage the whole overlay. They must
+   work when there is no pane at all.
+2. **`scope: 'pane'`** for commands that act on one pane. Check `api.pane` first
+   and return an error string if it is missing.
+3. **Return a string.** It is displayed by whichever entry point ran the command.
+   Returning `''` (or nothing) means "no output".
+4. **Never throw for bad input.** Return an error or usage line. The dispatcher
+   catches throws, but a clear message is better than `Error: undefined`.
+5. **`usage` starts with the command name**, because `help` prints it verbatim.
 
-Open `content/commands.js` and add your command to the `BMUX_COMMANDS` object:
+## Adding a pane command
 
 ```javascript
-const BMUX_COMMANDS = {
-    // ... existing commands ...
-    
-    'newcommand': {
-        description: 'Description of what your command does',
-        usage: 'newcommand <required-arg> [optional-arg]',
-        execute: async function(pane, args) {
-            // Validate arguments
-            if (args.length === 0) {
-                return 'Error: Please provide required arguments';
-            }
-            
-            // Access the iframe in this pane
-            const iframe = pane.querySelector('iframe');
-            if (!iframe || !iframe.contentDocument) {
-                return 'Error: Unable to access iframe content';
-            }
-            
-            // Perform operations
-            const result = doSomething(iframe, args);
-            
-            // Return result
-            return `Success: ${result}`;
+'elements': {
+    scope: 'pane',
+    description: 'Count elements matching a selector',
+    usage: 'elements <selector>',
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
+        if (args.length === 0) {
+            return 'Error: Usage: elements <selector>';
         }
+
+        const iframe = pane.querySelector('iframe');
+        if (!iframe) return 'Error: No iframe found';
+
+        const doc = safeGetIframeDocument(iframe);   // helper in commands.js
+        if (!doc) return 'Error: Cross-origin content';
+
+        const found = doc.querySelectorAll(args[0]);
+        return `Found ${found.length} element(s) matching ${args[0]}`;
+    }
+}
+```
+
+That is the whole change: the command is now available from the console, the `:`
+line, every pane input, and `help`.
+
+## Adding an overlay command
+
+Overlay commands use the client primitives rather than touching the DOM themselves:
+
+```javascript
+'zoom-pane': {
+    scope: 'overlay',
+    description: 'Report the focused pane at full size (not implemented)',
+    usage: 'zoom-pane',
+    execute: function (api) {
+        const pane = api.client.getActivePane();
+        if (!pane) return 'Error: No active pane';
+        return `Would zoom pane ${api.client.getPaneNumber(pane)} (${api.client.getPaneId(pane)})`;
+    }
+}
+```
+
+### Client primitives available on `api.client`
+
+| Method | Returns |
+|--------|---------|
+| `getPanes()` | Array of pane elements, DOM order |
+| `getActivePane()` | The pane with the `active` class, or the first pane |
+| `getPaneId(pane)` | The pane's id string, e.g. `%2` |
+| `getPaneNumber(pane)` | The pane's 1-based reading-order number |
+| `getPaneUrl(pane)` | The pane's current URL (cross-origin safe) |
+| `findPaneByToken(token)` | Pane from `2` or `%2`, or `null` |
+| `setActivePane(pane)` | Makes the pane active, refreshes badges and status bar |
+| `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
+| `splitWindow(direction)` | Splits the active pane (`'horizontal'`/`'vertical'`) |
+| `newWindow()` | Resets to a single pane |
+| `toggle()` | Hides or shows the overlay |
+| `setControlMode(on)` | Sets Control Mode on/off |
+| `showCommandMode()` / `hideCommandMode()` | Opens/closes the `:` line |
+| `log(message)` | Appends to the debug console |
+
+## Adding a key binding
+
+Keys are data, not code. Add an entry to `BMUX_KEYBINDINGS` in
+`content/commands.js`:
+
+```javascript
+const BMUX_KEYBINDINGS = {
+    control: {
+        // ...
+        'z': 'zoom-pane'
+    },
+    prefix: {
+        // ...
+        'z': 'zoom-pane'
     }
 };
 ```
 
-### Step 2: Test the Command
+`control` is used in Control Mode (Alt+Shift+B), `prefix` after `Ctrl+b`. The value
+is a command line, so it can carry arguments (`'focus-pane left'`). Keys that are
+not listed are swallowed by Control Mode, which is what stops the page from seeing
+them.
 
-1. Reload the extension
-2. Refresh your page
-3. Activate BMUX
-4. In any pane's command input (bottom of pane), type: `newcommand arg1 arg2`
-5. Press Enter
+## Built-in commands
 
-### Step 3: Document the Command
+Overlay scope:
 
-Your command will automatically appear in the `help` command output.
+| Command | Description |
+|---------|-------------|
+| `help` | List every command, grouped by scope |
+| `list-panes` | Number, id, active marker and URL for each pane |
+| `focus-pane <n\|%id\|dir>` | Focus by number, id, or direction (wraps) |
+| `split-window [-h\|-v]` | Split the active pane |
+| `new-window` | Reset the overlay to one pane |
+| `detach` | Hide or show the overlay |
+| `kill-pane` | Registered; reports "not implemented" |
+| `control-mode [on\|off\|toggle]` | Enter or leave Control Mode |
+| `command-prompt` | Open the `:` line |
 
-## Built-in Commands
+Pane scope:
 
-### help
-- **Description**: List all available commands
-- **Usage**: `help`
-- **Returns**: Full list of commands with descriptions
-
-### source
-- **Description**: Show page source code in console
-- **Usage**: `source`
-- **Returns**: Logs HTML source to console
-
-### filter
-- **Description**: Filter and display specific HTML elements
-- **Usage**: `filter <css-selector>`
-- **Example**: `filter div`, `filter .className`, `filter #myId`
-- **Returns**: List of matching elements (also logs to console)
-
-### url
-- **Description**: Show or change the current pane URL
-- **Usage**: `url [new-url]`
-- **Examples**:
-  - `url` - Show current URL
-  - `url https://example.com` - Navigate to URL
-
-### reload
-- **Description**: Reload the current pane
-- **Usage**: `reload`
-
-### clear
-- **Description**: Clear the command output
-- **Usage**: `clear`
+| Command | Description |
+|---------|-------------|
+| `source` | Show the pane's HTML in a console view |
+| `restore` | Return from console view to browser view |
+| `filter <selector>` | List elements matching a CSS selector |
+| `url [new-url]` | Show or change the pane URL |
+| `reload` | Reload the pane |
+| `clear` | Clear the pane's output area |
 
 ## Accessing Pane Contents
 
-### Get the Iframe
+### Get the iframe
 
 ```javascript
 const iframe = pane.querySelector('iframe');
 ```
 
-### Access Iframe Document (same-origin only)
+### Access the iframe document (same-origin only)
+
+Use the helpers already in `content/commands.js` — never touch
+`iframe.contentDocument` directly, or you will throw on cross-origin frames:
 
 ```javascript
-const doc = iframe.contentDocument;
-if (!doc) {
-    return 'Error: Cross-origin restriction (cannot access content)';
-}
+const doc = safeGetIframeDocument(iframe);   // null when cross-origin
+if (!doc) return 'Error: Cross-origin restriction';
+
+const url = safeGetIframeUrl(iframe);        // falls back to the src attribute
+if (!isIframeAccessible(iframe)) { /* ... */ }
 ```
 
-### Query Elements in the Page
+### Query elements in the page
 
 ```javascript
 const elements = doc.querySelectorAll('.some-class');
-elements.forEach(el => {
-    console.log(el.textContent);
-});
+elements.forEach(el => console.log(el.textContent));
 ```
 
-### Execute Scripts in the Pane
+### Execute scripts in the pane
 
 ```javascript
 iframe.contentWindow.eval('alert("Hello from BMUX!")');
@@ -140,173 +205,144 @@ iframe.contentWindow.eval('alert("Hello from BMUX!")');
 
 ## Common Patterns
 
-### Form Field Extraction
+### Form field extraction
 
 ```javascript
 'extract-forms': {
+    scope: 'pane',
     description: 'Extract all form fields from the page',
     usage: 'extract-forms',
-    execute: async function(pane, args) {
-        const iframe = pane.querySelector('iframe');
-        if (!iframe || !iframe.contentDocument) {
-            return 'Error: Cannot access page content';
-        }
-        
-        const forms = iframe.contentDocument.querySelectorAll('form');
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
+        const doc = safeGetIframeDocument(pane.querySelector('iframe'));
+        if (!doc) return 'Error: Cannot access page content';
+
+        const forms = doc.querySelectorAll('form');
         let output = `Found ${forms.length} form(s)\n\n`;
-        
+
         forms.forEach((form, i) => {
             output += `Form ${i}:\n`;
-            const inputs = form.querySelectorAll('input, textarea, select');
-            inputs.forEach(input => {
+            form.querySelectorAll('input, textarea, select').forEach((input) => {
                 output += `  - ${input.name || input.id}: ${input.type}\n`;
             });
         });
-        
+
         return output;
     }
 }
 ```
 
-### Data Scraping
+### Data scraping
 
 ```javascript
 'scrape': {
-    description: 'Scrape specific data from the page',
+    scope: 'pane',
+    description: 'Scrape text from matching elements',
     usage: 'scrape <selector>',
-    execute: async function(pane, args) {
-        if (args.length === 0) {
-            return 'Error: Provide a CSS selector';
-        }
-        
-        const iframe = pane.querySelector('iframe');
-        const doc = iframe.contentDocument;
-        const elements = doc.querySelectorAll(args[0]);
-        
-        const data = Array.from(elements).map(el => el.textContent.trim());
+    execute: function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+        if (args.length === 0) return 'Error: Provide a CSS selector';
+
+        const doc = safeGetIframeDocument(pane.querySelector('iframe'));
+        if (!doc) return 'Error: Cannot access page content';
+
+        const data = Array.from(doc.querySelectorAll(args[0])).map((el) => el.textContent.trim());
         console.log('Scraped data:', data);
-        
-        return `Scraped ${data.length} items. Check console.`;
+        return `Scraped ${data.length} items. Check the console.`;
     }
 }
 ```
 
-### Auto-fill Forms
+### Layout scripting
+
+Overlay commands make multi-pane layouts scriptable:
 
 ```javascript
-'autofill': {
-    description: 'Auto-fill a form field',
-    usage: 'autofill <field-name> <value>',
-    execute: async function(pane, args) {
-        if (args.length < 2) {
-            return 'Error: autofill <field-name> <value>';
-        }
-        
-        const [fieldName, ...valueParts] = args;
-        const value = valueParts.join(' ');
-        
-        const iframe = pane.querySelector('iframe');
-        const input = iframe.contentDocument.querySelector(
-            `input[name="${fieldName}"], input#${fieldName}`
-        );
-        
-        if (!input) {
-            return `Error: Field "${fieldName}" not found`;
-        }
-        
-        input.value = value;
-        return `Set ${fieldName} = ${value}`;
+'quad': {
+    scope: 'overlay',
+    description: 'Split into four panes',
+    usage: 'quad',
+    execute: function (api) {
+        const client = api.client;
+        client.splitWindow('horizontal');
+        client.splitWindow('vertical');
+        client.setActivePane(client.getPanes()[0]);
+        client.splitWindow('vertical');
+        return 'Four panes';
     }
 }
 ```
 
-## Error Handling
-
-Always handle potential errors:
+## Error handling
 
 ```javascript
-execute: async function(pane, args) {
+execute: async function (api, args) {
     try {
-        // Your logic
-        return 'Success';
+        return doWork(api, args);
     } catch (e) {
         return `Error: ${e.message}`;
     }
 }
 ```
 
-## Async Operations
+The dispatcher also catches throws and turns them into `Error: <message>`, so a
+bug reports itself in the console instead of breaking the input.
 
-Commands can be `async` and use `await`:
+## Async operations
+
+Commands may be `async`; the dispatcher awaits them:
 
 ```javascript
-execute: async function(pane, args) {
-    const iframe = pane.querySelector('iframe');
-    
-    // Wait for something
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    // Fetch external data
+execute: async function (api, args) {
     const response = await fetch('https://api.example.com/data');
-    const data = await response.json();
-    
-    return `Fetched: ${JSON.stringify(data)}`;
+    return `Fetched ${(await response.json()).length} items`;
 }
 ```
 
-## Logging vs. Returning
+## Logging vs. returning
 
-- **Return**: Shows output in the pane's command output area
-- **console.log()**: Logs to browser DevTools console
-- Use both for comprehensive feedback
+- **Return**: displayed by the entry point that ran the command (console
+  scrollback, or the pane's output area).
+- **`api.log(msg)`**: append to the debug console directly.
+- **`console.log()`**: browser DevTools only.
 
-```javascript
-execute: async function(pane, args) {
-    const data = extractData(pane);
-    
-    console.log('Full data:', data); // For developers
-    return `Extracted ${data.length} items`; // For users
-}
-```
+## Verifying a change
 
-## Best Practices
+1. `node --check content/commands.js`
+2. Reload the extension in `chrome://extensions`, then refresh the page.
+3. Open the overlay and run the command from the debug console (`$`), the `:` line
+   and a pane's input (`>`) — all three should behave the same.
+4. Run `help`: the new command must appear with its usage line.
+5. Check a bad argument: it should return a message, not throw, and it must not
+   move focus.
 
-1. **Always validate arguments** before processing
-2. **Handle cross-origin errors** gracefully
-3. **Provide clear error messages**
-4. **Use consistent naming** (lowercase, hyphenated)
-5. **Document complex commands** with examples
-6. **Log detailed data** to console for debugging
-7. **Return concise messages** to users
-
-## Command Template
-
-Copy this template when creating new commands:
+## Command template
 
 ```javascript
 'my-command': {
+    scope: 'pane',
     description: 'One-line description of what this does',
     usage: 'my-command <required> [optional]',
-    execute: async function(pane, args) {
-        // Validate arguments
+    execute: async function (api, args) {
+        const pane = api.pane;
+        if (!pane) return 'Error: No pane';
+
         if (args.length === 0) {
-            return `Error: Usage: ${this.usage}`;
+            return 'Error: Usage: my-command <required> [optional]';
         }
-        
-        // Get iframe
+
         const iframe = pane.querySelector('iframe');
-        if (!iframe || !iframe.contentDocument) {
-            return 'Error: Cannot access page content (cross-origin)';
-        }
-        
+        if (!iframe) return 'Error: No iframe found';
+
+        const doc = safeGetIframeDocument(iframe);
+        if (!doc) return 'Error: Cross-origin content';
+
         try {
-            // Your logic here
-            const result = performOperation(iframe, args);
-            
-            // Log details for debugging
-            console.log('[my-command] Result:', result);
-            
-            // Return user-friendly message
+            const result = doWork(doc, args);
+            console.log('[my-command] result:', result);
             return `Success: ${result}`;
         } catch (e) {
             return `Error: ${e.message}`;
@@ -315,4 +351,5 @@ Copy this template when creating new commands:
 }
 ```
 
-Happy coding! Your new commands will be automatically available to all panes.
+Happy coding! A new command is available from every entry point and listed by
+`help` as soon as it is in `BMUX_COMMANDS`.

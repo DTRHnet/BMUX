@@ -35,3 +35,6 @@ build/
 # Test artifacts
 coverage/
 .nyc_output/
+
+# Local verification harness (jsdom; see CHANGELOG)
+.verify/

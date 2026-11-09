@@ -143,6 +143,37 @@
   border-color: #00aaff;
 }
 
+/* Directional focus buttons (focus-pane up|down|left|right), pushed to the
+   right end of the toolbar so they read as pane navigation, not window actions. */
+.bmux-nav-group {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+}
+
+.bmux-btn-nav {
+  min-width: 52px;
+}
+
+/* Pane footer badge: "[number id]", e.g. "[2 %2]" */
+.bmux-pane-badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  white-space: nowrap;
+  font-family: 'Consolas', monospace;
+  font-size: 10px;
+  color: #8fd4ff;
+  background: #101820;
+  border: 1px solid #345;
+  border-radius: 4px;
+}
+
+.bmux-pane.active .bmux-pane-badge {
+  color: #ffffff;
+  background: #00aaff;
+  border-color: #00aaff;
+}
+
 /* Draggable Debug Console */
 #bmux-debug-overlay {
   position: fixed;
