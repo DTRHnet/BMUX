@@ -46,7 +46,14 @@ limits, what a script cannot do, how to write a demo (with the pacing table take
 from the shipped script), and how to record one. README, QUICKSTART, COMMAND_USAGE
 (new section 12), ADDING_COMMANDS (script-friendly commands) and IMPLEMENTATION
 (section 20, the engine) all cover the feature, and the README gained a fifth
-screenshot: the tour mid-run on dtrh.net.
+screenshot of the tour on dtrh.net.
+
+Every current document carries a **0.6.0** stamp, and the sweep fixed what had
+drifted: the popup/"New Session" description, `[CONTROL MODE]`/blue-border wording,
+a 70% console clamp, `Esc` described as `control-mode off` instead of `escape`,
+missing alias keys, and a Firefox claim that no test backed (now stated as
+untested). DESIGN and UPDATE_STATUS are labelled historical and point at the
+current docs.
 
 ## Verification
 

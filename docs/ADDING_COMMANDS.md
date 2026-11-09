@@ -1,5 +1,9 @@
 # BMUX - Adding Commands
 
+**Version 0.6.0** — commands live in `content/commands.js`, the `.bmux` format
+in `content/scripts.js`; a command written to these rules is usable from the
+console, the keys *and* a script without extra work.
+
 ## Overview
 
 Every BMUX command is defined once, in `content/commands.js`, in the
@@ -180,7 +184,7 @@ Overlay commands use the client primitives rather than touching the DOM:
 | `appendPaneOutput(pane, text, kind)` | Append a block to a pane console (`'command'` or `'result'`) |
 | `setPaneConsoleOpen(pane, open)` / `togglePaneConsole(pane)` | Open, close or toggle the pane console |
 | `clearPaneConsole(pane)` | Empty the pane console scrollback |
-| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 70% of the pane) |
+| `setPaneConsoleHeight(pane, px)` | Set the console height (clamped to 40px … 90% of the pane) |
 | `describeElement(element)` | `TAG#id.class "snippet"` for a matched element |
 | `focusDirection(dir)` | `{ ok, pane, wrapped }` or `{ ok: false, message }` |
 | `newWindow()` | Reset to a single pane |

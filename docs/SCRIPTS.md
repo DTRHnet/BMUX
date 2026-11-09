@@ -1,5 +1,7 @@
 # `.bmux` script files
 
+**Version 0.6.0** — scripts shipped in 0.6.0; the format is stable within 0.6.x.
+
 A `.bmux` file is a list of commands that BMUX runs in order, one line at a time,
 with `sleep` between the steps. It is how you record a demo, how you show someone
 a layout without describing it, and how you turn a long sequence of commands you

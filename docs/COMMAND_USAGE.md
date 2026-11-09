@@ -1,5 +1,9 @@
 # BMUX Command Usage Guide
 
+**Version 0.6.0** — 44 commands. Every command below is what the shipped
+`content/commands.js` defines; the `.bmux` script format has its own guide
+([SCRIPTS.md](SCRIPTS.md)).
+
 Every command in BMUX is defined once, in `content/commands.js`. The toolbar, the
 debug console, the `:` line, each pane's input and the key bindings all run those
 same commands through one dispatcher, so a command behaves identically wherever
@@ -41,7 +45,7 @@ command:
 | `⤢` / `⤡` | `resize-pane -Z` — maximize that pane, or restore the layout |
 
 ### Debug console (floating window, `$` prompt)
-Runs any command against the **active pane** (blue border) and keeps a scrollback
+Runs any command against the **active pane** (the ice-cyan focus ring) and keeps a scrollback
 of every line and result. Drag it by its header, resize it from its corner or bottom
 edge — and note it is **hidden by default** now (`debug on|off`), with `verbose on`
 mirroring its output into the focused pane instead.
@@ -91,12 +95,18 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 | `Alt+←` `Alt+→` `Alt+↑` `Alt+↓` | `resize-pane -L/-R/-U/-D 2` | same |
 | `z` / `Shift+z` | `resize-pane -Z` (zoom toggle) | same |
 | `l` | `log toggle` (this pane's console) | same |
-| `keys` | *(command)* list the last key events and their resolution | same |
 | `q` | `display-panes` | same |
 | `o` | `cycle-pane next` | same |
 | `;` | `last-pane` | same |
 | `Space` | `next-layout` | same |
-| `Esc` | `control-mode off` | — |
+| `Esc` | `escape` — clear filter highlights, else leave Control Mode | — |
+
+Both tables also carry the alias forms, because keyboards disagree about what
+Shift+5 and Shift+' report: `%`, `Shift+Digit5`, `Digit5` and `5` all split
+horizontally; `"`, `Shift+Quote`, `Quote` and `'` all split vertically. `z` and
+`Shift+z` both zoom. `keys` prints the last twelve events with the raw `key`,
+`code`, modifiers and the command each resolved to, so a shortcut that does not
+fire can be diagnosed rather than guessed at.
 
 Keys pressed while the focus is inside a pane's iframe are resolved in that frame
 and relayed to the top frame as a command line (`relay-line` → `execute-line`).
@@ -204,7 +214,7 @@ Rules:
 | Drag the boundary between two panes | Resize that split |
 | Double-click a boundary | Reset that split to 50/50 |
 | Hover a boxed match (after `filter`) | Names it in that pane's status line |
-| Drag a pane console's top edge | Resize that console (minimum 40px, max 70% of the pane) |
+| Drag a pane console's top edge | Resize that console (minimum 40px, max 90% of the pane) |
 | Double-click a pane console's edge | Reset its height to 140px |
 | Drag the floating console's corner | Resize the floating console |
 | Click a pane's `⤢` / `⤡` button | Maximize / restore that pane |
@@ -384,7 +394,7 @@ $ list-panes -j
 ```
 
 ### `focus-pane <number|%id|up|down|left|right>`
-Focuses a pane, and that pane gets the blue border and the `[ACTIVE]` marker.
+Focuses a pane, and that pane gets the focus ring and the `[ACTIVE]` marker.
 
 ```
 $ focus-pane 2        # by number

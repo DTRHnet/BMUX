@@ -4,7 +4,7 @@
 
 ## Activation
 ```
-Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, blue border); again to turn it off
+Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, inset ring); again to turn it off
 Extension Icon - The same: one click activates, another hides
 ```
 
@@ -154,7 +154,7 @@ Layout              - Cycle layout presets
 
 ## Mouse
 ```
-Click a pane / its iframe   - Focus it (blue border)
+Click a pane / its iframe   - Focus it (ice-cyan ring)
 Drag a boundary             - Resize the split
 Double-click a boundary     - Reset that split to 50/50
 Hover a boxed match         - Names it in that pane's status line
@@ -192,7 +192,7 @@ status line and turns that box green. Same-origin panes only.
 
 ## Focusing Panes
 ```
-Click a pane           - Makes it active (blue border)
+Click a pane           - Makes it active (ice-cyan ring)
 Up/Down/Left/Right     - Toolbar buttons, or arrow keys in Control Mode
 q then a digit         - display-panes: numbers over the panes
 > focus-pane right     - Same thing from any command input
@@ -272,12 +272,12 @@ Changing layout never reloads the pages in the panes.
 ```
 $ help              - Same commands as pane input
 $ list-panes        - Every pane, numbered and identified
-$ source            - Affects active pane (blue border)
+$ source            - Affects active pane (ringed)
 [Drag the header to move console]
 ```
 
 ## Tips
-- **Click a pane** to make it active (blue border)
+- **Click a pane** to make it active (ice-cyan ring)
 - **The status bar** shows the focused pane and its size, e.g.
   `pane 2 %2 · 30%x100%`, plus `· ZOOM` while zoomed
 - **Each move logs its result** in the debug console, e.g.

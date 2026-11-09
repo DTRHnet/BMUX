@@ -2,7 +2,7 @@
 
 **Version 0.6.0**
 
-A Chrome/Firefox extension inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
+A Chrome extension (Manifest V3) inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
 ![BMUX Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -573,7 +573,7 @@ scripting:
 | `l` | `log toggle` (open/close this pane's console) |
 | `Space` | `next-layout` |
 | `:` | `command-prompt` |
-| `Esc` | Exit Control Mode (or cancel `display-panes`) |
+| `Esc` | `escape`: clear filter highlights if any, else leave Control Mode |
 
 `%`, `Shift+5` and `5` all split horizontally (`"`, `Shift+'` and `'` vertically) —
 the tables carry layout-independent aliases, because keyboards disagree about which

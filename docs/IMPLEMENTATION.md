@@ -1,20 +1,27 @@
 # BMUX Implementation Summary
 
-## Current Status (0.1.0)
+**Version 0.6.0** — this describes the shipped code, not a plan. Where a section
+records history (the popup that used to exist, the layouts that used to be thrown
+away on reload), it says so.
 
-BMUX is fully functional with the following features implemented.
+## Current Status (0.6.0)
 
-### 1. **Popup Control**
-Located in the browser extension icon menu, you can:
-- **Show/Hide Overlay**: Toggle the BMUX interface on/off manually
-- **Toggle Control Mode**: Enter/exit keyboard command mode
-- **New Session**: Create a new BMUX session
+BMUX is fully functional. 44 commands across two scopes, a ratio-driven split tree
+that never reloads a page, visual filters, clickable prompts, per-pane consoles that
+can be detached, per-tab persistence with named layouts, and `.bmux` script files.
+
+### 1. **Activation**
+There is no popup and no session object. One action — the toolbar icon
+(`chrome.action.onClicked`) or `Alt+Shift+B` — shows the overlay *and* enters
+Control Mode, and doing it again hides the overlay and leaves Control Mode.
+`detach` (`d`) toggles the same state from the keyboard. The legacy `popup/`
+directory and the dead `STATE` / `createSession` machinery were removed in 0.5.0.
 
 ### 2. **Global Hotkey (Alt+Shift+B)**
 - Registered in `manifest.json` as a browser-level shortcut
 - Cannot be blocked by websites
-- Toggles "Control Mode" on/off
-- Works across all tabs and iframes
+- Toggles BMUX: overlay plus Control Mode on, the same keys off again
+- Works across all tabs and iframes (a pane's iframe keeps listening)
 
 ### 3. **Control Mode**
 Activation is one state: clicking the toolbar icon (`chrome.action.onClicked`) or
@@ -22,7 +29,7 @@ pressing `Alt+Shift+B` shows the overlay *and* enters Control Mode; doing it aga
 hides the overlay and leaves Control Mode. There is no popup. When activated:
 - A quiet one-pixel inset ring around the overlay (`.bmux-control-active`) and a
   tinted `CONTROL MODE` chip in the status bar — not a thick blue frame
-- Status bar shows `[CONTROL MODE]` with blue background
+- The status bar's left segment reads `CONTROL MODE` (tinted) or `NORMAL`
 - All keyboard input is captured by BMUX, except while a console or pane input
   has focus (typing always wins)
 - Keys resolve through `BMUX_KEYBINDINGS.control` in `content/commands.js`:
@@ -83,8 +90,9 @@ that is merely hidden keeps running). Handles are hidden while zoomed, and a
 directional focus move unzooms first so it reads the real geometry.
 
 ### 7. **Focus model**
-- The active pane is the one with the `active` class (blue border), always set
-  explicitly by `setActivePane`.
+- The active pane is the one with the `active` class (an ice-cyan outline and a
+  brighter footer, the frost palette's equivalent of tmux's highlighted border),
+  always set explicitly by `setActivePane`.
 - Sources: a split, a click on the pane, a click inside its iframe (detected from
   the window blur with the iframe as `activeElement`), `focus-pane`,
   `cycle-pane`, `last-pane`, `display-panes`, and focus moving to a survivor after
@@ -357,9 +365,8 @@ the filter commands and leaves the clickable card to the person driving the demo
 ## How to Use
 
 ### Installation
-1. Load the extension in Chrome/Firefox:
-   - Chrome: `chrome://extensions` → Enable Developer Mode → Load Unpacked
-   - Firefox: `about:debugging` → Load Temporary Add-on
+1. Load the extension in Chrome (the only browser this has been run in):
+   - `chrome://extensions` → Enable Developer Mode → Load Unpacked
 2. Navigate to the BMUX folder and select it
 
 ### Basic Workflow
@@ -370,7 +377,9 @@ the filter commands and leaves the clickable card to the person driving the demo
 4. **Arrange**: `select-layout main-vertical`, `swap-pane 1 2`, `rotate-window`
 5. **Focus**: click, arrows, `q` + digit, `focus-pane %2`, `o` / `;`
 6. **Zoom**: `z`
-7. **Exit**: `d`, `Detach`, or the toolbar icon again
+7. **Keep it**: it is saved per tab as you go (`persist status`), named layouts
+   with `save-layout work`, `.bmux` scripts with `script file` / `script demo`
+8. **Exit**: `d`, `Detach`, or the toolbar icon again
 
 ## Architecture
 
@@ -436,15 +445,19 @@ to `content/commands.js` only.
 
 ## Browser Compatibility
 
-### Chrome/Edge (Manifest V3)
-- ✅ Fully supported
-- Global hotkey: `Alt+Shift+B`
-- Commands API works perfectly
+### Chromium (Manifest V3) - verified
+- Chromium 150 with the extension unpacked: the whole verification suite runs here
+  (layout, keys, filters, prompts, persistence, scripts, a real `page.reload()`).
+- Global hotkey `Alt+Shift+B`, `chrome.action.onClicked`, `commands`,
+  `declarativeNetRequest`, `storage.session` all exercised.
+- Chrome and Edge are the same engine; only Chromium has been tested.
 
-### Firefox
-- ✅ Mostly supported (use Manifest V2 for better support)
-- May need to adjust `manifest.json` for full compatibility
-- Global hotkeys work via `commands` API
+### Firefox - not verified
+- The manifest is Manifest V3 with `background.service_worker`, which Firefox reads
+  differently (`background.scripts` / event pages), and `declarativeNetRequest`
+  support differs by version.
+- No test has been run on Firefox, so the honest statement is *untested*, not
+  supported. It is on the roadmap, not in this release.
 
 ## Known Issues and Limitations
 
@@ -461,6 +474,13 @@ to `content/commands.js` only.
 9. **Filter boxes are measured when drawn**: pages that move elements without
    mutating the DOM (CSS transitions) need the filter re-run
 10. **`kill-pane` refuses the last pane**; use `new-window` to reset
+11. **A `.bmux` script cannot click a prompt**: it waits for a human answer or the
+   15 s timeout. The demos pass `-y` instead
+12. **A script does not survive a navigation**: a reload or a new tab destroys the
+   runner, so the persistence round trip stays manual; the script panel is not
+   saved with the layout either
+13. **Scripts are not code**: no variables, loops or branches, and no file or
+   network access — a script is a list of commands you could have typed
 
 ## Troubleshooting
 
@@ -468,7 +488,8 @@ to `content/commands.js` only.
 1. Reload extension in `chrome://extensions`
 2. Refresh the web page
 3. Open browser console (F12) and check for errors
-4. Verify content script loaded: Look for "BMUX Client Loading..." in console
+4. Verify content script loaded: look for `BMUX Client Loading...` (and the
+   `TOP`/`FRAME` line after it) in the page console
 
 ### "Keyboard shortcuts don't work"
 1. Check if Control Mode is active (inset ring, `CONTROL MODE` chip in the status bar)

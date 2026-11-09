@@ -60,6 +60,21 @@ sequence you keep typing into one word.
   every line remains something you could have typed.
 - The panel is not persisted; a running script ends with the page.
 
+### Docs
+
+- Every current document now states its version: COMMAND_USAGE, ADDING_COMMANDS,
+  SCRIPTS, CROSS_ORIGIN, CSP_HANDLING and IMPLEMENTATION lead with **0.6.0**, and
+  the two historical documents (DESIGN, UPDATE_STATUS) say so explicitly and point
+  at the current ones.
+- Stale claims corrected while sweeping: the IMPLEMENTATION "Popup Control / New
+  Session" section (the popup was removed in 0.5.0) is now the activation story; the
+  status bar's `[CONTROL MODE]`/blue-border wording is the frost chip and ring; the
+  console clamp is 90% everywhere (ADDING_COMMANDS still said 70%); `Esc` is
+  documented as the `escape` command (COMMAND_USAGE said `control-mode off`); the
+  alias keys (`Shift+5`/`5`, `Shift+'`/`'`) are in the key guide; and Firefox
+  compatibility is described as *untested* instead of "mostly supported", matching
+  the roadmap.
+
 ### Verification
 
 - `node --check` clean; CRLF kept everywhere; `manifest.json` parses as 0.6.0.

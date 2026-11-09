@@ -1,5 +1,9 @@
 # BMUX Implementation Update
 
+> **Historical (0.0.1).** A snapshot of the first working command registry, when
+> there were six commands. Kept as a record; for the current state see
+> [IMPLEMENTATION.md](IMPLEMENTATION.md) (0.6.0, 44 commands).
+
 ## Current Status
 
 I've successfully implemented the following:
