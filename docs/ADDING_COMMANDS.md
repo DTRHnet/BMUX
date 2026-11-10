@@ -1,6 +1,6 @@
 # BMUX - Adding Commands
 
-**Version 0.9.0** — commands live in `content/commands.js`, the `.bmux` format
+**Version 1.0.0** — commands live in `content/commands.js`, the `.bmux` format
 in `content/scripts.js`; a command written to these rules is usable from the
 console, the keys *and* a script without extra work.
 

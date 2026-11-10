@@ -8,7 +8,7 @@
 </p>
 
 <p align="center">
-  <a href="manifest.json"><img alt="version 0.9.0" src="https://img.shields.io/badge/version-0.9.0-0e7490?style=flat-square&labelColor=083344"></a>
+  <a href="manifest.json"><img alt="version 1.0.0" src="https://img.shields.io/badge/version-1.0.0-0e7490?style=flat-square&labelColor=083344"></a>
   <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-15803d?style=flat-square&labelColor=052e16"></a>
   <img alt="Manifest V3" src="https://img.shields.io/badge/manifest-v3-334155?style=flat-square&labelColor=0f172a">
   <img alt="70 commands" src="https://img.shields.io/badge/commands-70-1d4ed8?style=flat-square&labelColor=172554">
@@ -22,64 +22,74 @@
   command line that can look inside the pages.</em>
 </p>
 
-> **New in 0.9.0:** the extension menu is back — **Toggle** and **Settings**, with a
-> toolbar you can edit. Any command can become a top-menu button, verified against the
-> registry before it is saved. And `help` is now a real help system: box-drawn tables
-> for every command, and `help <command>` for usage, arguments, flags, examples, notes
-> and what to read next.
->
-> **New in 0.8.0:** **seven palettes** (`frost` stays the default: `midnight`, `amber`,
-> `light`, `nord`, `rose`, `classic`), **box-drawn tables** for every listing, and
-> clicking a pane's *page* — not just its footer — now focuses that pane. Plus the
-> inspection commands: BMUX can *look inside* a pane. `list-cookies`, `list-storage`,
-> `list-forms`, `list-scripts`, `list-resources`, `outline`, `find-text` and `eval`
-> report what the page really contains — including **cross-origin** panes, because
-> the question is asked inside the pane's own frame. Cookies are brokered through
-> the browser's `cookies` API, so `httpOnly` ones show up and `set-cookie` /
-> `delete-cookie` work. Cookie jars export as Netscape files for `curl`, `wget` and
-> `yt-dlp`.
->
-> **New in 0.7.0:** a tab can hold several **windows** — named layouts you switch
-> between instantly (`n` / `p`, `select-window`, or the chip in the status bar)
-> without reloading a single page. Each window keeps its own split tree, focus,
-> zoom and consoles, all of it restored on reload. `new-window` finally means what
-> it says; the old reset is now `reset-layout`.
->
-> **New in 0.6.0:** commands can live in a file. A `.bmux` script runs a list of
-> commands with `sleep` between them — `script demo` runs an 87-command tour of the
-> whole extension in under a minute, `script file` loads your own, and `sleep 2`
-> paces it (`sleep 250ms` works too). One panel, one Run button, one Stop button;
-> the current command is always on screen.
->
-> **New in 0.5.0:** your layout survives a reload. Splits, ratios, URLs, titles,
-> focus, zoom and console state are saved per tab and restored on load, named
-> layouts can be saved with `save-layout` / `restore-layout`, and `persist off`
-> switches all of it off. The layout *follows the page* when the tab navigates
-> elsewhere, and a brand-new tab inherits the newest layout.
->
-> **New in 0.4.0:** commands chain with `;` (`filter img; filter a`), commands can
-> ask questions you **click** (cards with buttons, digits or `y`/`n`), `filter`
-> draws then narrows in rounds (*inside a container*, *text contains*, *visible
-> only*, *unique targets*), filters accumulate, and every pane has its own `⤢`
-> maximize button.
->
-> **New in 0.3.0:** the per-pane console is a real scrollback (opens, stays
-> open, scrolls, drag to resize, `l` or `log toggle`), `filter` understands preset
-> words (`filter links internal`) and asks yes/no before boxing a preset or a big
-> result, and `Shift+z` maximizes a pane like tmux.
->
-> **New in 0.2.0:** `filter` is now a visual tool — it boxes every match inside
-> the pane, names each one in the pane's status line as you hover it, and clears
-> with `Esc` or `filter -c`.
->
-> **New in 0.1.0:** percentage splits, mouse-draggable split boundaries, zoom,
-> layout presets, real `kill-pane`, pane titles, swap/rotate, `display-panes`,
-> `capture-pane`, and a ratio-driven layout engine that never reparents a pane —
-> so re-layouting does not reload anything. See [CHANGELOG.md](CHANGELOG.md).
+## Why BMUX?
+
+I've been a tmux user for a long time. Long enough that panes, windows, sessions,
+keyboard-driven navigation and the general philosophy behind terminal multiplexing
+have become second nature to me.
+
+Over the years, I've spent a considerable amount of time experimenting with terminal
+workflows, combining tools like tmux, fzf, reptyr and various TUI libraries to build an
+environment that works the way I think. I've written about some of that exploration
+here:
+
+**[FZF Is An Absolute Command Line Powerhouse](https://www.dtrh.net/blog/2501/FZF-is-an-Absolute-Command-Line-Powerhouse)**
+
+Eventually, I started thinking: why should that workflow be limited to the terminal?
+
+The browser has become one of the most important tools in modern computing. We spend
+enormous amounts of time researching, developing, debugging, managing projects and
+working across dozens of tabs. Yet the traditional browser experience still feels
+surprisingly disconnected from the workflows we've spent years refining in the terminal.
+
+**BMUX is my attempt to change that.**
+
+Inspired by tmux, BMUX brings a multiplexer-style workflow into the browser. Multiple
+panes, persistent layouts, keyboard-driven interaction, windows, commands and the
+ability to inspect and interact with pages without constantly switching between tabs.
+
+This isn't intended to replace tmux, nor is it an attempt to turn the browser into
+something it isn't. It's about taking a workflow I genuinely enjoy using and applying
+its best ideas somewhere they make just as much sense.
+
+I'm building BMUX because I want it to be something I'd actually use every day.
+Something powerful, flexible and extensible, without sacrificing usability.
+
+It's an ongoing project, and there's plenty of room to experiment, improve and build
+upon what's here.
+
+If you enjoy terminal workflows, browser tooling, automation or simply making software
+work a little differently, you're welcome to explore the project and get involved.
+
+— KBS <admin@dtrh.net>
 
 ---
 
-## 📸 Screenshots
+## Table of Contents
+
+| **Understand** | **Use** | **Reference** |
+|---|---|---|
+| [Why BMUX?](#why-bmux) | [Quick start](#quick-start) | [Documentation](#documentation) |
+| [At a glance](#at-a-glance) | [Features](#features) | [Project structure](#project-structure) |
+| [Design philosophy](#design-philosophy) | [Commands](#commands) | [Privacy & security](#privacy--security) |
+| [Known limitations](#known-limitations) | [How the layout works](#how-the-layout-works) | [Contributing](#contributing) |
+| [Roadmap](#roadmap) | | [License](#license) |
+| | | [Acknowledgments](#acknowledgments) |
+| | | [Support](#support) |
+
+> **New in 1.0.0:** the first stable release. The extension menu (**Toggle** and
+> **Settings**) with a toolbar you can edit from a catalog of every real command, the
+> version in the top menu, categorised `help` with a full page per command, seven
+> palettes, box-drawn tables, windows (several named layouts per tab), `.bmux` script
+> files, and pane inspection — cookies including `httpOnly`, storage, forms, scripts,
+> resources, an outline, text search and page-world `eval`. 70 commands, all documented,
+> all scriptable.
+>
+> The road here is in [RELEASE_1.0.0.md](RELEASE_1.0.0.md) (the release document),
+> [RELEASE_NOTES.md](RELEASE_NOTES.md) (per version) and
+> [CHANGELOG.md](CHANGELOG.md) (the detailed record).
+
+## At a glance
 
 Real captures: Chromium 150 running the unpacked extension against
 [dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders. The freshest
@@ -89,7 +99,7 @@ in the middle pane.
 **Three panes on the blog.** The blog index, a real article, and `/tools` — built with
 two `split-window` calls without reloading anything. The frost palette, Control Mode's
 inset ring and `CONTROL MODE` chip, the window chip (`1:1`), the version in the top
-menu (`v0.9.0`), and per-pane footers with title, `[number id]` badge and the console /
+menu (`v1.0.0`), and per-pane footers with title, `[number id]` badge and the console /
 detach / maximize buttons.
 
 ![Three panes on the dtrh.net blog: the index, an article, and /tools](docs/images/11-blog-layout.png)
@@ -163,7 +173,7 @@ with the layout. Frost is the default, and `theme next` cycles.
 
 ---
 
-## 🚀 Quick Start
+## Quick start
 
 ### Installation
 
@@ -172,6 +182,9 @@ with the layout. Frost is the default, and `theme next` cycles.
 3. **Enable Developer Mode** (top-right toggle)
 4. **Load Unpacked**: Click and select the `BMUX` folder
 5. **Refresh** any open tabs to activate
+
+Every step of that, plus upgrade notes and the honest list of limits, is also in
+**[RELEASE_1.0.0.md](RELEASE_1.0.0.md)**.
 
 ### Basic Usage
 
@@ -191,7 +204,7 @@ with the layout. Frost is the default, and `theme next` cycles.
 
 ---
 
-## ✨ Features
+## Features
 
 ### 🪟 Splitting with real sizes
 - **Horizontal splits** (`%`) - Side-by-side panes
@@ -270,7 +283,7 @@ registers** — so a button can only be saved if its command actually exists.
 
 - **Built in**: `Split H`, `Split V`, `New Window`, `Panes`, `Windows`, `Cookies`,
   `Storage`, `Forms`, `Outline`, the four focus buttons, `Zoom`, `Layout`, `Detach`.
-- The wordmark carries the extension version (`BMUX v0.9.0`, read from the manifest),
+- The wordmark carries the extension version (`BMUX v1.0.0`, read from the manifest),
   so a bug report always has a number attached.
 - **Add anything**: `list-cookies -j`, `outline`, `theme midnight`, `script demo`,
   `filter links --visible`, or a command of your own.
@@ -709,7 +722,7 @@ Graceful handling of cross-origin restrictions:
 
 ---
 
-## 📋 Commands
+## Commands
 
 Commands can be run from the toolbar, the debug console (`$` prompt), the `:`
 line in Control Mode, or a pane's input (`>` prompt). One dispatcher runs them all:
@@ -879,7 +892,7 @@ a command line, so keys are not a second code path.
 
 ---
 
-## 🗂️ How the layout works
+## How the layout works
 
 ```
         split(row, 0.3)
@@ -899,30 +912,39 @@ a command line, so keys are not a second code path.
 
 ---
 
-## 📚 Documentation
+## Documentation
 
-### User Guides
-- **[Command Usage Guide](docs/COMMAND_USAGE.md)** - Every command, every entry point, mouse and layouts
-- **[Implementation Overview](docs/IMPLEMENTATION.md)** - Architecture, layout engine, message flow
+### Start here
+- **[Quick reference](QUICKSTART.md)** - every key, command and gesture on one page
+- **[Command usage guide](docs/COMMAND_USAGE.md)** - every command, every entry point, mouse, layouts, persistence, inspection
+- **[Release notes](RELEASE_NOTES.md)** - what each version added, and the [1.0.0 release](RELEASE_1.0.0.md)
+- **[Changelog](CHANGELOG.md)** - the detailed, per-version record
 
-### Developer Guides
-- **[Scripts](docs/SCRIPTS.md)** - The `.bmux` format: `sleep`, the panel, recording a demo
-- **[Adding Commands](docs/ADDING_COMMANDS.md)** - How to create custom commands
-- **[Cross-Origin Handling](docs/CROSS_ORIGIN.md)** - Understanding browser restrictions
-- **[CSP Handling](docs/CSP_HANDLING.md)** - How iframe blocking is bypassed
+### Going deeper
+- **[Scripts](docs/SCRIPTS.md)** - the `.bmux` format: `sleep`, the panel, writing and recording a demo
+- **[Implementation overview](docs/IMPLEMENTATION.md)** - architecture, layout engine, message flow, every mechanism
+- **[Adding commands](docs/ADDING_COMMANDS.md)** - the registry, the help metadata, making a command script-friendly
+- **[Cross-origin handling](docs/CROSS_ORIGIN.md)** - what works across origins and why
+- **[CSP handling](docs/CSP_HANDLING.md)** - how iframe blocking is bypassed
+- **[Contributing](CONTRIBUTING.md)** - how to get involved, and what makes a good pull request
 
-### Technical Reference
-- **[Design Documentation](docs/DESIGN.md)** - Original design specification (historical)
-- **[Update Status](docs/UPDATE_STATUS.md)** - 0.0.1 progress tracker (historical)
+### Historical
+- **[Design documentation](docs/DESIGN.md)** - the original design specification (pre-0.1.0)
+- **[Update status](docs/UPDATE_STATUS.md)** - the 0.0.1 progress tracker
 
 ---
 
-## 🗂️ Project Structure
+## Project structure
 
 ```
 BMUX/
-├── manifest.json           # Extension configuration (v0.9.0)
+├── manifest.json           # Extension configuration (v1.0.0)
 ├── rules.json              # CSP header removal rules
+├── CONTRIBUTING.md         # How to contribute, and what a good PR looks like
+├── RELEASE_1.0.0.md        # The 1.0.0 release document
+├── RELEASE_NOTES.md        # Release notes, newest first
+├── CHANGELOG.md            # The detailed, per-version record
+├── QUICKSTART.md           # One page: keys, commands, gestures
 ├── background/
 │   └── main.js            # Service worker (state, message relay)
 ├── content/
@@ -960,7 +982,7 @@ key-to-action switch.
 
 ---
 
-## 🎨 Design Philosophy
+## Design philosophy
 
 ### Not a Direct TMUX Clone
 BMUX is **inspired by** TMUX but adapted for the browser:
@@ -981,7 +1003,7 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 
 ---
 
-## 🔐 Privacy & Security
+## Privacy & security
 
 ### What BMUX Does
 - ✅ Removes CSP/X-Frame-Options headers for panes
@@ -1028,18 +1050,18 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 
 ---
 
-## 🐛 Known Limitations
+## Known limitations
 
 ### Browser Restrictions
 - **Some sites** may use JavaScript iframe busters (can't be bypassed)
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.7.0)
+### Current Version (1.0.0)
 - ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console
-  scrollback (transient UI); console open/height is
+  scrollback (transient UI); console open/height *is* persisted
 - ⏳ **A new tab inherits the newest layout from another tab**, so it copies the
   shape (fresh pages), not the live pages; only one layout is offered
 - ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
@@ -1079,11 +1101,11 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - ⏳ **Chained filters keep appending** until `filter -c` or `--replace`
 - ⏳ **Presets depend on the page's markup** — `prices`/`comments` need
   conventional class names, so plain selectors are the fallback
-- ⏳ `kill-pane` refuses the last pane (use `new-window` to reset)
+- ⏳ `kill-pane` refuses the last pane (use `reset-layout` to start the window over)
 
 ---
 
-## 🛣️ Roadmap
+## Roadmap
 
 ### Version 0.1.0
 - [x] Ratio-driven layout engine; no page reloads on split or re-layout
@@ -1150,7 +1172,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] A frame-side inspection relay, so the above work on cross-origin panes
 - [x] Background cookie broker: `httpOnly` visibility, inject and delete
 
-### Version 0.9.0
+### Version 1.0.0
 - [x] Extension menu: **Toggle** and **Settings** (a real popup, frost-styled)
 - [x] Toolbar buttons are data (`label` + `command`), editable in a settings page
 - [x] Add/remove/reorder buttons, verified against the command registry, capped at 24
@@ -1176,33 +1198,50 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions welcome! Areas where help is needed:
+Bug reports, ideas, documentation fixes and pull requests are welcome — the full
+expectations are in **[CONTRIBUTING.md](CONTRIBUTING.md)**. In short: keep a pull
+request focused, explain the problem before the diff, include how you tested it, and
+update the docs that your change makes stale.
 
-1. **Testing** - Try it on different sites, report issues
-2. **Commands** - Create useful commands ([guide](docs/ADDING_COMMANDS.md))
-3. **Documentation** - Improve guides and tutorials
-4. **Design** - UI/UX enhancements
-5. **Code** - Bug fixes and new features
+Areas where help is especially useful:
+
+1. **Testing** - try it on different sites and browsers, report what breaks
+2. **Commands** - write one ([guide](docs/ADDING_COMMANDS.md)); it shows up in `help`
+   and in the toolbar editor automatically
+3. **Documentation** - the guides, the examples, the screenshots
+4. **Design** - UI/UX, palettes, accessibility
+5. **Code** - bug fixes, regressions, performance
 
 ---
 
-## 📜 License
+## License
 
 MIT License - See LICENSE file for details
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
-- **TMUX** - The original terminal multiplexer that inspired this project
-- **Chrome Extensions** - For the powerful browser APIs
-- **Community** - For feedback and feature requests
+- **The tmux project and its maintainers** — thank you. BMUX exists because tmux got
+  the model right: a split tree, panes that keep running, one key to move, one command
+  line to rule them all. BMUX borrows its layout, its command names (`split-window`,
+  `kill-pane`, `display-panes`, `new-window`, `prefix + Z` …) and its manners on
+  purpose, so that time spent in tmux pays off here. It is not tmux and does not try to
+  replace it; it is a thank-you note with a browser attached.
+  [github.com/tmux/tmux](https://github.com/tmux/tmux)
+- **The terminal-tooling community** — `fzf`, `reptyr`, the TUI libraries and everyone
+  who writes about their setup: the workflows in [Why BMUX?](#why-bmux) come straight
+  from that tradition.
+- **Chrome extensions platform** — `declarativeNetRequest`, `chrome.scripting`,
+  `chrome.storage`, `chrome.cookies`: the APIs that make panes, persistence and
+  inspection possible without a native helper.
+- **Everyone who reported a bug, asked for a command or sent a fix.**
 
 ---
 
-## 📞 Support
+## Support
 
 - **Issues**: [GitHub Issues](https://github.com/dtrhnet/BMUX/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/dtrhnet/BMUX/discussions)
@@ -1211,4 +1250,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.9.0 | Last Updated: November 2026
+Version 1.0.0 · Last updated November 2026

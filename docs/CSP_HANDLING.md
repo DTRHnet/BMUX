@@ -1,6 +1,6 @@
 # BMUX CSP (Content Security Policy) Handling
 
-**Version 0.9.0** — the rules in `rules.json` and the `declarativeNetRequest`
+**Version 1.0.0** — the rules in `rules.json` and the `declarativeNetRequest`
 permission as shipped.
 
 ## The Problem
