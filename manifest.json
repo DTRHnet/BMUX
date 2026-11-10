@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "BMUX",
-    "version": "0.8.0",
+    "version": "0.9.0",
     "description": "A TMUX-inspired Browser Multiplexer",
     "permissions": [
         "tabs",
@@ -19,7 +19,12 @@
         "service_worker": "background/main.js"
     },
     "action": {
-        "default_title": "Activate BMUX"
+        "default_title": "BMUX menu — toggle or settings",
+        "default_popup": "popup/popup.html"
+    },
+    "options_ui": {
+        "page": "settings/settings.html",
+        "open_in_tab": true
     },
     "content_scripts": [
         {
@@ -54,7 +59,7 @@
                 "default": "Ctrl+Shift+L",
                 "mac": "Command+Shift+L"
             },
-            "description": "Activate BMUX (overlay + Control Mode)"
+            "description": "Open the BMUX menu (toggle, settings)"
         },
         "toggle-bmux-mode": {
             "suggested_key": {

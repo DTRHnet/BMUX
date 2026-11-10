@@ -5,6 +5,91 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-11-10
+
+The extension menu is back, the toolbar is yours to edit, and `help` became a real
+help system.
+
+### Added
+
+- **The extension menu**: clicking the toolbar icon opens `popup/popup.html` with
+  **Toggle** (show or hide the overlay in the tab you are looking at) and **Settings**
+  (open the toolbar editor). `Alt+Shift+B` still toggles without the menu, and
+  `Ctrl+Shift+L` opens the menu from the keyboard. The manifest declares
+  `default_popup`, so `chrome.action.onClicked` no longer fires — activation still has
+  exactly one implementation (`toggle()` in the content script).
+- **An editable toolbar.** The overlay's buttons are data — `{ label, command }` pairs
+  stored in `chrome.storage.local` (default: 16 buttons, cap 24). `settings/` lists
+  them, moves them up and down, deletes them, and adds new ones from a catalog of every
+  registered command: the page loads `content/scripts.js` + `content/commands.js` and
+  validates against the real `BMUX_COMMANDS`, showing the usage of whatever is typed
+  and refusing unknown commands with the reason. `Load defaults` restores the built-in
+  set; `Save` persists.
+- **New built-in buttons** for the listing commands: `Panes`, `Windows`, `Cookies`,
+  `Storage`, `Forms`, `Outline`.
+- **`help` as a help system.** No argument prints every command in box-drawn tables
+  grouped by scope; `help <command>` prints a full page (summary, usage, arguments
+  table with required flags, flags table, examples, notes, see-also, docs pointer);
+  `help <filter>` searches names and descriptions; `help <alias>` resolves to the
+  command it mirrors. All of it comes from `BMUX_HELP`, metadata next to the registry.
+- Background messages `toolbar-get` / `toolbar-set` / `toolbar-reset` (structural
+  validation: label ≤ 24 chars, command ≤ 120, dedupe, ≤ 24 buttons, always ≥ 1).
+
+### Changed
+
+- `renderToolbar()` draws `#bmux-toolbar-buttons` from the configuration and wires each
+  button to `runCommandAndLog(command)`, so a custom button behaves exactly like the
+  same command typed. `sanitizeToolbar()` re-checks every entry against the registry
+  and skips (with a log line) any command this build does not know — a stored button
+  cannot render dead.
+- The toolbar markup lost its fixed ids (`#btn-split-h` …); buttons carry
+  `data-command` instead.
+
+### Notes
+
+- The settings page is an options page (`options_ui`, `open_in_tab`), so it works
+  without an active overlay and can be opened from `chrome://extensions` too.
+- A button's command may carry arguments (`list-cookies -j`, `filter links --visible`);
+  only the first token is validated, because the rest is the same line the console
+  would run.
+- `help` output is capped by the table formatter (96 characters by default, 120 for
+  help), so a very long description is ellipsised there and shown in full by
+  `help <command>`.
+
+### Added (second pass)
+
+- **The version, in the top menu.** The wordmark now reads `BMUX v0.9.0`, read from
+  `chrome.runtime.getManifest()`, and the menu popup shows the same number in its
+  footer. A runtime that cannot report it renders no chip rather than a wrong one.
+- **Help categories.** `help` groups commands into ten categories with sub-categories
+  (Layout & panes › Split, kill, reorder / Size & presets / Focus & numbering;
+  Windows; Persistence › This tab / Named layouts; Scripts; Cookies; Storage;
+  Inspection › Page inventory / Code / Pane content & filters; Appearance;
+  Diagnostics; Overlay & input). `help <category>` lists one, `help <category>/<sub>`
+  narrows further, `help overlay` and `help pane` list by scope, and `help cookies/`
+  reaches a category whose name is also a command. Every command carries `category`
+  (and optional `sub`) in `BMUX_HELP`; the harness fails if one is missing.
+- **Three new screenshots** from the dtrh.net blog
+  ([subdomains/blog](https://www.dtrh.net/subdomains/blog)): three panes with a real
+  article in the middle, `filter links` with the refine card, and `outline` +
+  `list-scripts --third-party` in the pane console.
+- **Higher-contrast badges** in the README (darker fills, dark label backgrounds),
+  with the version badge linking to the manifest and the license badge to `LICENSE`.
+
+### Verification
+
+- jsdom: **1194 checks** (56 more) — help overview/detail/filter/alias/unknown,
+  categories and sub-categories, `help overlay`/`help pane`, metadata coverage, the
+  toolbar version chip (present, absent without a manifest, back again), the
+  metadata covering every visible command, the toolbar rendering from the default and
+  from a stored configuration, `sanitizeToolbar` dropping unknown commands and
+  duplicates, and the background `toolbar-get`/`set`/`reset` validation.
+- Chromium 150, unpacked: **188 checks** (15 more) — the toolbar and the menu both show
+  the manifest version, the menu page offers Toggle and Settings, the settings page lists the toolbar and the catalog, refuses
+  `nosuchcommand`, accepts `list-windows -j`, saves it, the overlay renders 17 buttons
+  after a reload, `Load defaults` + `Save` restores 16, and Toggle in the menu
+  activates BMUX in the tab.
+
 ## [0.8.0] - 2026-11-10 (second pass)
 
 Four things that make the release feel finished.

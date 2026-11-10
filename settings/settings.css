@@ -1,0 +1,254 @@
+/* Settings page: the toolbar editor. Frost palette, same variables as the overlay. */
+:root {
+    --bg-deep: #08111c;
+    --bg: #0e1a27;
+    --bg-raised: #132434;
+    --bg-sunken: #0a1520;
+    --line: #1e364b;
+    --text: #dbe9f5;
+    --text-dim: #86a3ba;
+    --accent: #7fd0f0;
+    --accent-strong: #b3e7ff;
+    --accent-soft: rgba(127, 208, 240, 0.16);
+    --accent-line: rgba(127, 208, 240, 0.45);
+    --ok: #9fe8c8;
+    --warn: #ffd98a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0 auto;
+    max-width: 980px;
+    padding: 28px 20px 90px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+header h1 {
+    margin: 0 0 6px;
+    font-size: 22px;
+    letter-spacing: 0.04em;
+    color: var(--accent-strong);
+}
+
+header h1 span {
+    color: var(--text-dim);
+    font-weight: normal;
+    letter-spacing: 0;
+    font-size: 16px;
+}
+
+.lede {
+    margin: 0 0 18px;
+    color: var(--text-dim);
+    max-width: 70ch;
+}
+
+code {
+    font-family: 'Consolas', 'Monaco', monospace;
+    background: var(--bg-sunken);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0 4px;
+    font-size: 12px;
+}
+
+.panel {
+    background: var(--bg-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+
+.panel h2 {
+    margin: 0 0 10px;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+}
+
+.preview {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px;
+    margin-bottom: 10px;
+    border: 1px dashed var(--line);
+    border-radius: 8px;
+    background: var(--bg-sunken);
+    min-height: 38px;
+}
+
+.preview .chip {
+    padding: 2px 8px;
+    border: 1px solid var(--accent-line);
+    border-radius: 5px;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-size: 12px;
+}
+
+table.buttons {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+table.buttons th,
+table.buttons td {
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--line);
+    text-align: left;
+    vertical-align: middle;
+}
+
+table.buttons th {
+    color: var(--text-dim);
+    font-weight: normal;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+table.buttons .col-num { width: 34px; }
+table.buttons .col-actions { width: 150px; }
+
+table.buttons td.command {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 12px;
+    color: var(--accent);
+}
+
+table.buttons td.command.invalid {
+    color: var(--warn);
+}
+
+table.buttons td.command .why {
+    display: block;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 11px;
+}
+
+.row-actions {
+    display: flex;
+    gap: 4px;
+}
+
+button {
+    font: inherit;
+    font-size: 12px;
+    padding: 4px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg-sunken);
+    color: var(--text);
+    cursor: pointer;
+}
+
+button:hover {
+    border-color: var(--accent-line);
+    color: var(--accent-strong);
+}
+
+button.primary {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+    color: var(--accent-strong);
+}
+
+button:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+.add-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.add-row label {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.add-row label.grow { flex: 1 1 320px; }
+
+input[type="text"] {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    padding: 6px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--bg-sunken);
+    color: var(--text);
+    min-width: 160px;
+}
+
+input[type="text"]:focus {
+    outline: none;
+    border-color: var(--accent-line);
+}
+
+.hint { color: var(--text-dim); font-size: 12px; margin: 8px 0 0; }
+.error { color: var(--warn); font-size: 12px; margin: 8px 0 0; }
+.empty { color: var(--text-dim); font-style: italic; margin: 8px 0 0; }
+
+.catalog {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+.catalog .catalog-item {
+    padding: 2px 8px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    background: var(--bg-sunken);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+
+.catalog .catalog-item:hover {
+    border-color: var(--accent-line);
+    color: var(--accent-strong);
+}
+
+footer {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--bg-deep);
+    border-top: 1px solid var(--line);
+}
+
+.status {
+    margin-left: auto;
+    color: var(--text-dim);
+    font-size: 12px;
+}
+
+.status.ok { color: var(--ok); }
+.status.error { color: var(--warn); }

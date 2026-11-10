@@ -524,6 +524,31 @@
 }
 
 /* Toolbar */
+#bmux-toolbar-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-right: 15px;
+  user-select: none;
+}
+
+.bmux-brand-name {
+  font-weight: bold;
+  color: var(--bmux-accent-strong);
+  letter-spacing: 0.06em;
+}
+
+/* The extension version, next to the wordmark: small and quiet. */
+.bmux-brand-version {
+  font-size: 10px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  color: var(--bmux-text-dim);
+  border: 1px solid var(--bmux-line);
+  border-radius: 999px;
+  padding: 0 5px;
+  line-height: 14px;
+}
+
 #bmux-toolbar {
   height: 40px;
   background: var(--bmux-bg);

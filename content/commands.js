@@ -467,6 +467,1646 @@ const BMUX_KEYBINDINGS = {
     }
 };
 
+/**
+ * Help metadata, per command: what `help <command>` prints beyond the one-line
+ * description and the usage string.
+ *
+ * `help` (no argument) builds its tables from the registry itself; a single command
+ * gets this detail. Everything here is data, so a new command can add its own
+ * arguments, flags, examples and notes without touching the help renderer.
+ */
+const BMUX_HELP = {
+    "keys": {
+    "category": "diagnostics",
+        "examples": [
+            "keys"
+        ],
+        "notes": [
+            "Each line shows the raw key, the code the keyboard reported, the modifiers, the mode it was read in and the command it resolved to.",
+            "An unbound key also logs `Unbound key: \u2026` \u2014 that is the fastest way to see what a keyboard actually sends."
+        ],
+        "related": [
+            "info",
+            "debug"
+        ]
+    },
+    "debug": {
+    "category": "diagnostics",
+        "args": [
+            {
+                "form": "on|off|toggle",
+                "description": "show, hide or flip the floating debug window (default: toggle)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "debug on",
+            "debug off"
+        ],
+        "notes": [
+            "The debug window is hidden by default; `verbose on` sends the same output to the focused pane's console instead."
+        ],
+        "related": [
+            "verbose",
+            "info"
+        ]
+    },
+    "verbose": {
+    "category": "diagnostics",
+        "args": [
+            {
+                "form": "on|off|status",
+                "description": "mirror debug output into the focused pane console (default: status)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "verbose on",
+            "verbose status"
+        ],
+        "related": [
+            "debug",
+            "log"
+        ]
+    },
+    "info": {
+    "category": "diagnostics",
+        "args": [
+            {
+                "form": "all|layout|panes|keys|state",
+                "description": "which section to print (default: all)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "info",
+            "info layout",
+            "info state"
+        ],
+        "notes": [
+            "`info state` includes the window count, the active window, theme, verbose, auto-restore and where the layout came from."
+        ],
+        "related": [
+            "keys",
+            "list-panes",
+            "list-windows"
+        ]
+    },
+    "theme": {
+    "category": "appearance",
+        "args": [
+            {
+                "form": "name",
+                "description": "palette to apply: frost (default), classic, midnight, amber, light, nord, rose",
+                "required": false
+            },
+            {
+                "form": "next|prev",
+                "description": "cycle through the palettes",
+                "required": false
+            }
+        ],
+        "examples": [
+            "theme",
+            "theme midnight",
+            "theme next"
+        ],
+        "notes": [
+            "With no argument the palettes are listed with the current one marked; the choice is saved with the layout."
+        ],
+        "related": [
+            "info"
+        ]
+    },
+    "help": {
+    "category": "input",
+        "args": [
+            {
+                "form": "<command>",
+                "description": "show the usage, arguments, flags, examples and notes for one command",
+                "required": false
+            },
+            {
+                "form": "<filter>",
+                "description": "list the commands whose name or description contains the text",
+                "required": false
+            }
+        ],
+        "examples": [
+            "help",
+            "help list-cookies",
+            "help list",
+            "help filter"
+        ],
+        "notes": [
+            "With no argument every command is listed in tables, grouped by scope.",
+            "Hidden aliases (y, n) are left out of the overview but work when typed."
+        ],
+        "related": [
+            "keys",
+            "info"
+        ]
+    },
+    "list-panes": {
+    "category": "layout",
+    "sub": "panes",
+        "flags": [
+            {
+                "flag": "-j, --json",
+                "description": "print the same data as JSON (fractional geometry, active/zoomed flags, URL)"
+            }
+        ],
+        "examples": [
+            "list-panes",
+            "list-panes -j"
+        ],
+        "notes": [
+            "Numbers are layout order (top-to-bottom, left-to-right) and can change; ids (%1, %2) never do.",
+            "Panes of the active window only \u2014 use list-windows for the others."
+        ],
+        "related": [
+            "list-windows",
+            "capture-pane",
+            "display-panes"
+        ]
+    },
+    "focus-pane": {
+    "category": "layout",
+    "sub": "focus",
+        "args": [
+            {
+                "form": "<number>",
+                "description": "1-based number in layout order, as list-panes prints it",
+                "required": true
+            },
+            {
+                "form": "<%id>",
+                "description": "pane id, e.g. %2",
+                "required": true
+            },
+            {
+                "form": "up|down|left|right",
+                "description": "move to the nearest pane in that direction (wraps at the edge)",
+                "required": true
+            }
+        ],
+        "examples": [
+            "focus-pane 2",
+            "focus-pane %3",
+            "focus-pane left"
+        ],
+        "notes": [
+            "Directional focus reads the real pane rectangles and prefers the pane straight ahead over one off to the side.",
+            "It unzooms first, so focus moves against the layout rather than the zoomed pane."
+        ],
+        "related": [
+            "cycle-pane",
+            "last-pane",
+            "display-panes"
+        ]
+    },
+    "last-pane": {
+    "category": "layout",
+    "sub": "focus",
+        "examples": [
+            "last-pane"
+        ],
+        "notes": [
+            "The previous pane is remembered per window; `;` is the key."
+        ],
+        "related": [
+            "cycle-pane",
+            "focus-pane"
+        ]
+    },
+    "cycle-pane": {
+    "category": "layout",
+    "sub": "focus",
+        "args": [
+            {
+                "form": "next|prev",
+                "description": "direction to walk the layout order (default: next)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "cycle-pane",
+            "cycle-pane prev"
+        ],
+        "related": [
+            "last-pane",
+            "focus-pane"
+        ]
+    },
+    "split-window": {
+    "category": "layout",
+    "sub": "panes",
+        "flags": [
+            {
+                "flag": "-h",
+                "description": "split side by side (a new pane to the right)"
+            },
+            {
+                "flag": "-v",
+                "description": "split top to bottom (a new pane below)"
+            },
+            {
+                "flag": "-l <size>",
+                "description": "size of the new pane: 30%, 30 or 0.3 (10\u201390%)"
+            },
+            {
+                "flag": "-b",
+                "description": "put the new pane first (left/top) instead of second"
+            },
+            {
+                "flag": "-d",
+                "description": "keep focus on the pane being split"
+            }
+        ],
+        "examples": [
+            "split-window -h",
+            "split-window -v -l 30%",
+            "split-window -h -b -d"
+        ],
+        "notes": [
+            "The new pane starts on the same URL as the pane it splits; no page is reloaded.",
+            "Capped at 12 panes per window and 24 per tab."
+        ],
+        "related": [
+            "kill-pane",
+            "resize-pane",
+            "select-layout"
+        ]
+    },
+    "kill-pane": {
+    "category": "layout",
+    "sub": "panes",
+        "args": [
+            {
+                "form": "number|%id",
+                "description": "which pane to close (default: the active pane)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "kill-pane",
+            "kill-pane %2"
+        ],
+        "notes": [
+            "The last pane of a window is refused \u2014 use reset-layout to start over."
+        ],
+        "related": [
+            "split-window",
+            "reset-layout"
+        ]
+    },
+    "resize-pane": {
+    "category": "layout",
+    "sub": "sizing",
+        "flags": [
+            {
+                "flag": "-L|-R|-U|-D <percent>",
+                "description": "move the boundary left/right/up/down by that much (default 2)"
+            },
+            {
+                "flag": "-x <size>",
+                "description": "set the focused pane's share outright: 25%, 25 or 0.25"
+            },
+            {
+                "flag": "-Z",
+                "description": "toggle zoom (maximize) for the focused pane"
+            }
+        ],
+        "examples": [
+            "resize-pane -R 5",
+            "resize-pane -x 30%",
+            "resize-pane -Z"
+        ],
+        "notes": [
+            "Shares are clamped to 5\u201395% so a pane can never vanish; dragging a boundary hits the same code."
+        ],
+        "related": [
+            "split-window",
+            "select-layout"
+        ]
+    },
+    "select-layout": {
+    "category": "layout",
+    "sub": "sizing",
+        "args": [
+            {
+                "form": "<preset>",
+                "description": "even-horizontal, even-vertical, main-vertical, main-horizontal or tiled",
+                "required": true
+            }
+        ],
+        "examples": [
+            "select-layout main-vertical",
+            "select-layout tiled"
+        ],
+        "notes": [
+            "Presets rebuild the tree only \u2014 panes are never moved in the DOM, so pages do not reload."
+        ],
+        "related": [
+            "next-layout",
+            "rotate-window"
+        ]
+    },
+    "next-layout": {
+    "category": "layout",
+    "sub": "sizing",
+        "examples": [
+            "next-layout"
+        ],
+        "notes": [
+            "Cycles even-horizontal \u2192 main-vertical \u2192 even-vertical \u2192 main-horizontal \u2192 tiled; Space is the key."
+        ],
+        "related": [
+            "select-layout"
+        ]
+    },
+    "swap-pane": {
+    "category": "layout",
+    "sub": "panes",
+        "args": [
+            {
+                "form": "<a>",
+                "description": "pane to move (number or %id)",
+                "required": true
+            },
+            {
+                "form": "<b>",
+                "description": "pane to swap it with (default: the active pane)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "swap-pane 1 2"
+        ],
+        "related": [
+            "rotate-window",
+            "select-layout"
+        ]
+    },
+    "rotate-window": {
+    "category": "layout",
+    "sub": "panes",
+        "flags": [
+            {
+                "flag": "-r, --reverse",
+                "description": "rotate the other way"
+            }
+        ],
+        "examples": [
+            "rotate-window",
+            "rotate-window --reverse"
+        ],
+        "notes": [
+            "Panes keep their iframes; only their slots change."
+        ],
+        "related": [
+            "swap-pane",
+            "select-layout"
+        ]
+    },
+    "display-panes": {
+    "category": "layout",
+    "sub": "focus",
+        "examples": [
+            "display-panes"
+        ],
+        "notes": [
+            "Numbers appear over the panes for 2 seconds; press a digit to focus that pane. `q` is the key."
+        ],
+        "related": [
+            "focus-pane",
+            "list-panes"
+        ]
+    },
+    "persist": {
+    "category": "persistence",
+    "sub": "tab",
+        "args": [
+            {
+                "form": "on|off|status",
+                "description": "auto-restore for this tab (default: status)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "persist status",
+            "persist off"
+        ],
+        "notes": [
+            "`off` also clears this tab's snapshot and stops writes; named layouts are untouched.",
+            "Layouts follow the tab across navigation, and a new tab inherits the newest one (see inherit)."
+        ],
+        "related": [
+            "inherit",
+            "save-layout",
+            "list-layouts"
+        ]
+    },
+    "inherit": {
+    "category": "persistence",
+    "sub": "tab",
+        "args": [
+            {
+                "form": "on|off|status",
+                "description": "whether a brand-new tab adopts the newest layout (default: status)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "inherit status",
+            "inherit off"
+        ],
+        "related": [
+            "persist",
+            "new-window"
+        ]
+    },
+    "sleep": {
+    "category": "scripts",
+        "args": [
+            {
+                "form": "<seconds>",
+                "description": "how long to wait: 2, 0.5, 2s or 250ms (default 1)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "sleep 2",
+            "sleep 250ms; list-panes"
+        ],
+        "notes": [
+            "A plain command, so it works in a chain and inside a .bmux script. Capped at an hour per call.",
+            "`script stop` cuts a pending sleep short."
+        ],
+        "related": [
+            "script"
+        ]
+    },
+    "script": {
+    "category": "scripts",
+        "args": [
+            {
+                "form": "run",
+                "description": "run what is in the script panel",
+                "required": false
+            },
+            {
+                "form": "file [--run]",
+                "description": "pick a .bmux file from disk (and optionally start it)",
+                "required": false
+            },
+            {
+                "form": "demo",
+                "description": "load the built-in demo and run it",
+                "required": false
+            },
+            {
+                "form": "open|close",
+                "description": "show or hide the panel",
+                "required": false
+            },
+            {
+                "form": "stop",
+                "description": "stop after the current command, cutting a sleep",
+                "required": false
+            },
+            {
+                "form": "status",
+                "description": "panel state, line count, what the runner is doing (default)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "script demo",
+            "script file --run",
+            "script run",
+            "script stop"
+        ],
+        "notes": [
+            "One script runs at a time and a script cannot start another, so `script stop` always means something.",
+            "A script cannot click a prompt (pass -y), cannot survive a navigation, and has no variables or loops."
+        ],
+        "related": [
+            "sleep"
+        ]
+    },
+    "save-layout": {
+    "category": "persistence",
+    "sub": "named",
+        "args": [
+            {
+                "form": "[name]",
+                "description": "single word, no spaces or colons (default: default); newest 30 per site are kept",
+                "required": false
+            }
+        ],
+        "examples": [
+            "save-layout work"
+        ],
+        "related": [
+            "restore-layout",
+            "list-layouts",
+            "delete-layout"
+        ]
+    },
+    "restore-layout": {
+    "category": "persistence",
+    "sub": "named",
+        "args": [
+            {
+                "form": "<name>",
+                "description": "a layout saved for this site",
+                "required": true
+            }
+        ],
+        "examples": [
+            "restore-layout work"
+        ],
+        "related": [
+            "save-layout",
+            "list-layouts"
+        ]
+    },
+    "list-layouts": {
+    "category": "persistence",
+    "sub": "named",
+        "examples": [
+            "list-layouts"
+        ],
+        "related": [
+            "save-layout",
+            "restore-layout",
+            "delete-layout"
+        ]
+    },
+    "delete-layout": {
+    "category": "persistence",
+    "sub": "named",
+        "args": [
+            {
+                "form": "<name>",
+                "description": "the layout to remove",
+                "required": true
+            },
+            {
+                "form": "--all",
+                "description": "remove every layout saved for this site",
+                "required": false
+            }
+        ],
+        "examples": [
+            "delete-layout work",
+            "delete-layout --all"
+        ],
+        "related": [
+            "save-layout",
+            "list-layouts"
+        ]
+    },
+    "new-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "[name]",
+                "description": "what to call the new window (default: its number)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "new-window docs",
+            "new-window"
+        ],
+        "notes": [
+            "Creates a window: another layout in the same tab, one pane on the current page. Up to 6 per tab.",
+            "This changed meaning in 0.7.0 \u2014 it no longer resets the layout; that is reset-layout."
+        ],
+        "related": [
+            "reset-layout",
+            "next-window",
+            "list-windows"
+        ]
+    },
+    "reset-layout": {
+    "category": "layout",
+    "sub": "panes",
+        "examples": [
+            "reset-layout"
+        ],
+        "notes": [
+            "Resets the window you are in; other windows are untouched. The old `new-window` behaviour."
+        ],
+        "related": [
+            "new-window",
+            "kill-window"
+        ]
+    },
+    "next-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "[n]",
+                "description": "how many windows to move (default 1, wraps)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "next-window",
+            "next-window 2"
+        ],
+        "related": [
+            "previous-window",
+            "select-window",
+            "last-window"
+        ]
+    },
+    "previous-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "[n]",
+                "description": "how many windows to move back (default 1, wraps)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "previous-window"
+        ],
+        "related": [
+            "next-window",
+            "select-window"
+        ]
+    },
+    "last-window": {
+    "category": "windows",
+        "examples": [
+            "last-window"
+        ],
+        "notes": [
+            "A two-step toggle between the last two windows; no key is bound (l is the pane console)."
+        ],
+        "related": [
+            "next-window",
+            "select-window"
+        ]
+    },
+    "select-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "<number>",
+                "description": "1-based position as list-windows prints it",
+                "required": true
+            },
+            {
+                "form": "<name>",
+                "description": "the name given with rename-window",
+                "required": true
+            }
+        ],
+        "examples": [
+            "select-window 2",
+            "select-window docs"
+        ],
+        "related": [
+            "rename-window",
+            "list-windows"
+        ]
+    },
+    "rename-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "[name]",
+                "description": "single word up to 32 characters (none: a text prompt)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "rename-window docs",
+            "rename-window"
+        ],
+        "related": [
+            "select-window",
+            "list-windows"
+        ]
+    },
+    "kill-window": {
+    "category": "windows",
+        "args": [
+            {
+                "form": "[number|name]",
+                "description": "which window (default: the active one, with a confirmation card)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "kill-window",
+            "kill-window 2"
+        ],
+        "notes": [
+            "Closes every pane in that window. The last window is refused \u2014 a tab always has one layout."
+        ],
+        "related": [
+            "new-window",
+            "kill-pane"
+        ]
+    },
+    "list-windows": {
+    "category": "windows",
+        "flags": [
+            {
+                "flag": "-j, --json",
+                "description": "print the windows as JSON (number, name, panes, active)"
+            }
+        ],
+        "examples": [
+            "list-windows",
+            "list-windows -j"
+        ],
+        "related": [
+            "select-window",
+            "list-panes"
+        ]
+    },
+    "list-cookies": {
+    "category": "cookies",
+        "flags": [
+            {
+                "flag": "--name <prefix>",
+                "description": "only cookies whose name contains this text"
+            },
+            {
+                "flag": "--domain <d>",
+                "description": "only cookies for that domain"
+            },
+            {
+                "flag": "-j, --json",
+                "description": "print the cookies as JSON"
+            },
+            {
+                "flag": "--export netscape|json",
+                "description": "print a Netscape cookie jar (curl, wget, yt-dlp) or JSON"
+            }
+        ],
+        "examples": [
+            "list-cookies",
+            "list-cookies --name session",
+            "list-cookies --export netscape > jar.txt"
+        ],
+        "notes": [
+            "Read through the browser's cookies API, so httpOnly cookies appear and cross-origin panes work.",
+            "Collateral view: every domain/path the pane's origin would send."
+        ],
+        "related": [
+            "set-cookie",
+            "delete-cookie",
+            "clear-cookies"
+        ]
+    },
+    "cookies": {
+    "category": "cookies",
+        "aliasOf": "list-cookies"
+    },
+    "set-cookie": {
+    "category": "cookies",
+        "args": [
+            {
+                "form": "<name>=<value>",
+                "description": "the cookie to write; the value is everything after the first '='",
+                "required": true
+            }
+        ],
+        "flags": [
+            {
+                "flag": "--domain <d>",
+                "description": "cookie domain (default: the pane's host)"
+            },
+            {
+                "flag": "--path </>",
+                "description": "cookie path (default: /)"
+            },
+            {
+                "flag": "--expires <seconds>",
+                "description": "lifetime in seconds from now (default: a session cookie)"
+            },
+            {
+                "flag": "--secure",
+                "description": "send only over https"
+            },
+            {
+                "flag": "--http-only",
+                "description": "hide the cookie from page JavaScript"
+            },
+            {
+                "flag": "--same-site lax|strict|none",
+                "description": "the SameSite attribute"
+            }
+        ],
+        "examples": [
+            "set-cookie session=abc123 --http-only --path /",
+            "set-cookie theme=dark --expires 3600"
+        ],
+        "related": [
+            "list-cookies",
+            "delete-cookie"
+        ]
+    },
+    "delete-cookie": {
+    "category": "cookies",
+        "args": [
+            {
+                "form": "<name>",
+                "description": "cookie name to remove for this pane's origin",
+                "required": true
+            }
+        ],
+        "examples": [
+            "delete-cookie session"
+        ],
+        "related": [
+            "list-cookies",
+            "clear-cookies"
+        ]
+    },
+    "clear-cookies": {
+    "category": "cookies",
+        "flags": [
+            {
+                "flag": "-y",
+                "description": "skip the confirmation card"
+            }
+        ],
+        "examples": [
+            "clear-cookies",
+            "clear-cookies -y"
+        ],
+        "related": [
+            "delete-cookie",
+            "list-cookies"
+        ]
+    },
+    "list-storage": {
+    "category": "storage",
+        "args": [
+            {
+                "form": "local|session",
+                "description": "which storage area (default: local)",
+                "required": false
+            },
+            {
+                "form": "[pattern]",
+                "description": "case-insensitive regular expression on the key",
+                "required": false
+            }
+        ],
+        "flags": [
+            {
+                "flag": "--keys",
+                "description": "print keys and sizes only"
+            },
+            {
+                "flag": "-j, --json",
+                "description": "print the entries as JSON"
+            }
+        ],
+        "examples": [
+            "list-storage",
+            "list-storage session",
+            "list-storage --keys",
+            "list-storage '^auth'"
+        ],
+        "notes": [
+            "Read inside the pane's own frame, so each origin's storage works \u2014 including cross-origin panes."
+        ],
+        "related": [
+            "set-storage",
+            "list-cookies"
+        ]
+    },
+    "set-storage": {
+    "category": "storage",
+        "args": [
+            {
+                "form": "<key>=<value>",
+                "description": "the item to write; everything after the first '=' is the value",
+                "required": true
+            },
+            {
+                "form": "[session]",
+                "description": "write to sessionStorage instead of localStorage",
+                "required": false
+            },
+            {
+                "form": "<key> --remove",
+                "description": "delete the item instead of writing it",
+                "required": false
+            }
+        ],
+        "examples": [
+            "set-storage token=abc123",
+            "set-storage temp=e2e session",
+            "set-storage token --remove"
+        ],
+        "related": [
+            "list-storage"
+        ]
+    },
+    "list-forms": {
+    "category": "inspect",
+    "sub": "dom",
+        "flags": [
+            {
+                "flag": "--highlight",
+                "description": "draw a box around each form inside the pane"
+            },
+            {
+                "flag": "-j, --json",
+                "description": "print the forms as JSON"
+            }
+        ],
+        "examples": [
+            "list-forms",
+            "list-forms --highlight"
+        ],
+        "notes": [
+            "Passwords never print: the value is shown as (password). Inputs outside a form are listed after the forms."
+        ],
+        "related": [
+            "outline",
+            "find-text",
+            "filter"
+        ]
+    },
+    "forms": {
+    "category": "inspect",
+    "sub": "dom",
+        "aliasOf": "list-forms"
+    },
+    "list-scripts": {
+    "category": "inspect",
+    "sub": "dom",
+        "flags": [
+            {
+                "flag": "--third-party",
+                "description": "only scripts whose host differs from the page's"
+            },
+            {
+                "flag": "-j, --json",
+                "description": "print the scripts as JSON"
+            }
+        ],
+        "examples": [
+            "list-scripts",
+            "list-scripts --third-party"
+        ],
+        "related": [
+            "list-resources"
+        ]
+    },
+    "scripts": {
+    "category": "inspect",
+    "sub": "dom",
+        "aliasOf": "list-scripts"
+    },
+    "list-resources": {
+    "category": "inspect",
+    "sub": "dom",
+        "flags": [
+            {
+                "flag": "-j, --json",
+                "description": "print the groups and URLs as JSON"
+            }
+        ],
+        "examples": [
+            "list-resources"
+        ],
+        "notes": [
+            "Uses the browser's resource timing; when that buffer is empty it falls back to counting the DOM."
+        ],
+        "related": [
+            "list-scripts",
+            "capture-pane"
+        ]
+    },
+    "resources": {
+    "category": "inspect",
+    "sub": "dom",
+        "aliasOf": "list-resources"
+    },
+    "eval": {
+    "category": "inspect",
+    "sub": "code",
+        "args": [
+            {
+                "form": "<expression>",
+                "description": "JavaScript to run in the page's own world; quotes are taken literally",
+                "required": true
+            }
+        ],
+        "examples": [
+            "eval document.title",
+            "eval document.querySelectorAll('a').length",
+            "eval ({ links: document.links.length })"
+        ],
+        "notes": [
+            "Runs through chrome.scripting in the frame's main world, so page globals are visible.",
+            "MV3 forbids eval in a content script, which is why it takes that route; a page whose CSP disallows eval refuses it."
+        ],
+        "related": [
+            "find-text",
+            "capture-pane",
+            "js"
+        ]
+    },
+    "js": {
+    "category": "inspect",
+    "sub": "code",
+        "aliasOf": "eval"
+    },
+    "find-text": {
+    "category": "inspect",
+    "sub": "dom",
+        "args": [
+            {
+                "form": "<query>",
+                "description": "text to look for; matching is case-insensitive",
+                "required": true
+            }
+        ],
+        "flags": [
+            {
+                "flag": "--no-highlight",
+                "description": "report only, draw nothing"
+            },
+            {
+                "flag": "--clear",
+                "description": "remove the boxes from an earlier search"
+            },
+            {
+                "flag": "-j, --json",
+                "description": "print the matches as JSON"
+            }
+        ],
+        "examples": [
+            "find-text beta",
+            "find-text 'sign in' --no-highlight",
+            "find-text --clear"
+        ],
+        "notes": [
+            "Searches visible text nodes (script/style are skipped) and boxes the matches inside the pane's own document, so it works cross-origin.",
+            "The boxes are a snapshot: scrolling does not move them."
+        ],
+        "related": [
+            "filter",
+            "eval",
+            "outline"
+        ]
+    },
+    "outline": {
+    "category": "inspect",
+    "sub": "dom",
+        "flags": [
+            {
+                "flag": "-j, --json",
+                "description": "print headings and landmarks as JSON"
+            }
+        ],
+        "examples": [
+            "outline"
+        ],
+        "notes": [
+            "Flags heading level jumps (h1 \u2192 h3) and lists landmarks: main, nav, header, footer, aside, article and ARIA roles."
+        ],
+        "related": [
+            "list-forms",
+            "capture-pane"
+        ]
+    },
+    "structure": {
+    "category": "inspect",
+    "sub": "dom",
+        "aliasOf": "outline"
+    },
+    "detach": {
+    "category": "input",
+        "examples": [
+            "detach"
+        ],
+        "notes": [
+            "Hides the overlay and leaves Control Mode; the toolbar icon (or Alt+Shift+B) brings it back with Control Mode on."
+        ],
+        "related": [
+            "control-mode"
+        ]
+    },
+    "control-mode": {
+    "category": "input",
+        "args": [
+            {
+                "form": "on|off|toggle",
+                "description": "turn Control Mode on, off or flip it (default: toggle)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "control-mode on"
+        ],
+        "related": [
+            "detach",
+            "escape"
+        ]
+    },
+    "escape": {
+    "category": "input",
+        "examples": [
+            "escape"
+        ],
+        "notes": [
+            "Clears filter highlights if any are on screen, otherwise leaves Control Mode. Esc runs it."
+        ],
+        "related": [
+            "filter",
+            "control-mode"
+        ]
+    },
+    "yes": {
+    "category": "input",
+        "notes": [
+            "Answers the open prompt affirmatively; `y` is a hidden alias, Enter often works too."
+        ],
+        "related": [
+            "no"
+        ]
+    },
+    "no": {
+    "category": "input",
+        "notes": [
+            "Answers the open prompt negatively; `n` is a hidden alias."
+        ],
+        "related": [
+            "yes"
+        ]
+    },
+    "command-prompt": {
+    "category": "input",
+        "examples": [
+            "command-prompt"
+        ],
+        "notes": [
+            "The `:` line: same dispatcher as the console and pane inputs, with history (Up/Down) and Tab completion."
+        ],
+        "related": [
+            "help"
+        ]
+    },
+    "source": {
+    "category": "inspect",
+    "sub": "pane",
+        "examples": [
+            "source"
+        ],
+        "notes": [
+            "Needs a same-origin pane; the HTML is shown in the pane console, `restore` returns to the page."
+        ],
+        "related": [
+            "restore",
+            "capture-pane"
+        ]
+    },
+    "restore": {
+    "category": "inspect",
+    "sub": "pane",
+        "examples": [
+            "restore"
+        ],
+        "related": [
+            "source"
+        ]
+    },
+    "filter": {
+    "category": "inspect",
+    "sub": "pane",
+        "args": [
+            {
+                "form": "<selector|preset>",
+                "description": "CSS selector, or a preset word such as links, images or forms",
+                "required": true
+            }
+        ],
+        "flags": [
+            {
+                "flag": "--presets",
+                "description": "print the preset vocabulary"
+            },
+            {
+                "flag": "-l <selector>",
+                "description": "list the matches without drawing boxes"
+            },
+            {
+                "flag": "-c",
+                "description": "clear the boxes (and every refinement)"
+            },
+            {
+                "flag": "-n <max>",
+                "description": "cap the number of matches (200 by default, 1000 hard)"
+            },
+            {
+                "flag": "-y",
+                "description": "skip the confirmation card for a big or preset query"
+            },
+            {
+                "flag": "--in <selector>",
+                "description": "keep only matches inside that container"
+            },
+            {
+                "flag": "--not-in <selector>",
+                "description": "drop matches inside that container"
+            },
+            {
+                "flag": "--text <word>",
+                "description": "keep only matches whose text contains the word"
+            },
+            {
+                "flag": "--visible",
+                "description": "keep only matches that are actually on screen"
+            },
+            {
+                "flag": "--unique <attr>",
+                "description": "keep one match per value of that attribute"
+            },
+            {
+                "flag": "--replace",
+                "description": "start a fresh set instead of adding to the current one"
+            }
+        ],
+        "examples": [
+            "filter links",
+            "filter img; filter a",
+            "filter .card --in main --text price",
+            "filter -c"
+        ],
+        "notes": [
+            "Boxes are drawn inside the pane, hover names the element in the pane status line, and a page mutation re-queries them.",
+            "Filters accumulate until `filter -c` or `--replace`. A big result asks before drawing (see `yes`/`no`)."
+        ],
+        "related": [
+            "find-text",
+            "source",
+            "escape"
+        ]
+    },
+    "url": {
+    "category": "inspect",
+    "sub": "pane",
+        "args": [
+            {
+                "form": "[new-url]",
+                "description": "navigate this pane (bare, it prints the current URL)",
+                "required": false
+            }
+        ],
+        "examples": [
+            "url",
+            "url example.com",
+            "url https://example.com/docs"
+        ],
+        "related": [
+            "reload",
+            "list-panes"
+        ]
+    },
+    "reload": {
+    "category": "inspect",
+    "sub": "pane",
+        "examples": [
+            "reload"
+        ],
+        "related": [
+            "url"
+        ]
+    },
+    "capture-pane": {
+    "category": "inspect",
+    "sub": "pane",
+        "flags": [
+            {
+                "flag": "-n <lines>",
+                "description": "how many lines to print (default 40)"
+            }
+        ],
+        "examples": [
+            "capture-pane",
+            "capture-pane -n 20"
+        ],
+        "notes": [
+            "Same-origin panes only: the text is read from the pane's document."
+        ],
+        "related": [
+            "source",
+            "filter",
+            "find-text"
+        ]
+    },
+    "rename-pane": {
+    "category": "inspect",
+    "sub": "pane",
+        "args": [
+            {
+                "form": "<title|->",
+                "description": "the title shown in the pane footer; `-` clears it",
+                "required": true
+            }
+        ],
+        "examples": [
+            "rename-pane Docs",
+            "rename-pane -"
+        ],
+        "related": [
+            "list-panes",
+            "rename-window"
+        ]
+    },
+    "log": {
+    "category": "inspect",
+    "sub": "pane",
+        "args": [
+            {
+                "form": "toggle",
+                "description": "open or close this pane's console (default)",
+                "required": false
+            },
+            {
+                "form": "on|off",
+                "description": "open or close it explicitly",
+                "required": false
+            },
+            {
+                "form": "clear",
+                "description": "empty the scrollback",
+                "required": false
+            },
+            {
+                "form": "size <px>",
+                "description": "set the console height (40px \u2026 90% of the pane)",
+                "required": false
+            },
+            {
+                "form": "detach|attach",
+                "description": "float the console in its own window, or dock it back",
+                "required": false
+            }
+        ],
+        "examples": [
+            "log toggle",
+            "log size 240",
+            "log detach"
+        ],
+        "notes": [
+            "The console is per pane, keeps its scrollback, and its open state and height are saved with the layout."
+        ],
+        "related": [
+            "clear",
+            "verbose",
+            "capture-pane"
+        ]
+    },
+    "clear": {
+    "category": "inspect",
+    "sub": "pane",
+        "examples": [
+            "clear"
+        ],
+        "related": [
+            "log"
+        ]
+    }
+};
+
+
+/** Help categories, in the order `help` prints them: [key, title, [[sub, title], …]]. */
+const BMUX_HELP_CATEGORIES = [
+    ["layout", "Layout & panes", [["panes", "Split, kill, reorder"], ["sizing", "Size & presets"], ["focus", "Focus & numbering"]]],
+    ["windows", "Windows", [["", "One tab, several layouts"]]],
+    ["persistence", "Persistence", [["tab", "This tab"], ["named", "Named layouts"]]],
+    ["scripts", "Scripts", [["", "Script files and pacing"]]],
+    ["cookies", "Cookies", [["", "Read, inject, remove"]]],
+    ["storage", "Storage", [["", "localStorage & sessionStorage"]]],
+    ["inspect", "Inspection", [["dom", "Page inventory"], ["code", "Code"], ["pane", "Pane content & filters"]]],
+    ["appearance", "Appearance", [["", "Palettes"]]],
+    ["diagnostics", "Diagnostics", [["", "Keys, logging, state"]]],
+    ["input", "Overlay & input", [["", "Activation, prompts, help"]]],
+];
+
+/** Commands that mirror another one (`cookies` -> `list-cookies`). */
+function bmuxHelpAliasesOf(name) {
+    return Object.keys(BMUX_HELP).filter((key) => BMUX_HELP[key].aliasOf === name);
+}
+
+/** One-line usage for a command, or its name when the usage string is empty. */
+function bmuxHelpUsage(name) {
+    const definition = BMUX_COMMANDS[name];
+    if (!definition) return name;
+    return definition.usage || name;
+}
+
+/** A table of commands: name and what it does. */
+function bmuxHelpTable(client, names) {
+    const rows = names.slice().sort().map((name) => [
+        name,
+        String(BMUX_COMMANDS[name].description || '')
+    ]);
+    return client.formatTable(['command', 'what it does'], rows, { maxWidth: 120 });
+}
+
+/** Every visible command name, sorted. */
+function bmuxHelpVisibleNames() {
+    return Object.keys(BMUX_COMMANDS)
+        .filter((name) => !BMUX_COMMANDS[name].hidden)
+        .sort();
+}
+
+/** The category key and sub key of a command (`layout`, `panes`). */
+function bmuxHelpCategoryOf(name) {
+    const meta = BMUX_HELP[name] || {};
+    return { category: meta.category || 'input', sub: meta.sub || '' };
+}
+
+/** The names in one category, optionally narrowed to a sub-category. */
+function bmuxHelpCategoryNames(key, sub) {
+    return bmuxHelpVisibleNames().filter((name) => {
+        const where = bmuxHelpCategoryOf(name);
+        return where.category === key && (!sub || where.sub === sub);
+    });
+}
+
+/** The title of a category (or `category › sub`). */
+function bmuxHelpCategoryTitle(key, sub) {
+    const entry = BMUX_HELP_CATEGORIES.find((candidate) => candidate[0] === key);
+    if (!entry) return key;
+
+    if (!sub) return entry[1];
+    const found = entry[2].find((pair) => pair[0] === sub);
+    return `${entry[1]} › ${found ? found[1] : sub}`;
+}
+
+/** `Layout & panes › Split, kill, reorder`, for a command's detail page. */
+function bmuxHelpWhereOf(name) {
+    const where = bmuxHelpCategoryOf(name);
+    return bmuxHelpCategoryTitle(where.category, where.sub);
+}
+
+/**
+ * The overview: one table per category (and sub-category), then how to narrow it.
+ */
+function bmuxHelpOverview(client) {
+    const names = bmuxHelpVisibleNames();
+    const lines = [`${names.length} commands in ${BMUX_HELP_CATEGORIES.length} categories`];
+
+    BMUX_HELP_CATEGORIES.forEach(([key, title, subs]) => {
+        const inCategory = bmuxHelpCategoryNames(key);
+        if (!inCategory.length) return;
+
+        lines.push('');
+        lines.push(title);
+
+        const groups = subs.length > 1 || (subs.length === 1 && subs[0][0]);
+        if (!groups) {
+            lines.push(bmuxHelpTable(client, inCategory));
+            return;
+        }
+
+        subs.forEach(([sub, subTitle]) => {
+            const inSub = bmuxHelpCategoryNames(key, sub);
+            if (!inSub.length) return;
+            lines.push(`  ${subTitle}`);
+            lines.push(bmuxHelpTable(client, inSub));
+        });
+    });
+
+    lines.push('');
+    lines.push('help <command>     usage, arguments, flags, examples and notes');
+    lines.push('help <category>    one category, e.g. help cookies');
+    lines.push('help overlay       every overlay command');
+    lines.push('help pane          every pane command');
+    lines.push('help <filter>      commands whose name or description matches');
+
+    return lines.join('\n');
+}
+
+/** One category (or one category › sub) as tables. */
+function bmuxHelpCategory(client, key, sub) {
+    const entry = BMUX_HELP_CATEGORIES.find((candidate) => candidate[0] === key);
+    if (!entry) return null;
+
+    const names = bmuxHelpCategoryNames(key, sub);
+    if (!names.length) return null;
+
+    const lines = [`${bmuxHelpCategoryTitle(key, sub)} — ${names.length} command(s)`];
+
+    if (sub || !entry[2].some((pair) => pair[0])) {
+        lines.push(bmuxHelpTable(client, names));
+    } else {
+        entry[2].forEach(([subKey, subTitle]) => {
+            const inSub = bmuxHelpCategoryNames(key, subKey);
+            if (!inSub.length) return;
+            lines.push('');
+            lines.push(subTitle);
+            lines.push(bmuxHelpTable(client, inSub));
+        });
+    }
+
+    lines.push('');
+    lines.push('help <command> for arguments, flags and examples');
+    return lines.join('\n');
+}
+
+/** Every command in one scope (`overlay` or `pane`). */
+function bmuxHelpScope(client, scope) {
+    const names = bmuxHelpVisibleNames().filter((name) => (BMUX_COMMANDS[name].scope || 'overlay') === scope);
+    if (!names.length) return null;
+
+    return [
+        `${scope} commands — ${names.length}`,
+        bmuxHelpTable(client, names),
+        '',
+        'help <command> for arguments, flags and examples'
+    ].join('\n');
+}
+
+/**
+ * The detail view for one command: what it is, how to call it, its arguments and
+ * flags in tables, examples, notes, aliases and what to use next.
+ */
+function bmuxHelpDetail(client, asked) {
+    const meta = BMUX_HELP[asked] || {};
+    const target = meta.aliasOf || asked;
+    const definition = BMUX_COMMANDS[target];
+
+    if (!definition) return `Error: "${target}" is not a command`;
+
+    const lines = [];
+    const aliases = bmuxHelpAliasesOf(target);
+
+    lines.push(`${target} — ${definition.scope} command`);
+    lines.push(`category: ${bmuxHelpWhereOf(target)}`);
+    if (aliases.length) lines.push(`aliases: ${aliases.join(', ')}`);
+    if (meta.aliasOf) lines.push(`"${asked}" is an alias of ${target}.`);
+    lines.push('');
+    lines.push(String(definition.description || ''));
+    lines.push('');
+    lines.push('Usage');
+    lines.push('  ' + bmuxHelpUsage(target));
+
+    const args = meta.args || [];
+    if (args.length) {
+        lines.push('');
+        lines.push('Arguments');
+        lines.push(client.formatTable(['argument', 'required', 'what it is'], args.map((entry) => [
+            entry.form,
+            entry.required ? 'yes' : 'no',
+            entry.description
+        ])));
+    }
+
+    const flags = meta.flags || [];
+    if (flags.length) {
+        lines.push('');
+        lines.push('Flags');
+        lines.push(client.formatTable(['flag', 'what it does'], flags.map((entry) => [
+            entry.flag,
+            entry.description
+        ])));
+    }
+
+    if (meta.examples && meta.examples.length) {
+        lines.push('');
+        lines.push('Examples');
+        meta.examples.forEach((example) => lines.push('  > ' + example));
+    }
+
+    if (meta.notes && meta.notes.length) {
+        lines.push('');
+        lines.push('Notes');
+        meta.notes.forEach((note) => lines.push('  - ' + note));
+    }
+
+    const related = (meta.related || []).filter((name) => BMUX_COMMANDS[name]);
+    if (related.length) {
+        lines.push('');
+        lines.push('See also: ' + related.join(', '));
+    }
+
+    lines.push('');
+    lines.push('Full documentation: docs/COMMAND_USAGE.md');
+
+    return lines.join('\n');
+}
+
 const BMUX_COMMANDS = {
 
     // --- Overlay commands (they manage the whole overlay) ---
@@ -572,31 +2212,46 @@ const BMUX_COMMANDS = {
 
     'help': {
         scope: 'overlay',
-        description: 'List every command, grouped by scope',
-        usage: 'help',
+        description: 'List every command in tables, or explain one in detail',
+        usage: 'help [command|filter]',
         execute: function (api, args) {
-            const groups = { overlay: [], pane: [] };
+            const client = api.client;
+            const asked = String(args[0] || '').trim();
 
-            for (const [name, definition] of Object.entries(BMUX_COMMANDS)) {
-                if (definition.hidden) continue;
-                const group = definition.scope === 'pane' ? groups.pane : groups.overlay;
-                group.push({ name: name, definition: definition });
+            if (!asked) return bmuxHelpOverview(client);
+
+            const wanted = asked.toLowerCase();
+
+            // 1. A command, or an alias of one (`cookies` -> `list-cookies`).
+            if (bmuxHasOwn(BMUX_COMMANDS, wanted)) return bmuxHelpDetail(client, wanted);
+            if (bmuxHasOwn(BMUX_HELP, wanted)) return bmuxHelpDetail(client, wanted);
+
+            // 2. A category (`layout`, `cookies`, `inspect`) or category › sub.
+            const [categoryKey, subKey] = wanted.split('/');
+            const category = bmuxHelpCategory(client, categoryKey, subKey);
+            if (category) return category;
+
+            // 3. A scope: every overlay command, or every pane command.
+            if (wanted === 'overlay' || wanted === 'pane') {
+                const scope = bmuxHelpScope(client, wanted);
+                if (scope) return scope;
             }
 
-            const render = (title, entries) => {
-                let text = `=== ${title} ===\n\n`;
-                entries.forEach((entry) => {
-                    text += `${entry.name}\n  ${entry.definition.description}\n  Usage: ${entry.definition.usage}\n\n`;
-                });
-                return text;
-            };
+            // 4. Otherwise treat the word as a filter over names and descriptions.
+            const matches = bmuxHelpVisibleNames()
+                .filter((name) => name.indexOf(wanted) !== -1 ||
+                    String(BMUX_COMMANDS[name].description || '').toLowerCase().indexOf(wanted) !== -1);
 
-            const footer = 'Panes are numbered top-to-bottom, left-to-right. ' +
-                'The active pane is the one with the blue border.\n';
+            if (!matches.length) {
+                return `Error: no command, category or scope matches "${asked}". Type "help" for the full list.`;
+            }
 
-            return render('Overlay commands', groups.overlay) +
-                render('Pane commands (act on one pane)', groups.pane).trimEnd() +
-                '\n\n' + footer;
+            return [
+                `No command named "${asked}" — ${matches.length} match(es):`,
+                bmuxHelpTable(client, matches),
+                '',
+                'help <command> explains one of them in detail.'
+            ].join('\n');
         }
     },
 

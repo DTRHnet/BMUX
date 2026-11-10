@@ -1,3 +1,65 @@
+# BMUX Version 0.9.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.9.0
+**Release Date**: November 10, 2026
+**Status**: Menu, toolbar and help release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Menu | Clicking the icon opens **Toggle** and **Settings** (frost-styled popup); `Alt+Shift+B` still toggles, `Ctrl+Shift+L` opens the menu |
+| Toolbar | The overlay's buttons are data — add any command, reorder, delete; verified against the registry before saving |
+| Defaults | 16 buttons, including `Panes`, `Windows`, `Cookies`, `Storage`, `Forms`, `Outline` for the inspection commands |
+| Storage | `chrome.storage.local → toolbar:buttons`, owned by the background (`toolbar-get`/`set`/`reset`), capped at 24 |
+| Help | `help` prints box tables per scope; `help <command>` prints usage, arguments, flags, examples, notes, see-also |
+| Search | `help <filter>` matches names and descriptions; aliases resolve to their target |
+
+## The shape of it
+
+**The menu** is two verbs and no state: Toggle asks for the active tab and sends it
+`{ command: 'toggle-bmux' }` — the message the icon used to trigger itself — and
+Settings calls `chrome.runtime.openOptionsPage()`. Activation therefore still has one
+implementation, in the content script.
+
+**The toolbar** is configuration. `background/main.js` stores the list and validates
+its *shape* (labels, lengths, dedupe, 24 max). The settings page loads
+`content/scripts.js` and `content/commands.js`, so it validates the *command* against
+the real registry and shows the usage of whatever you type; the content script's
+`sanitizeToolbar()` checks again at render time and skips unknown commands with a log
+line, so a stored button can never be dead.
+
+**Help** is data too: `BMUX_HELP` holds `args`, `flags`, `examples`, `notes`,
+`related` and `aliasOf` per command, and the renderer turns that into tables. The
+harness fails if a visible command has no entry, which is what keeps the detail pages
+from going stale.
+
+## Docs
+
+README (menu, toolbar and help sections, new screenshots), QUICKSTART (menu, toolbar,
+help), COMMAND_USAGE (the `help` entry with its four modes), ADDING_COMMANDS (the
+`BMUX_HELP` entry every new command needs, and toolbar eligibility), IMPLEMENTATION
+(section 23: the menu, the configuration and the help data). All stamped 0.9.0.
+
+## Verification
+
+- **1194 jsdom checks** — help (overview, categories, sub-categories, `overlay`/`pane`
+  scopes, detail, filter, alias, unknown, metadata coverage), the toolbar version chip
+  (present, absent without a manifest, restored), toolbar rendering from defaults and
+  from a stored configuration, `sanitizeToolbar` behaviour, and the background
+  configuration API.
+- **188 Chromium checks** — the version in the toolbar and in the menu, the settings
+  page (list, catalog, refusal of an unknown command, acceptance of a real one, save),
+  the overlay rendering the saved toolbar after a reload, reset to defaults, and Toggle
+  from the menu activating BMUX.
+
+---
+
 # BMUX Version 0.8.0 - Release Summary
 
 ## Release Information

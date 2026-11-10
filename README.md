@@ -8,12 +8,12 @@
 </p>
 
 <p align="center">
-  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-7fd0f0?style=flat-square">
-  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-9fe8c8?style=flat-square">
-  <img alt="Manifest V3" src="https://img.shields.io/badge/manifest-v3-1e364b?style=flat-square">
-  <img alt="70 commands" src="https://img.shields.io/badge/commands-70-b3e7ff?style=flat-square">
-  <img alt="jsdom 1138 checks" src="https://img.shields.io/badge/jsdom-1138%20checks-86a3ba?style=flat-square">
-  <img alt="Chromium 173 checks" src="https://img.shields.io/badge/chromium-173%20checks-ffd98a?style=flat-square">
+  <a href="manifest.json"><img alt="version 0.9.0" src="https://img.shields.io/badge/version-0.9.0-0e7490?style=flat-square&labelColor=083344"></a>
+  <a href="LICENSE"><img alt="license MIT" src="https://img.shields.io/badge/license-MIT-15803d?style=flat-square&labelColor=052e16"></a>
+  <img alt="Manifest V3" src="https://img.shields.io/badge/manifest-v3-334155?style=flat-square&labelColor=0f172a">
+  <img alt="70 commands" src="https://img.shields.io/badge/commands-70-1d4ed8?style=flat-square&labelColor=172554">
+  <img alt="1194 jsdom checks" src="https://img.shields.io/badge/jsdom-1194%20checks-7c3aed?style=flat-square&labelColor=2e1065">
+  <img alt="Chromium 188 checks" src="https://img.shields.io/badge/chromium-188%20checks-a16207?style=flat-square&labelColor=431407">
 </p>
 
 <p align="center">
@@ -22,6 +22,12 @@
   command line that can look inside the pages.</em>
 </p>
 
+> **New in 0.9.0:** the extension menu is back — **Toggle** and **Settings**, with a
+> toolbar you can edit. Any command can become a top-menu button, verified against the
+> registry before it is saved. And `help` is now a real help system: box-drawn tables
+> for every command, and `help <command>` for usage, arguments, flags, examples, notes
+> and what to read next.
+>
 > **New in 0.8.0:** **seven palettes** (`frost` stays the default: `midnight`, `amber`,
 > `light`, `nord`, `rose`, `classic`), **box-drawn tables** for every listing, and
 > clicking a pane's *page* — not just its footer — now focuses that pane. Plus the
@@ -76,12 +82,32 @@
 ## 📸 Screenshots
 
 Real captures: Chromium 150 running the unpacked extension against
-[dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders.
+[dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders. The freshest
+three are the [blog](https://www.dtrh.net/subdomains/blog), including a real article
+in the middle pane.
 
-**Activated: three panes on dtrh.net.** The frost palette, Control Mode's quiet
-inset ring and its `CONTROL MODE` chip, the window chip (`1:1`), and per-pane
-footers with the title, `[number id]` badge and the console / detach / maximize
-buttons.
+**Three panes on the blog.** The blog index, a real article, and `/tools` — built with
+two `split-window` calls without reloading anything. The frost palette, Control Mode's
+inset ring and `CONTROL MODE` chip, the window chip (`1:1`), the version in the top
+menu (`v0.9.0`), and per-pane footers with title, `[number id]` badge and the console /
+detach / maximize buttons.
+
+![Three panes on the dtrh.net blog: the index, an article, and /tools](docs/images/11-blog-layout.png)
+
+**`filter links` on the blog.** 343 anchors found and 200 boxed; the hovered one is
+named in the pane's status line (`FILTER: links · 200 match(es)`) and the refine card
+offers to narrow the result down — click a button, a digit, `y`/`n`, or type `yes`/`no`.
+
+![filter boxing the links on the blog page, with the refine card](docs/images/12-blog-filter.png)
+
+**Inspection on the same page.** `outline` prints the heading hierarchy and landmarks
+and flags the level jumps, then `list-scripts --third-party` lists 139 scripts and
+points at the only third-party tag — both answered by the pane's own frame.
+
+![outline and list-scripts output in the blog pane's console](docs/images/13-blog-inspect.png)
+
+**The classic activation shot.** Three panes on `/tools` in the frost palette, from the
+0.5.0-era set (kept: every later screenshot builds on it).
 
 ![BMUX activated on dtrh.net with three panes](docs/images/01-activation.png)
 
@@ -223,6 +249,88 @@ with the layout. Frost is the default, and `theme next` cycles.
   there (`q` in Control Mode)
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
+
+### 🧰 The extension menu: Toggle and Settings
+Clicking the toolbar icon opens a small menu instead of toggling blind:
+
+- **Toggle** shows or hides the overlay in the tab you are looking at (overlay *and*
+  Control Mode, as always). `Alt+Shift+B` still does the same thing without the menu.
+- **Settings** opens the toolbar editor in its own tab.
+
+<p align="center">
+  <img alt="The BMUX menu: Toggle and Settings" src="docs/images/09-menu.png" width="280">
+</p>
+
+### 🎛️ A toolbar you can edit
+The buttons along the top of the overlay are data, not markup: each is a `label` plus
+a `command`, and every button runs its command through the same dispatcher as the
+console. The settings page lists the current set, moves buttons up and down, deletes
+them, and adds new ones from a live catalog of **every command the extension
+registers** — so a button can only be saved if its command actually exists.
+
+- **Built in**: `Split H`, `Split V`, `New Window`, `Panes`, `Windows`, `Cookies`,
+  `Storage`, `Forms`, `Outline`, the four focus buttons, `Zoom`, `Layout`, `Detach`.
+- The wordmark carries the extension version (`BMUX v0.9.0`, read from the manifest),
+  so a bug report always has a number attached.
+- **Add anything**: `list-cookies -j`, `outline`, `theme midnight`, `script demo`,
+  `filter links --visible`, or a command of your own.
+- The editor shows the usage of whatever you type, refuses an unknown command with the
+  reason, and the renderer re-checks every entry before drawing it — a button whose
+  command no longer exists is skipped with a log line, never a dead button.
+- Stored in `chrome.storage.local` (this profile only, never synced); **Load defaults**
+  puts the built-in set back.
+
+![The toolbar editor: the current buttons, a command catalog and the add row](docs/images/10-settings.png)
+
+### 📖 Help that actually helps
+`help` prints every command in box-drawn tables **grouped into categories** — Layout &
+panes, Windows, Persistence, Scripts, Cookies, Storage, Inspection, Appearance,
+Diagnostics, Overlay & input — each with its own sub-categories. `help <command>` is a
+full page: usage, an arguments table (and what is required), a flags table, examples,
+notes, what to read next, and where the full docs are.
+
+```
+> help split-window
+split-window — overlay command
+
+Split the active pane in two, keeping every page loaded
+
+Usage
+  split-window [-h|-v] [-l <size>] [-b] [-d]  (size like 30% or 0.3)
+
+Flags
+┌────────────┬─────────────────────────────────────────────────┐
+│ flag       │ what it does                                    │
+├────────────┼─────────────────────────────────────────────────┤
+│ -h         │ split side by side (a new pane to the right)    │
+│ -v         │ split top to bottom (a new pane below)          │
+│ -l <size>  │ size of the new pane: 30%, 30 or 0.3 (10–90%)   │
+…
+Examples
+  > split-window -v -l 30%
+  > split-window -h -b -d
+
+Notes
+  - The new pane starts on the same URL as the pane it splits; no page is reloaded.
+See also: kill-pane, resize-pane, select-layout
+
+Full documentation: docs/COMMAND_USAGE.md
+```
+
+Narrow it however you think:
+
+```
+> help                 # every command, by category and sub-category
+> help layout          # one category (sub-categories kept)
+> help layout/focus    # one sub-category
+> help overlay         # every overlay command
+> help pane            # every pane command
+> help list-cookies    # one command, in full
+> help list            # search names and descriptions
+> help cookies/        # a name that is both a command and a category
+```
+
+An unknown word gets a suggestion instead of a wall of text.
 
 ### 🔬 Looking inside a pane
 Every pane is a different page, often a different origin. These commands ask the
@@ -614,7 +722,7 @@ These act on the whole overlay.
 
 | Command | Description | Example |
 |---------|-------------|---------|
-| `help` | List every command, grouped by scope | `> help` |
+| `help [command\|category\|overlay\|pane\|filter]` | Tables by category, or one command in full detail | `> help list-cookies` |
 | `list-panes [-j]` | Number, id, size, marker, title, URL (`-j` = JSON) | `> list-panes` |
 | `focus-pane <n\|%id\|dir>` | Focus by number, id, or direction (`up`/`down`/`left`/`right`, wraps) | `> focus-pane %2` |
 | `last-pane` | Focus the pane that was active before | `> last-pane` |
@@ -812,7 +920,7 @@ a command line, so keys are not a second code path.
 
 ```
 BMUX/
-├── manifest.json           # Extension configuration (v0.7.0)
+├── manifest.json           # Extension configuration (v0.9.0)
 ├── rules.json              # CSP header removal rules
 ├── background/
 │   └── main.js            # Service worker (state, message relay)
@@ -822,8 +930,17 @@ BMUX/
 │   ├── commands.js        # Command registry + key bindings (source of truth)
 │   ├── scripts.js         # .bmux format: parser, sleep arguments, built-in demo
 │   └── styles.css         # Frost palette, split handles, panels, drag shield
+├── popup/                 # The extension menu: Toggle + Settings
+│   ├── popup.html
+│   ├── popup.css
+│   └── popup.js
+├── settings/              # Toolbar editor (loads the registry to validate commands)
+│   ├── settings.html
+│   ├── settings.css
+│   └── settings.js
 ├── examples/
-│   └── demo.bmux          # The shipped demo script (script demo runs this)
+│   ├── demo.bmux          # The shipped demo script (script demo runs this)
+│   └── dtrh-tour.bmux     # The three-page tour used for the screenshots
 └── docs/                  # Documentation
     ├── images/              # Screenshots used by this README
     ├── ADDING_COMMANDS.md
@@ -895,8 +1012,8 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 
 ### Activation
 Clicking the toolbar icon or pressing `Alt+Shift+B` turns BMUX on — overlay plus
-Control Mode in one step — and the same action turns it off. There is no popup; the
-icon is the button. If your window manager or another extension has taken
+Control Mode in one step, and the menu's **Toggle** turns it off the same way. If your
+window manager or another extension has taken
 `Alt+Shift+B`, rebind it at `chrome://extensions/shortcuts`; `Ctrl+b` works
 regardless.
 
@@ -1033,6 +1150,17 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Background cookie broker: `httpOnly` visibility, inject and delete
 
 ### Version 0.9.0
+- [x] Extension menu: **Toggle** and **Settings** (a real popup, frost-styled)
+- [x] Toolbar buttons are data (`label` + `command`), editable in a settings page
+- [x] Add/remove/reorder buttons, verified against the command registry, capped at 24
+- [x] `help` in box-drawn tables; `help <command>` with arguments, flags, examples, notes
+- [x] `help <filter>` search over names and descriptions
+- [x] `help` grouped by category and sub-category; `help <category>`, `help <category>/<sub>`,
+      `help overlay`, `help pane`
+- [x] The extension version in the top menu (and in the menu popup)
+- [x] The overlay re-checks every configured button and skips commands it does not know
+
+### Version 0.10.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Broadcasting input to all panes
@@ -1082,4 +1210,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.8.0 | Last Updated: November 2026
+Version 0.9.0 | Last Updated: November 2026

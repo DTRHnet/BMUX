@@ -1,6 +1,6 @@
 # BMUX Cross-Origin Handling
 
-**Version 0.8.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
+**Version 0.9.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
 for where these decisions live.
 
 **0.8.0 update:** a cross-origin pane is no longer a black box. Inspection commands

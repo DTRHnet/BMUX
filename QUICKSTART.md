@@ -1,12 +1,39 @@
 # BMUX Quick Reference
 
-**Version 0.8.0**
+**Version 0.9.0**
 
 ## Activation
 ```
 Alt+Shift+B    - Turn BMUX on (overlay + Control Mode, inset ring); again to turn it off
-Extension Icon - The same: one click activates, another hides
+Extension Icon - Opens the menu: Toggle (same as the hotkey) and Settings
+Ctrl+Shift+L   - Opens the same menu from the keyboard
 ```
+
+## The menu and the toolbar
+```
+Extension icon -> Toggle | Settings
+```
+- **Toggle** shows or hides BMUX in the tab you are looking at.
+- **Settings** opens the toolbar editor: the buttons along the top of the overlay are
+  data (`label` + `command`). Add one from the catalog of every real command
+  (`list-cookies -j`, `outline`, `theme midnight`, `script demo`…), reorder with ↑/↓,
+  delete with ✕, then **Save**. **Load defaults** puts the built-in set back.
+- A button whose command no longer exists is skipped with a log line, never drawn dead.
+
+## Help
+```
+> help                  - Every command, in tables, grouped by category
+> help layout           - One category: Layout & panes (sub-categories kept)
+> help layout/focus     - One sub-category (category/sub)
+> help overlay          - Every overlay command
+> help pane             - Every pane command
+> help list-cookies     - Usage, arguments, flags, examples and notes for one command
+> help list             - Search names and descriptions
+> help cookies/         - A name that is both a command and a category
+> keys                  - What the keyboard actually sent, and what it ran
+```
+The overlay's wordmark shows the version (`BMUX v0.9.0`), read from the manifest —
+useful when reporting a bug.
 
 ## Control Mode Keys (after Alt+Shift+B)
 ```
