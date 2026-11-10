@@ -91,7 +91,24 @@ work a little differently, you're welcome to explore the project and get involve
 
 ## At a glance
 
-Real captures: Chromium 150 running the unpacked extension against
+<p align="center">
+  <a href="docs/images/demo.mp4" title="Play the BMUX demo (MP4, 9 minutes)">
+    <img src="docs/images/demo-poster.png"
+         alt="BMUX demo — click to play"
+         width="860">
+  </a>
+</p>
+
+<p align="center"><strong>Some Functionality Examples</strong></p>
+
+<p align="center">
+  <sub>
+    nine minutes on real pages ·
+    <a href="docs/images/demo.mp4">open the video</a> (MP4, 15 MB)
+  </sub>
+</p>
+
+The stills below are real captures: Chromium 150 running the unpacked extension against
 [dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders. The freshest
 three are the [blog](https://www.dtrh.net/subdomains/blog), including a real article
 in the middle pane.
@@ -965,7 +982,7 @@ BMUX/
 │   ├── demo.bmux          # The shipped demo script (script demo runs this)
 │   └── dtrh-tour.bmux     # The three-page tour used for the screenshots
 └── docs/                  # Documentation
-    ├── images/              # Screenshots used by this README
+    ├── images/              # Screenshots and the demo video used by this README
     ├── ADDING_COMMANDS.md
     ├── COMMAND_USAGE.md
     ├── SCRIPTS.md           # The .bmux format, limits and demo walkthrough
