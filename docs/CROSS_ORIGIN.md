@@ -1,7 +1,14 @@
 # BMUX Cross-Origin Handling
 
-**Version 0.7.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
+**Version 0.8.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
 for where these decisions live.
+
+**0.8.0 update:** a cross-origin pane is no longer a black box. Inspection commands
+(`list-storage`, `list-forms`, `list-scripts`, `list-resources`, `outline`,
+`find-text`) ask the pane's own frame over `postMessage`, and `eval` runs in the
+frame's main world through `chrome.scripting`; cookies are read by the background.
+What still needs a same-origin pane is the tooling that reads the document from the
+top frame: `source`, `filter` and `capture-pane`.
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # BMUX - Adding Commands
 
-**Version 0.7.0** — commands live in `content/commands.js`, the `.bmux` format
+**Version 0.8.0** — commands live in `content/commands.js`, the `.bmux` format
 in `content/scripts.js`; a command written to these rules is usable from the
 console, the keys *and* a script without extra work.
 
@@ -321,6 +321,28 @@ Rules the persister enforces (in `background/main.js`, on write *and* read): ver
 that produces a bigger or stranger layout will not have it restored — keep layouts
 within those limits.
 
+### Commands that inspect a pane
+
+Two helpers, and a rule: **ask the pane, do not reach into it**.
+
+- `client.inspectPane(pane, kind, args, timeoutMs)` posts a request into the pane's
+  frame (`content/inspect.js` answers it there) and resolves `{ ok, result }` or
+  `{ ok: false, error }`. Kinds: `storage`, `forms`, `scripts`, `resources`,
+  `outline`, `find-text`, `eval`. It is the only way to see a cross-origin pane, so
+  reach for it instead of touching `iframe.contentDocument`.
+- `client.formatValue(value)` renders a result: aligned columns for an array of
+  records, pretty JSON for a lone object, one line per scalar. Use it and the output
+  matches the rest of the console.
+- Cookies go through the background (`client.listCookies` / `setCookie` /
+  `removeCookies`), because `httpOnly` is invisible from any frame and the `cookies`
+  permission lives there. Pass the pane's URL (`client.getPaneUrl(pane)`) so the jar
+  is the right origin's.
+
+If you add a *handler* (a new `kind`), put it in `content/inspect.js`, keep the
+result JSON-safe and capped, and raise an error for bad input — a throw becomes
+`ok: false` and the command reports it. A handler that never answers just makes the
+command wait out its timeout.
+
 ### Commands and windows
 
 Several windows live in one tab, but only one of them is *live*: `client.layout`,
@@ -443,6 +465,9 @@ Overlay scope:
 | `reset-layout` | Reset this window to one pane |
 | `next-window` / `previous-window` / `last-window` / `select-window` / `rename-window` / `kill-window` / `list-windows` | Window management (see [COMMAND_USAGE](COMMAND_USAGE.md)) |
 | `escape` | What `Esc` runs: clear filter highlights, else leave Control Mode |
+| `list-cookies` / `set-cookie` / `delete-cookie` / `clear-cookies` | Cookies via the background broker (`cookies` permission) |
+| `list-storage` / `set-storage` | Storage of the pane's origin, read inside the pane |
+| `list-forms` / `list-scripts` / `list-resources` / `outline` / `find-text` / `eval` (aliases `forms`, `scripts`, `resources`, `structure`, `js`) | Pane inspection via the frame relay |
 | `detach` | Hide or show the overlay |
 | `control-mode [on\|off\|toggle]` | Enter or leave Control Mode |
 | `command-prompt` | Open the `:` line |

@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.7.0**
+**Version 0.8.0**
 
 ## Activation
 ```
@@ -87,6 +87,26 @@ Full reference: `docs/SCRIPTS.md`.
 ```
 A failing command doesn't stop the chain; a prompt raised by one is answered
 before the next starts.
+
+## Inspecting a pane
+```
+> outline                    - Headings + landmarks (structure is an alias)
+> list-forms                 - action, method, every field (forms)
+> list-scripts --third-party - Scripts, [3rd] flagged, inline sizes (scripts)
+> list-resources             - images / css / fonts / xhr, counts + bytes (resources)
+> find-text beta             - Box every visible match in the pane; --clear removes
+> list-storage               - localStorage (or: list-storage session) — --keys, -j
+> set-storage token=abc      - Write one;  set-storage token --remove  deletes
+> eval document.title        - Run JS in the page and print the result (js)
+> list-cookies               - Cookies for this pane, httpOnly included (cookies)
+> list-cookies --export netscape   - A jar for curl / wget / yt-dlp
+> set-cookie session=abc --http-only
+> delete-cookie session      - Or: clear-cookies (asks first)
+```
+These work on **cross-origin panes** too: the question is asked inside the pane's
+own frame (`content/inspect.js`), and cookies go through the browser's `cookies`
+API. `source`, `filter` and `capture-pane` still need a same-origin pane. `eval`
+runs in the page's world; a page that keeps a CSP via a `<meta>` tag refuses it.
 
 ## Windows (several layouts in one tab)
 ```
