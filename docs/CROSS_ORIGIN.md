@@ -1,6 +1,6 @@
 # BMUX Cross-Origin Handling
 
-**Version 0.6.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
+**Version 0.7.0** — behaviour of the shipped code; see [IMPLEMENTATION.md](IMPLEMENTATION.md)
 for where these decisions live.
 
 ## Overview

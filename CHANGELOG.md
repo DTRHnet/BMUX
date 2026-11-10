@@ -5,6 +5,76 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-11-09
+
+A tab can hold several windows — named layouts you switch between without
+reloading a page. `new-window` finally means what it says.
+
+### Added
+
+- **Windows: several layouts in one tab.** Up to six per tab, each with its own
+  split tree, ratios, focused pane, zoom, pane consoles and titles. Switching is a
+  DOM show/hide (`display:none`), so no pane ever reloads — verified in Chromium
+  with a page-side load counter that does not move across switches.
+- **`new-window [name]`** creates a window (one pane on the current page) and
+  switches to it. **`next-window [n]`**, **`previous-window [n]`** (both wrap),
+  **`last-window`**, **`select-window <number|name>`**, **`rename-window [name]`**
+  (a text prompt when no name is given), **`kill-window [number|name]`** (a
+  confirmation card, and the last window is refused), **`list-windows [-j]`**.
+- **Keys**: `n` next, `p` previous, `c` new, `&` kill (confirms), `,` rename (asks),
+  `w` list — in Control Mode and after `Ctrl+b`, so 27 bound keys per table.
+- **A status-bar window chip** (`2:docs (2/2)`) that names the active window and
+  cycles to the next one on click — the mouse path for window switching.
+- **Snapshot version 2**: every window is persisted with its own tree, focus, zoom
+  and root pane, plus `activeWindow`. Version-1 snapshots (anything saved by 0.6.0)
+  are upgraded on read into a single window named `main`, so upgrading never costs
+  a layout.
+- **New caps**, enforced in the background on write and read: 6 windows, 12 panes
+  per window, 24 panes total, depth 32, 96 KB, window names sanitized to 32
+  printable characters.
+- `info state` and `install_bmux`-style diagnostics now report windows; `Tab`
+  completion knows `select-window`/`kill-window` arguments from the window list.
+
+### Changed
+
+- **`new-window` changed meaning**: it creates a window instead of resetting the
+  overlay. The old behaviour is **`reset-layout`**, now scoped to the current window
+  (other windows are untouched). This is the one breaking change in 0.7.0: a
+  `.bmux` script written for 0.6.0 needs that one-word edit, and both shipped
+  examples were updated.
+- Restoring, `save-layout` / `restore-layout`, inheritance and follow-the-page all
+  work per window: the tab's own page follows into the **active** window's root
+  pane, and the other windows keep their saved URLs.
+- `docs/SCRIPTS.md`, the shipped demo (`73` → `87` commands) and the site tour
+  (`63` → `80` commands) gained a windows chapter; the built-in demo and
+  `examples/demo.bmux` are still byte-identical.
+
+### Notes
+
+- A hidden window keeps its iframes running. That is why switching is instant and
+  why the cap is six — the alternative (unloading panes) would reload them on the
+  way back, which is exactly what BMUX promises not to do.
+- `kill-window` destroy panes through the same path as `kill-pane`, so filters,
+  prompts and floating consoles belonging to that window go with it.
+- A tab always has one window; `kill-window` on the last one is refused the way
+  `kill-pane` refuses the last pane.
+
+### Verification
+
+- `node --check` clean on all four scripts; CRLF kept everywhere; `manifest.json`
+  parses as 0.7.0; `manifest.json` lists the same three content scripts.
+- jsdom: **959 checks** (57 new) — window creation, switching, wrapping, rename
+  (including the prompt), kill (refusal + pane cleanup), per-window isolation of
+  tree/focus/zoom, per-window numbering with tab-wide unique ids, `list-windows`
+  text and JSON, `reset-layout` scoped to one window, both-window persistence
+  round-trip, the **version-1 upgrade path**, the 6-window/12-per-window/24-total
+  caps, inheritance of two windows, follow-the-page touching only the active window,
+  and a script that creates and lists windows.
+- Chromium 150, unpacked: **147 checks** (14 new) — a second window built and
+  switched with the page-load counter unchanged (no reload), the chip click, a
+  reload restoring both windows with the active one visible, and `kill-window`
+  through its confirmation card.
+
 ## [0.6.0] - 2026-11-09
 
 Commands can live in a file. A `.bmux` script runs a list of command lines with

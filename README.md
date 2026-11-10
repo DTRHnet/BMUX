@@ -1,14 +1,20 @@
 # BMUX - Browser Multiplexer
 
-**Version 0.6.0**
+**Version 0.7.0**
 
 A Chrome extension (Manifest V3) inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
 
-![BMUX Version](https://img.shields.io/badge/version-0.6.0-blue)
+![BMUX Version](https://img.shields.io/badge/version-0.7.0-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
+> **New in 0.7.0:** a tab can hold several **windows** — named layouts you switch
+> between instantly (`n` / `p`, `select-window`, or the chip in the status bar)
+> without reloading a single page. Each window keeps its own split tree, focus,
+> zoom and consoles, all of it restored on reload. `new-window` finally means what
+> it says; the old reset is now `reset-layout`.
+>
 > **New in 0.6.0:** commands can live in a file. A `.bmux` script runs a list of
-> commands with `sleep` between them — `script demo` runs a 73-command tour of the
+> commands with `sleep` between them — `script demo` runs an 87-command tour of the
 > whole extension in under a minute, `script file` loads your own, and `sleep 2`
 > paces it (`sleep 250ms` works too). One panel, one Run button, one Stop button;
 > the current command is always on screen.
@@ -47,8 +53,9 @@ Real captures: Chromium 150 running the unpacked extension against
 [dtrh.net](https://www.dtrh.net/) — nothing mocked, no placeholders.
 
 **Activated: three panes on dtrh.net.** The frost palette, Control Mode's quiet
-inset ring and its `CONTROL MODE` chip, and per-pane footers with the title,
-`[number id]` badge and the console / detach / maximize buttons.
+inset ring and its `CONTROL MODE` chip, the window chip (`1:1`), and per-pane
+footers with the title, `[number id]` badge and the console / detach / maximize
+buttons.
 
 ![BMUX activated on dtrh.net with three panes](docs/images/01-activation.png)
 
@@ -75,9 +82,18 @@ command away, and `theme frost` brings the ice palette back.
 panes — the home page on the left, `/changelog` on the right, `/tools` underneath —
 then worked through layouts, filters, persistence and the palette, without
 reloading anything. The panel at the bottom-left holds the script, its line count
-and `finished · 63/63`; the pane footer shows the titles the script set.
+and `finished · 63/63` (the tour has grown since — 80 commands today); the pane
+footer shows the titles the script set.
 
 ![The script panel running the dtrh tour, with three panes building themselves](docs/images/05-script-panel.png)
+
+**Two windows in one tab.** The same pages, a second layout: `new-window docs`,
+a split inside it, and `list-windows` printed into that pane's console (`1 1 · 3
+pane(s)` / `2 docs · 2 pane(s) [ACTIVE]`). The window chip at the bottom reads
+`2:docs (2/2)`; only the active window's panes are shown, and none of the five
+pages reloaded to get here.
+
+![Two windows in one tab, with list-windows printed and the window chip showing 2:docs](docs/images/06-windows.png)
 
 ---
 
@@ -154,6 +170,7 @@ and `finished · 63/63`; the pane footer shows the titles the script set.
 - `swap-pane <a> <b>` - two panes trade places
 - `rotate-window` - every pane moves one slot along the layout
 - Both keep the iframes exactly where they are in the DOM, so nothing reloads
+- Windows rearrange the same way: switching a window is a show/hide, not a reload
 
 ### 🎯 Pane navigation
 - **Four toolbar buttons** - `Up`, `Down`, `Left`, `Right`
@@ -166,6 +183,36 @@ and `finished · 63/63`; the pane footer shows the titles the script set.
   there (`q` in Control Mode)
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
+
+### 🪟 Windows: several layouts in one tab
+A browser tab no longer has one layout — it can have up to six, each with its own
+panes, and switching between them is a DOM show/hide, so nothing reloads:
+
+```
+> new-window docs        # a second layout in this tab, one pane, this page
+> split-window -v -l 45%  # arrange it however you like
+> rename-window docs
+> list-windows
+Windows:
+1 1          3 pane(s)
+2 docs       2 pane(s)  [ACTIVE]
+> next-window            # or n, or click the chip in the status bar
+> select-window 1        # by number, or by name: select-window docs
+> kill-window            # asks first; the last window is refused
+```
+
+- **Keys**: `n` next, `p` previous, `c` new, `&` kill (with a confirmation card),
+  `,` rename (a text prompt), `w` list — in Control Mode and after `Ctrl+b`.
+- **The status bar chip** (`2:docs (2/3)`) names the current window and cycles to
+  the next one on click, so the mouse path exists too.
+- **Everything is per window**: tree and ratios, focused pane, zoom, pane consoles
+  and titles. Pane numbers (`[1 %4]`, `display-panes`) start at 1 in each window;
+  pane ids (`%1`, `%2`) stay unique across the tab.
+- **Hidden windows keep running** — their iframes are `display:none`, not
+  unloaded, which is why switching costs nothing. Six windows is the cap, and
+  `.bmux` scripts drive them like any other command.
+- **`reset-layout`** resets the window you are in (it used to be `new-window`,
+  which now creates a window — the one breaking change in 0.7.0).
 
 ### 💾 Sessions that survive a reload
 The layout of the tab you are in is saved as it changes and put back when the
@@ -253,11 +300,11 @@ theme classic
 
 - **The panel is the runner**: `Run`, `Stop`, `File` and `×`, `Ctrl+Enter` to run,
   and a progress line that always names the command being run
-  (`7/73 · select-layout main-vertical`), tinted while a script runs.
+  (`7/87 · select-layout main-vertical`), tinted while a script runs.
 - **Every step is echoed** into the debug console with its index and its result, so
   the transcript of a run is the transcript you would get typing it all yourself.
 - **A failing line does not stop the rest** (`;`-chain semantics), and the run ends
-  with `ran 73/73` or a count of the errors.
+  with `ran 87/87` or a count of the errors.
 - **`sleep` is cancellable**: `script stop` ends a pending pause immediately and the
   next line never runs.
 - **Not a programming language** by design — no variables, loops or branches, so
@@ -489,7 +536,14 @@ These act on the whole overlay.
 | `swap-pane <a> [b]` | Swap two panes' positions | `> swap-pane 1 2` |
 | `rotate-window [-r]` | Move every pane one slot along the layout | `> rotate-window` |
 | `display-panes` | Show pane numbers; pick one with a digit | `> display-panes` |
-| `new-window` | Reset the overlay to one pane | `> new-window` |
+| `new-window [name]` | Create a window (another layout in this tab) and switch to it | `> new-window docs` |
+| `reset-layout` | Reset this window to one pane showing the current page | `> reset-layout` |
+| `next-window [n]` / `previous-window [n]` | Switch window, wrapping at either end | `> next-window` |
+| `last-window` | Back to the window you were in before | `> last-window` |
+| `select-window <n\|name>` | Switch to a window by number or name | `> select-window docs` |
+| `rename-window [name]` | Name this window; no name asks for one | `> rename-window docs` |
+| `kill-window [n\|name]` | Close that window and its panes; the last one is refused | `> kill-window 2` |
+| `list-windows [-j]` | Every window in this tab, with pane counts (`-j` = JSON) | `> list-windows` |
 | `detach` | Hide or show the overlay | `> detach` |
 | `control-mode [on\|off\|toggle]` | Turn Control Mode on, off, or toggle it | `> control-mode on` |
 | `command-prompt` | Open the `:` command line | `> command-prompt` |
@@ -562,7 +616,10 @@ scripting:
 | `Alt+Shift+B` | Toggle Control Mode |
 | `%` | `split-window -h` |
 | `"` | `split-window -v` (Shift+') |
-| `c` | `new-window` |
+| `c` | `new-window` (create a window) |
+| `n` / `p` | `next-window` / `previous-window` |
+| `&` / `,` | `kill-window` (confirms) / `rename-window` (asks) |
+| `w` | `list-windows` |
 | `d` | `detach` (hide overlay) |
 | `x` | `kill-pane` |
 | `←` `→` `↑` `↓` | Move focus, with wrap-around |
@@ -649,7 +706,7 @@ a command line, so keys are not a second code path.
 
 ```
 BMUX/
-├── manifest.json           # Extension configuration (v0.6.0)
+├── manifest.json           # Extension configuration (v0.7.0)
 ├── rules.json              # CSP header removal rules
 ├── background/
 │   └── main.js            # Service worker (state, message relay)
@@ -707,8 +764,9 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - ✅ Open source - fully auditable code
 
 ### What BMUX Stores Locally
-- The layout of each tab (split tree, pane URLs, custom titles, focus, zoom,
-  console state) in `chrome.storage.session` — cleared when the browser closes.
+- The layouts of each tab — every window, its split tree, pane URLs, custom
+  titles, focus, zoom and console state — in `chrome.storage.session`, cleared
+  when the browser closes.
 - Named layouts you explicitly saved, per site origin, in `chrome.storage.local`.
 - The auto-restore switch, and whether a new tab inherits the newest layout.
 - **Never `sync`**, never uploaded. `persist off` clears the current tab's
@@ -745,7 +803,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.6.0)
+### Current Version (0.7.0)
 - ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console
@@ -760,7 +818,10 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
   and a reload/new tab ends the run (those steps stay manual)
 - ⏳ **Scripts have no variables, loops or branches** by design — a script is a
   list of commands you could have typed, not code
-- ⏳ **No multiple windows / layout tabs** - `new-window` resets the overlay
+- ⏳ **Windows are capped at six per tab**, and a hidden window keeps its iframes
+  running (that is why switching is instant, and why the cap exists)
+- ⏳ **`new-window` changed meaning in 0.7.0** - it creates a window; `reset-layout`
+  is the old reset (a `.bmux` script written for 0.6.0 needs that one-word edit)
 - ⏳ **No floating panes** - every pane takes layout space
 - ⏳ **No `break-pane` / `join-pane`**
 - ⏳ **No broadcasting** of input to several panes
@@ -831,9 +892,17 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Shipped demo (`examples/demo.bmux`), byte-identical to what `script demo` runs
 
 ### Version 0.7.0
+- [x] Windows: several named layouts in one tab, each with its own tree/focus/zoom/consoles
+- [x] `new-window [name]`, `next-window`, `previous-window`, `last-window`, `select-window`
+- [x] `rename-window` (with a text prompt), `kill-window` (with a confirmation), `list-windows [-j]`
+- [x] `reset-layout` — the old `new-window` behaviour, now per window
+- [x] Status-bar window chip (click = next), keys `n` `p` `c` `&` `,` `w`
+- [x] Snapshot v2: every window persisted, version-1 layouts upgraded on read
+- [x] Switching windows never reloads a page (verified with a page-load counter)
+
+### Version 0.8.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
-- [ ] Multiple windows / layout tabs
 - [ ] Broadcasting input to all panes
 - [ ] Pane drag-and-drop reordering
 - [ ] Touch/pointer-based resizing
@@ -881,4 +950,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.6.0 | Last Updated: November 2026
+Version 0.7.0 | Last Updated: November 2026

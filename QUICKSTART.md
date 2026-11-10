@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.6.0**
+**Version 0.7.0**
 
 ## Activation
 ```
@@ -12,7 +12,11 @@ Extension Icon - The same: one click activates, another hides
 ```
 %            - Split horizontal (also Shift+5, 5)
 "            - Split vertical (also Shift+', ')
-c            - New window
+c            - New window (another layout in this tab)
+n / p        - Next / previous window
+&            - Kill window (asks first; the last one is refused)
+,            - Rename window (asks for a name)
+w            - List windows
 d            - Detach (hide overlay)
 x            - Kill pane (last pane is refused)
 Arrow        - Move focus left / right / up / down (wraps at the edge)
@@ -31,7 +35,7 @@ Esc          - Clear filter boxes; if none, exit Control Mode
 ```
 Ctrl+b, then %            - Split horizontal
 Ctrl+b, then "            - Split vertical
-Ctrl+b, then c            - New window
+Ctrl+b, then c            - New window (each of the five window keys works too)
 Ctrl+b, then d            - Detach
 Ctrl+b, then x            - Kill pane
 Ctrl+b, then Arrow        - Move focus
@@ -83,6 +87,24 @@ Full reference: `docs/SCRIPTS.md`.
 ```
 A failing command doesn't stop the chain; a prompt raised by one is answered
 before the next starts.
+
+## Windows (several layouts in one tab)
+```
+> new-window docs      - Create a window and switch to it (up to 6 per tab)
+> new-window           - Error: At most 6 windows per tab
+> next-window          - n; previous-window is p (both wrap)
+> select-window 2      - By number, or by name: select-window docs
+> last-window          - Back to the window you were in
+> rename-window docs   - Or just , for the prompt
+> kill-window          - & asks first; the last window is refused
+> list-windows         - Every window, pane counts, [ACTIVE] marker (-j = JSON)
+> reset-layout         - Reset THIS window to one pane (the old new-window)
+```
+Each window has its own tree, ratios, focus, zoom and pane consoles, and switching
+is a show/hide — **no page reloads**. The status bar shows `2:docs (2/2)`; click it
+for the next window. A window you are not looking at keeps running (`display:none`),
+which is why the cap is six. Everything is restored on reload: snapshot version 2
+holds all windows, and a 0.6.0 (version 1) layout is upgraded to one window.
 
 ## Prompts (click, key or command)
 ```

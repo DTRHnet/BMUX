@@ -149,7 +149,7 @@ const BMUX_DEMO_SCRIPT = `#!/usr/bin/env bmux
 # the navigation it would need.
 
 sleep 1
-new-window
+reset-layout
 sleep 1.2
 
 # 1 . a useful three-pane layout, built without reloading anything
@@ -223,7 +223,23 @@ sleep 2.4
 theme frost
 sleep 1.4
 
-# 6 . polish
+# 6 . windows: a second layout in the same tab, switched instantly
+new-window docs
+sleep 1.2
+split-window -v -l 45%
+sleep 1.2
+rename-window docs
+sleep 0.6
+list-windows
+sleep 2.2
+previous-window
+sleep 1.6
+next-window
+sleep 1.4
+select-window 1
+sleep 1.4
+
+# 7 . polish
 display-panes
 sleep 2
 info layout

@@ -11,7 +11,7 @@
 # Change the two `url` lines and the titles to tour your own site.
 
 sleep 1
-new-window
+reset-layout
 sleep 0.8
 
 # 1 . three panes, three different pages of the site, built without reloads
@@ -80,7 +80,26 @@ sleep 2.4
 theme frost
 sleep 1.2
 
-# 6 . a stable final frame
+# 6 . windows: a second layout of the same tab, over the same pages
+new-window notes
+sleep 1.2
+url https://www.dtrh.net/tools
+rename-window notes
+sleep 1.2
+split-window -v -l 50%
+sleep 1.2
+list-windows
+sleep 2.2
+previous-window
+sleep 1.8
+next-window
+sleep 1.6
+kill-window
+sleep 0.8
+yes
+sleep 1.4
+
+# 7 . a stable final frame
 select-layout main-vertical
 sleep 1.6
 focus-pane 1

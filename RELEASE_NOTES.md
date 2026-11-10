@@ -1,3 +1,72 @@
+# BMUX Version 0.7.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.7.0
+**Release Date**: November 9, 2026
+**Status**: Windows release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Windows | Up to six named layouts in one tab, each with its own tree, ratios, focus, zoom and pane consoles |
+| No reloads | Switching a window is a `display:none` swap — proven in Chromium with a page-load counter that does not move |
+| Commands | `new-window [name]`, `next-window`, `previous-window`, `last-window`, `select-window`, `rename-window`, `kill-window`, `list-windows`, and `reset-layout` for the old reset |
+| Keys | `n` `p` `c` `&` `,` `w` — in Control Mode and after `Ctrl+b` |
+| Mouse | A status-bar window chip (`2:docs (2/2)`) that switches on click |
+| Persistence | Snapshot v2 stores every window plus `activeWindow`; version-1 snapshots are upgraded on read into one window named `main` |
+| Caps | 6 windows, 12 panes per window, 24 panes total, depth 32, 96 KB, window names sanitized |
+| Breaking | `new-window` now creates a window; the reset it used to do is `reset-layout` |
+
+## The shape of it
+
+The client's live fields (`layout`, `zoomedPane`, `rootPane`, `layoutName`,
+`lastActivePane`) always describe the **active** window; inactive windows keep their
+own copy in a record. Switching is `stashActiveWindow()` → load the target record →
+`applyWindowVisibility()`, after which the existing renderer runs unchanged on one
+tree. Panes are never moved between windows in the DOM: a hidden window is
+`display:none`, so its iframes keep running and a switch costs nothing. That is the
+trade behind the six-window cap.
+
+The background owns the migration: `normalizeSnapshot()` accepts version 1 or 2,
+wraps a v1 tree as one window, enforces the caps and returns the v2 form to store —
+so the content script only ever applies one format.
+
+## What does not come back
+
+Restoring still **recreates** panes (pages load fresh); prompts, filter boxes and
+scrollback remain transient. A hidden window's pages keep their state while the
+window is hidden, but a reload recreates them like everything else.
+
+## Docs
+
+README (feature section, command and key tables, roadmap, limitations),
+QUICKSTART (windows block), COMMAND_USAGE (nine command entries, key rows, status
+bar, snapshot v2 and the upgrade), ADDING_COMMANDS (window-aware command rules and
+the v2 snapshot shape), IMPLEMENTATION (the window model, migration, caps), SCRIPTS
+(windows in the walkthrough, `reset-layout`) — every document stamped 0.7.0. Both
+shipped `.bmux` demos gained a windows chapter (87 and 80 commands) and still run
+clean on dtrh.net.
+
+## Verification
+
+- **959 jsdom checks** (57 new): creation, switching, wrapping, rename via prompt,
+  kill with cleanup and the last-window refusal, per-window isolation of
+  tree/focus/zoom, per-window numbering with tab-wide unique ids, `list-windows`
+  text and JSON, `reset-layout` scoping, both-window persistence, the **v1 upgrade
+  path**, the window/pane caps, two-window inheritance, follow-the-page limited to
+  the active window, and a script driving windows.
+- **147 Chromium checks** (14 new): a second window built and switched with the
+  page-load counter unchanged, the chip click, a reload restoring both windows with
+  the active one visible, and `kill-window` through its confirmation card.
+- The demos were re-checked in Chromium on dtrh.net with the new windows chapter.
+
+---
+
 # BMUX Version 0.6.0 - Release Summary
 
 ## Release Information

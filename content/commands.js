@@ -333,6 +333,11 @@ const BMUX_KEYBINDINGS = {
         'Quote': 'split-window -v',
         "'": 'split-window -v',
         'c': 'new-window',
+        'n': 'next-window',
+        'p': 'previous-window',
+        '&': 'kill-window',
+        ',': 'rename-window',
+        'w': 'list-windows',
         'x': 'kill-pane',
         'd': 'detach',
         ':': 'command-prompt',
@@ -365,6 +370,11 @@ const BMUX_KEYBINDINGS = {
         'Quote': 'split-window -v',
         "'": 'split-window -v',
         'c': 'new-window',
+        'n': 'next-window',
+        'p': 'previous-window',
+        '&': 'kill-window',
+        ',': 'rename-window',
+        'w': 'list-windows',
         'x': 'kill-pane',
         'd': 'detach',
         ':': 'command-prompt',
@@ -1068,11 +1078,144 @@ const BMUX_COMMANDS = {
 
     'new-window': {
         scope: 'overlay',
-        description: 'Reset the overlay to a single pane showing the current page',
-        usage: 'new-window',
+        description: 'Create a window (a second layout in this tab) and switch to it',
+        usage: 'new-window [name]',
         execute: function (api, args) {
-            api.client.newWindow();
-            return 'New window: layout reset to one pane';
+            const result = api.client.newWindow(args[0]);
+            if (!result.ok) return `Error: ${result.message}`;
+
+            const label = api.client.windowLabel(result.window);
+            const total = api.client.getWindows().length;
+            return `Window ${label} created (${total} window(s), ${api.client.getPanes().length} pane(s))`;
+        }
+    },
+
+    'reset-layout': {
+        scope: 'overlay',
+        description: 'Reset this window to a single pane showing the current page',
+        usage: 'reset-layout',
+        execute: function (api, args) {
+            api.client.resetLayout();
+            return 'Layout reset to one pane (this window only)';
+        }
+    },
+
+    'next-window': {
+        scope: 'overlay',
+        description: 'Switch to the next window, wrapping at the end',
+        usage: 'next-window [n]',
+        execute: function (api, args) {
+            const step = parseInt(args[0], 10);
+            const result = api.client.cycleWindow(Number.isFinite(step) && step !== 0 ? step : 1);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Window ${api.client.windowLabel(result.window)} ` +
+                `(${api.client.activeWindowIndex + 1}/${api.client.getWindows().length})`;
+        }
+    },
+
+    'previous-window': {
+        scope: 'overlay',
+        description: 'Switch to the previous window, wrapping at the start',
+        usage: 'previous-window [n]',
+        execute: function (api, args) {
+            const step = parseInt(args[0], 10);
+            const back = Number.isFinite(step) && step !== 0 ? -Math.abs(step) : -1;
+            const result = api.client.cycleWindow(back);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Window ${api.client.windowLabel(result.window)} ` +
+                `(${api.client.activeWindowIndex + 1}/${api.client.getWindows().length})`;
+        }
+    },
+
+    'last-window': {
+        scope: 'overlay',
+        description: 'Switch back to the window that was active before this one',
+        usage: 'last-window',
+        execute: function (api, args) {
+            const result = api.client.lastWindow();
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Window ${api.client.windowLabel(result.window)}`;
+        }
+    },
+
+    'select-window': {
+        scope: 'overlay',
+        description: 'Switch to a window by number or name',
+        usage: 'select-window <number|name>',
+        execute: function (api, args) {
+            const result = api.client.selectWindow(args[0]);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Window ${api.client.windowLabel(result.window)} selected ` +
+                `(${api.client.getPanes().length} pane(s))`;
+        }
+    },
+
+    'rename-window': {
+        scope: 'overlay',
+        description: 'Name this window; with no name it asks for one',
+        usage: 'rename-window [name]',
+        execute: async function (api, args) {
+            const client = api.client;
+
+            if (!args.length) {
+                const record = client.getActiveWindow();
+                if (!record) return 'Error: No window';
+
+                const answer = await api.askText({
+                    question: `Rename window ${client.windowLabel(record)}:`,
+                    placeholder: record.name,
+                    details: 'Windows are per tab and are restored with the layout.'
+                });
+                if (answer.cancelled) return 'Rename cancelled';
+
+                const renamed = client.renameWindow(answer.text);
+                if (!renamed.ok) return `Error: ${renamed.message}`;
+                return `Window renamed to "${renamed.name}"`;
+            }
+
+            const result = client.renameWindow(args[0]);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Window ${client.windowLabel(result.window)} renamed to "${result.name}"`;
+        }
+    },
+
+    'kill-window': {
+        scope: 'overlay',
+        description: 'Close a window and every pane in it (the last window is refused)',
+        usage: 'kill-window [number|name]',
+        execute: async function (api, args) {
+            const client = api.client;
+
+            if (!client.getWindows().length) return 'Error: No windows';
+            if (client.getWindows().length <= 1) return 'Error: Cannot kill the last window';
+
+            if (!args.length) {
+                const record = client.getActiveWindow();
+                const answer = await api.ask({
+                    question: `Kill window ${client.windowLabel(record)} (${client.getPanes().length} pane(s))?`,
+                    details: 'Every pane in it is closed. Other windows are untouched.',
+                    choices: [
+                        { id: 'yes', label: 'Kill window', key: 'y' },
+                        { id: 'no', label: 'Cancel', key: 'n' }
+                    ]
+                });
+                if (answer.cancelled || answer.choice === 'no') return 'Kill cancelled';
+            }
+
+            const result = client.killWindow(args[0]);
+            if (!result.ok) return `Error: ${result.message}`;
+            return `Killed window "${result.window.name}" — now ${client.windowLabel()} ` +
+                `(${client.getWindows().length} left)`;
+        }
+    },
+
+    'list-windows': {
+        scope: 'overlay',
+        description: 'List the windows in this tab, with their pane counts',
+        usage: 'list-windows [-j|--json]',
+        execute: function (api, args) {
+            const json = args.indexOf('-j') !== -1 || args.indexOf('--json') !== -1;
+            return api.client.listWindows(json);
         }
     },
 

@@ -79,7 +79,13 @@ const BMUX_CONSOLE_MAX_SHARE = 0.9;
 // layout before rendering a fresh one anyway.
 const BMUX_SAVE_DEBOUNCE = 400;
 const BMUX_RESTORE_TIMEOUT = 800;
-const SNAPSHOT_VERSION = 1;
+
+// Snapshot format, kept in step with background/main.js: version 2 stores a list
+// of windows. The background upgrades v1 snapshots on read, so this side only
+// ever has to apply v2.
+const SNAPSHOT_VERSION = 2;
+const BMUX_MAX_WINDOWS = 6;
+const BMUX_MAX_WINDOW_NAME = 32;
 
 // Pane console: height when first opened, the drag limits, and scrollback cap.
 const BMUX_CONSOLE_HEIGHT = 140;
@@ -499,6 +505,13 @@ class BMUXClient {
         this.rootPane = null;         // the pane that represents this tab's own page
         this.restoredNote = '';       // why the restored layout looks the way it does
 
+        // Windows: the fields above describe the ACTIVE window. Inactive windows
+        // keep their own copy here, which is what a switch swaps in — so every
+        // command, focus routine and renderer keeps working on "the layout".
+        this.windows = [];
+        this.activeWindowIndex = 0;
+        this.nextWindowId = 1;
+
         this.theme = 'frost';         // 'frost' (default) or 'classic'
         this.debugOpen = false;       // the floating debug window is optional
         this.verbose = false;         // mirror debug output into the focused pane
@@ -687,6 +700,7 @@ class BMUXClient {
 
           <div id="bmux-status-bar">
             <span id="bmux-status-left">[NORMAL]</span>
+            <button id="bmux-status-window" class="bmux-status-window" title="Next window (n)">1:main</button>
             <span id="bmux-status-right">Ready</span>
           </div>
         `;
@@ -703,6 +717,7 @@ class BMUXClient {
             handles: overlay.querySelector('#bmux-handles'),
             statusBar: overlay.querySelector('#bmux-status-bar'),
             statusLeft: overlay.querySelector('#bmux-status-left'),
+            statusWindow: overlay.querySelector('#bmux-status-window'),
             statusRight: overlay.querySelector('#bmux-status-right'),
             commandLine: overlay.querySelector('#bmux-command-line'),
             commandInput: overlay.querySelector('#bmux-command-input'),
@@ -762,6 +777,17 @@ class BMUXClient {
         this.bindCommandInput(this.ui.commandInput, {
             report: (text) => this.log(text)
         });
+
+        // The first window is created by loadPersistedLayout(): either from the
+        // snapshot or as a fresh one-pane window.
+
+        // The window chip is the mouse path to the next window (n does the same).
+        if (this.ui.statusWindow) {
+            this.ui.statusWindow.onclick = (event) => {
+                if (event) event.stopPropagation();
+                this.runCommandAndLog('next-window');
+            };
+        }
 
         // The script panel runs `.bmux` text: Run / Stop / File, plus Ctrl+Enter.
         if (this.ui.scriptRunButton) {
@@ -999,17 +1025,54 @@ class BMUXClient {
             this.log(`No saved layout: ${reply.reason}`);
         }
 
-        this.renderWindow();
+        this.ensureFirstWindow();
     }
 
     /** The current layout as a versioned, transport-safe snapshot. */
+    /** One node of a split tree as transport data. */
+    serializeNode(node) {
+        if (!node) return null;
+        if (node.kind === 'leaf') {
+            const pane = node.pane;
+            const data = { id: this.getPaneId(pane), url: this.getPaneUrl(pane) };
+            const custom = pane && pane.dataset ? pane.dataset.paneTitle : '';
+            if (custom) data.title = custom;
+            return { kind: 'leaf', pane: data };
+        }
+        return {
+            kind: 'split',
+            direction: node.direction,
+            ratio: Number(Number(node.ratio).toFixed(4)),
+            first: this.serializeNode(node.first),
+            second: this.serializeNode(node.second)
+        };
+    }
+
+    /** The active pane of a window record (by the `active` class), or its first. */
+    activePaneOf(record) {
+        const panes = [];
+        this.collectPaneRefs(record.layout, panes);
+        const active = panes.find((pane) => pane.classList.contains('active'));
+        return active || panes[0] || null;
+    }
+
+    /** The current layout of every window, as a versioned snapshot. */
     serializeLayout() {
-        if (!this.layout) return null;
+        if (!this.windows.length || !this.layout) return null;
 
-        const active = this.getActivePane();
+        this.stashActiveWindow();
+
+        let origin = window.location.href;
+        try {
+            origin = window.location.origin === 'null' ? window.location.href : window.location.origin;
+        } catch (e) {
+            origin = window.location.href;
+        }
+
+        // Consoles are keyed by pane id, so they travel with the snapshot once,
+        // not once per window.
         const consoles = {};
-
-        this.getPanes().forEach((pane) => {
+        this.allPanes().forEach((pane) => {
             const meta = {
                 open: this.isPaneConsoleOpen(pane),
                 height: this.getPaneConsoleHeight(pane)
@@ -1028,43 +1091,23 @@ class BMUXClient {
             consoles[this.getPaneId(pane)] = meta;
         });
 
-        const serializeNode = (node) => {
-            if (!node) return null;
-            if (node.kind === 'leaf') {
-                const pane = node.pane;
-                const data = { id: this.getPaneId(pane), url: this.getPaneUrl(pane) };
-                const custom = pane && pane.dataset ? pane.dataset.paneTitle : '';
-                if (custom) data.title = custom;
-                return { kind: 'leaf', pane: data };
-            }
+        const windows = this.windows.map((record) => {
+            const active = this.activePaneOf(record);
             return {
-                kind: 'split',
-                direction: node.direction,
-                ratio: Number(Number(node.ratio).toFixed(4)),
-                first: serializeNode(node.first),
-                second: serializeNode(node.second)
+                name: record.name,
+                layoutName: record.layoutName || null,
+                rootPaneId: record.rootPane ? this.getPaneId(record.rootPane) : null,
+                activeId: active ? this.getPaneId(active) : null,
+                zoomedId: record.zoomedPane ? this.getPaneId(record.zoomedPane) : null,
+                layout: this.serializeNode(record.layout)
             };
-        };
-
-        let origin = window.location.href;
-        try {
-            origin = window.location.origin === 'null' ? window.location.href : window.location.origin;
-        } catch (e) {
-            origin = window.location.href;
-        }
-
-        const root = this.rootPane && this.getPanes().indexOf(this.rootPane) !== -1
-            ? this.rootPane
-            : this.getPanes()[0];
+        });
 
         return {
             version: SNAPSHOT_VERSION,
             savedAt: Date.now(),
             origin: origin,
             url: window.location.href,
-            rootPaneId: root ? this.getPaneId(root) : null,
-            activeId: active ? this.getPaneId(active) : null,
-            zoomedId: this.zoomedPane ? this.getPaneId(this.zoomedPane) : null,
             nextPaneId: this.nextPaneId,
             prefs: {
                 theme: this.theme,
@@ -1072,13 +1115,15 @@ class BMUXClient {
                 verbose: this.verbose
             },
             consoles: consoles,
-            layout: serializeNode(this.layout)
+            activeWindow: this.activeWindowIndex,
+            windows: windows
         };
     }
 
-    /** Rebuild the overlay from a snapshot. Never throws. */
+    /** Rebuild the overlay from a version-2 snapshot. Never throws. */
     applySnapshot(snapshot) {
-        if (!snapshot || snapshot.version !== SNAPSHOT_VERSION || !snapshot.layout) {
+        if (!snapshot || snapshot.version !== SNAPSHOT_VERSION ||
+            !Array.isArray(snapshot.windows) || !snapshot.windows.length) {
             return { ok: false, reason: 'unsupported snapshot' };
         }
 
@@ -1088,32 +1133,37 @@ class BMUXClient {
             this.clearAllFilters();
             this.cancelPrompts();
             this.zoomedPane = null;
+            this.layout = null;
             this.layoutName = null;
             this.lastActivePane = null;
+            this.rootPane = null;
             this.rects = new Map();
+            this.windows = [];
+            this.activeWindowIndex = 0;
 
-            Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'))
-                .forEach((pane) => pane.remove());
+            this.allPanes().forEach((pane) => pane.remove());
 
-            const byId = new Map();
-
-            // The saved layout belongs to the page it was saved on. If this tab has
-            // since navigated elsewhere, its own page follows the tab: the root pane
-            // gets the current URL and the other panes keep theirs.
             const currentUrl = window.location.href;
             const savedUrl = typeof snapshot.url === 'string' ? snapshot.url : '';
             const followed = !!savedUrl && savedUrl !== currentUrl;
-            const rootId = followed && snapshot.rootPaneId ? String(snapshot.rootPaneId) : null;
 
-            const build = (node) => {
+            const requested = Number(snapshot.activeWindow);
+            const activeIndex = Number.isInteger(requested) && requested >= 0 && requested < snapshot.windows.length
+                ? requested
+                : 0;
+
+            const byId = new Map();
+
+            const build = (node, ctx) => {
                 if (!node) return null;
 
                 if (node.kind === 'leaf') {
                     const data = node.pane || {};
-                    const isRoot = rootId !== null && String(data.id) === rootId;
+                    const isRoot = ctx.isRoot && String(data.id) === ctx.rootId;
                     const pane = this.createPaneElement(isRoot ? currentUrl : (data.url || currentUrl));
                     if (data.id) pane.dataset.paneId = String(data.id);
                     if (data.title) pane.dataset.paneTitle = String(data.title);
+                    pane.dataset.windowId = ctx.record.id;
                     byId.set(pane.dataset.paneId, pane);
                     this.ui.panes.appendChild(pane);
                     return { kind: 'leaf', pane: pane };
@@ -1123,8 +1173,8 @@ class BMUXClient {
                     return null;
                 }
 
-                const first = build(node.first);
-                const second = build(node.second);
+                const first = build(node.first, ctx);
+                const second = build(node.second, ctx);
                 if (!first) return second;
                 if (!second) return first;
 
@@ -1137,13 +1187,33 @@ class BMUXClient {
                 };
             };
 
-            const tree = build(snapshot.layout);
-            if (!tree) {
+            // Windows: each entry keeps its own tree, ids and saved focus.
+            snapshot.windows.forEach((entry, index) => {
+                const data = entry && typeof entry === 'object' ? entry : {};
+                const record = this.createWindowRecord(data.name);
+                if (data.name) record.name = String(data.name).slice(0, BMUX_MAX_WINDOW_NAME);
+                record.layoutName = data.layoutName || null;
+
+                const ctx = {
+                    record: record,
+                    isRoot: followed && index === activeIndex,
+                    rootId: data.rootPaneId ? String(data.rootPaneId) : ''
+                };
+
+                record.layout = build(data.layout, ctx);
+                record.rootPaneId = ctx.rootId || null;
+                record.savedActiveId = data.activeId ? String(data.activeId) : null;
+                record.savedZoomedId = data.zoomedId ? String(data.zoomedId) : null;
+
+                if (record.layout) this.windows.push(record);
+            });
+
+            if (!this.windows.length) {
                 this.restoring = false;
                 return { ok: false, reason: 'empty layout' };
             }
 
-            this.layout = tree;
+            this.activeWindowIndex = Math.min(activeIndex, this.windows.length - 1);
 
             const prefs = snapshot.prefs || {};
             if (prefs.theme) this.setTheme(prefs.theme);
@@ -1151,7 +1221,7 @@ class BMUXClient {
             if (prefs.debugOpen !== undefined) this.setDebugOpen(prefs.debugOpen);
 
             const consoles = snapshot.consoles || {};
-            this.getPanes().forEach((pane) => {
+            this.allPanes().forEach((pane) => {
                 const saved = consoles[this.getPaneId(pane)];
                 if (!saved) return;
                 if (saved.height) pane.dataset.consoleHeight = String(saved.height);
@@ -1169,7 +1239,7 @@ class BMUXClient {
                 }
             });
 
-            const highestId = this.getPanes().reduce((max, pane) => {
+            const highestId = this.allPanes().reduce((max, pane) => {
                 const number = parseInt(String(this.getPaneId(pane)).replace('%', ''), 10);
                 return Number.isFinite(number) ? Math.max(max, number) : max;
             }, 0);
@@ -1181,27 +1251,52 @@ class BMUXClient {
                 this.nextPaneId
             );
 
-            this.rootPane = (rootId !== null ? byId.get(rootId) : null) ||
-                byId.get(String(snapshot.rootPaneId || '')) ||
-                this.getPanes()[0];
+            // Per-window focus and zoom, resolved against that window's panes.
+            this.windows.forEach((record) => {
+                const panes = [];
+                this.collectPaneRefs(record.layout, panes);
+
+                panes.forEach((pane) => pane.classList.remove('active'));
+
+                const savedActive = record.savedActiveId ? byId.get(record.savedActiveId) : null;
+                const chosen = savedActive && panes.indexOf(savedActive) !== -1 ? savedActive : panes[0];
+                if (chosen) chosen.classList.add('active');
+
+                const savedZoomed = record.savedZoomedId ? byId.get(record.savedZoomedId) : null;
+                record.zoomedPane = savedZoomed && panes.indexOf(savedZoomed) !== -1 ? savedZoomed : null;
+                record.lastActivePane = null;
+
+                if (!record.rootPane) {
+                    const rootId = record.rootPaneId;
+                    record.rootPane = (rootId && byId.get(rootId)) || panes[0] || null;
+                }
+                if (record.layout) {
+                    // rootPane was assigned when the tree was built; keep it valid.
+                    record.rootPane = panes.indexOf(record.rootPane) === -1 ? panes[0] : record.rootPane;
+                }
+
+                delete record.savedActiveId;
+                delete record.savedZoomedId;
+                delete record.rootPaneId;
+            });
+
+            this.unstashWindow(this.getActiveWindow());
+            this.applyWindowVisibility();
 
             if (followed) {
                 this.restoredNote = 'followed the page';
                 this.log(`Layout follows this tab's page: ${this.getPaneId(this.rootPane)} now shows ${currentUrl}`);
             }
 
-            const active = snapshot.activeId ? byId.get(String(snapshot.activeId)) : null;
-            this.setActivePane(active || this.getPanes()[0]);
-
-            if (snapshot.zoomedId) {
-                const zoomed = byId.get(String(snapshot.zoomedId));
-                if (zoomed) this.zoomedPane = zoomed;
-            }
-
             this.renderLayout();
+            this.stashActiveWindow();
             this.restoredFrom = 'session';
 
-            return { ok: true, panes: this.getPanes().length };
+            return {
+                ok: true,
+                panes: this.allPanes().length,
+                windows: this.windows.length
+            };
         } catch (error) {
             return { ok: false, reason: error && error.message ? error.message : String(error) };
         } finally {
@@ -1997,6 +2092,13 @@ class BMUXClient {
                 return ['on', 'off', 'status'];
             case 'script':
                 return ['run', 'file', 'demo', 'open', 'close', 'stop', 'status'];
+            case 'select-window':
+            case 'kill-window':
+                return this.getWindows()
+                    .map((record, index) => [String(index + 1), record.name])
+                    .reduce((all, pair) => all.concat(pair), []);
+            case 'list-windows':
+                return ['-j', '--json'];
             case 'cycle-pane':
                 return ['next', 'prev'];
             case 'split-window':
@@ -2075,13 +2177,262 @@ class BMUXClient {
     // --- Pane primitives (used by commands.js through api.client) ---
 
     /** Panes in layout order (reading order of the split tree). */
+    // --- windows: several layouts in one tab ---
+
+    /** Every pane in the overlay, across all windows (including hidden ones). */
+    allPanes() {
+        if (!this.ui || !this.ui.panes) return [];
+        return Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'));
+    }
+
+    getWindows() {
+        return this.windows;
+    }
+
+    getActiveWindow() {
+        return this.windows[this.activeWindowIndex] || null;
+    }
+
+    windowLabel(record) {
+        const window = record || this.getActiveWindow();
+        if (!window) return 'no window';
+        const number = this.windows.indexOf(window) + 1;
+        return `${number}:${window.name || number}`;
+    }
+
+    /** A window record: its own tree plus the per-window bits of the live state. */
+    createWindowRecord(name) {
+        const suggested = String(name == null ? '' : name)
+            .replace(/[\u0000-\u001f:]/g, '')
+            .trim()
+            .slice(0, BMUX_MAX_WINDOW_NAME);
+
+        return {
+            id: `w${this.nextWindowId++}`,
+            name: suggested || String(this.windows.length + 1),
+            layout: null,
+            zoomedPane: null,
+            rootPane: null,
+            layoutName: null,
+            lastActivePane: null
+        };
+    }
+
+    /** Copy the live fields into the active window record. */
+    stashActiveWindow() {
+        const record = this.getActiveWindow();
+        if (!record) return false;
+
+        record.layout = this.layout;
+        record.zoomedPane = this.zoomedPane;
+        record.rootPane = this.rootPane;
+        record.layoutName = this.layoutName;
+        record.lastActivePane = this.lastActivePane;
+        return true;
+    }
+
+    /** Load a window record's fields into the live state. */
+    unstashWindow(record) {
+        this.layout = record.layout;
+        this.zoomedPane = record.zoomedPane;
+        this.rootPane = record.rootPane;
+        this.layoutName = record.layoutName;
+        this.lastActivePane = record.lastActivePane;
+    }
+
+    /** Hide every pane that does not belong to the active window. */
+    applyWindowVisibility() {
+        const record = this.getActiveWindow();
+        const activeId = record ? record.id : null;
+
+        this.allPanes().forEach((pane) => {
+            if (pane.dataset.windowId === activeId) return;   // renderLayout owns those
+            pane.style.display = 'none';
+        });
+    }
+
+    /** Switch windows: stash, swap the live state, re-render. */
+    activateWindow(index) {
+        const target = this.windows[index];
+        if (!target) return { ok: false, message: 'No such window' };
+        if (index === this.activeWindowIndex && this.layout) {
+            return { ok: true, pane: this.getActivePane(), window: target };
+        }
+
+        this.clearPaneIndexes();
+        this.stashActiveWindow();
+        this.activeWindowIndex = index;
+        this.unstashWindow(target);
+
+        this.applyWindowVisibility();
+        this.renderLayout();
+
+        let active = this.getActivePane();
+        if (!active) {
+            active = this.getPanes()[0] || null;
+            if (active) this.setActivePane(active);
+        }
+
+        return { ok: true, pane: active, window: target };
+    }
+
+    cycleWindow(step) {
+        if (this.windows.length < 2) return { ok: false, message: 'Only one window' };
+
+        const size = this.windows.length;
+        const next = ((this.activeWindowIndex + (step || 1)) % size + size) % size;
+        const result = this.activateWindow(next);
+        return result.ok ? { ok: true, window: result.window } : result;
+    }
+
+    /** `select-window <number|name>`. */
+    selectWindow(token) {
+        const text = String(token == null ? '' : token).trim();
+        if (!text) return { ok: false, message: 'Usage: select-window <number|name>' };
+
+        const number = parseInt(text.replace(/^w/i, ''), 10);
+        if (Number.isFinite(number) && String(number) === text.replace(/^w/i, '')) {
+            if (number < 1 || number > this.windows.length) {
+                return { ok: false, message: `No window ${number} (1-${this.windows.length})` };
+            }
+            return this.activateWindow(number - 1);
+        }
+
+        const index = this.windows.findIndex((record) => record.name === text);
+        if (index === -1) return { ok: false, message: `No window named "${text}"` };
+        return this.activateWindow(index);
+    }
+
+    /** The window that was active before this one (kept as a simple rotation). */
+    lastWindow() {
+        if (this.windows.length < 2) return { ok: false, message: 'Only one window' };
+        const previous = (this.activeWindowIndex - 1 + this.windows.length) % this.windows.length;
+        const result = this.activateWindow(previous);
+        return result.ok ? { ok: true, window: result.window } : result;
+    }
+
+    renameWindow(name) {
+        const record = this.getActiveWindow();
+        if (!record) return { ok: false, message: 'No window' };
+
+        const clean = String(name == null ? '' : name)
+            .replace(/[\u0000-\u001f:]/g, '')
+            .trim()
+            .slice(0, BMUX_MAX_WINDOW_NAME);
+        if (!clean) return { ok: false, message: 'Usage: rename-window <name>' };
+
+        record.name = clean;
+        this.refreshStatus();
+        this.scheduleSave();
+        return { ok: true, window: record, name: clean };
+    }
+
+    /** Remove a window and every pane in it. The last window is refused. */
+    killWindow(token) {
+        if (this.windows.length <= 1) return { ok: false, message: 'Cannot kill the last window' };
+
+        let index = this.activeWindowIndex;
+        if (token !== undefined && token !== null && String(token).length) {
+            const number = parseInt(String(token), 10);
+            if (Number.isFinite(number)) {
+                if (number < 1 || number > this.windows.length) {
+                    return { ok: false, message: `No window ${number} (1-${this.windows.length})` };
+                }
+                index = number - 1;
+            } else {
+                index = this.windows.findIndex((record) => record.name === String(token));
+                if (index === -1) return { ok: false, message: `No window named "${token}"` };
+            }
+        }
+
+        const record = this.windows[index];
+        if (!record) return { ok: false, message: 'No such window' };
+
+        this.clearPaneIndexes();
+
+        const doomed = [];
+        this.collectPaneRefs(record.layout, doomed);
+        doomed.forEach((pane) => this.destroyPane(pane));
+
+        const wasActive = index === this.activeWindowIndex;
+        this.windows.splice(index, 1);
+
+        if (wasActive) {
+            this.activeWindowIndex = Math.min(index, this.windows.length - 1);
+            const next = this.getActiveWindow();
+            if (next) this.unstashWindow(next);
+            this.applyWindowVisibility();
+            this.renderLayout();
+
+            let active = this.getActivePane();
+            if (!active) {
+                active = this.getPanes()[0] || null;
+                if (active) this.setActivePane(active);
+            }
+        } else {
+            if (index < this.activeWindowIndex) this.activeWindowIndex -= 1;
+            this.stashActiveWindow();
+            this.applyWindowVisibility();
+            this.refreshStatus();
+        }
+
+        this.scheduleSave();
+        return { ok: true, window: record };
+    }
+
+    /** Remove a pane element and everything the client tracks for it. */
+    destroyPane(pane) {
+        if (!pane) return;
+        this.clearFilter(pane);
+        this.cancelPrompt(pane, 'its pane was removed');
+        if (this.filters && this.filters.delete) this.filters.delete(pane);
+        if (this.prompts && this.prompts.delete) this.prompts.delete(pane);
+        if (pane._bmuxFloat && pane._bmuxFloat.parentNode) {
+            pane._bmuxFloat.parentNode.removeChild(pane._bmuxFloat);
+        }
+        delete pane._bmuxFloat;
+        if (this.zoomedPane === pane) this.zoomedPane = null;
+        if (this.lastActivePane === pane) this.lastActivePane = null;
+        pane.remove();
+    }
+
+    /** `list-windows [-j]`. */
+    listWindows(json) {
+        this.stashActiveWindow();
+
+        if (json) {
+            return JSON.stringify(this.windows.map((record, index) => ({
+                number: index + 1,
+                name: record.name,
+                panes: this.paneCountOf(record.layout),
+                active: index === this.activeWindowIndex
+            })), null, 2);
+        }
+
+        const lines = ['Windows:'];
+        this.windows.forEach((record, index) => {
+            const panes = this.paneCountOf(record.layout);
+            const active = index === this.activeWindowIndex ? '  [ACTIVE]' : '';
+            lines.push(`${index + 1} ${String(record.name).padEnd(10)} ${panes} pane(s)${active}`);
+        });
+        return lines.join('\n');
+    }
+
+    paneCountOf(tree) {
+        const panes = [];
+        this.collectPaneRefs(tree, panes);
+        return panes.length;
+    }
+
     getPanes() {
         if (!this.ui) return [];
         const panes = [];
         this.collectPaneRefs(this.layout, panes);
 
         if (!panes.length) {
-            return Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'));
+            const record = this.getActiveWindow();
+            const activeId = record ? record.id : null;
+            return this.allPanes().filter((pane) => !activeId || pane.dataset.windowId === activeId);
         }
         return panes;
     }
@@ -2286,6 +2637,17 @@ class BMUXClient {
 
     refreshStatus() {
         if (!this.ui || !this.ui.statusRight) return;
+
+        const total = this.windows.length;
+        const label = total ? this.windowLabel() : 'no window';
+
+        if (this.ui.statusWindow) {
+            this.ui.statusWindow.textContent = total > 1 ? `${label} (${this.activeWindowIndex + 1}/${total})` : label;
+            this.ui.statusWindow.classList.toggle('bmux-status-window-many', total > 1);
+            this.ui.statusWindow.title = total > 1
+                ? `Window ${this.activeWindowIndex + 1} of ${total} — click or press n for the next one`
+                : 'This tab has one window (new-window creates another)';
+        }
 
         const pane = this.getActivePane();
         if (!pane) {
@@ -3669,7 +4031,9 @@ class BMUXClient {
                 `debug window: ${this.debugOpen ? 'open' : 'hidden'}`,
                 `auto-restore: ${this.persistEnabled ? 'on' : 'off'} (layout from ${this.restoredFrom})`,
                 `control mode: ${this.isControlMode ? 'on' : 'off'} · active: ${this.isActive ? 'yes' : 'no'}`,
-                `panes: ${this.getPanes().length} · zoomed: ${this.zoomedPane ? this.getPaneId(this.zoomedPane) : 'no'}`,
+                `windows: ${this.windows.length} (active ${this.windows.length ? this.windowLabel() : 'none'}) · ` +
+                    `panes here: ${this.getPanes().length} · panes total: ${this.allPanes().length}`,
+                `zoomed: ${this.zoomedPane ? this.getPaneId(this.zoomedPane) : 'no'}`,
                 `filters: ${this.filters.size} · prompts: ${this.prompts.size} · history: ${this.commandHistory.length}`
             ]);
         }
@@ -3727,7 +4091,7 @@ class BMUXClient {
 
         const target = this.getActivePane();
         if (!target) {
-            this.renderWindow();
+            if (!this.windows.length) this.ensureFirstWindow();
             return { ok: false, message: 'No pane to split' };
         }
 
@@ -3823,14 +4187,38 @@ class BMUXClient {
         return cursor ? cursor.pane : null;
     }
 
-    newWindow() {
+    /** Create a window with one pane on the current page and switch to it. */
+    newWindow(name) {
+        if (!this.ui) return { ok: false, message: 'Overlay not ready' };
+        if (this.windows.length >= BMUX_MAX_WINDOWS) {
+            return { ok: false, message: `At most ${BMUX_MAX_WINDOWS} windows per tab` };
+        }
+
         this.clearPaneIndexes();
-        this.log('New Window: layout reset to one pane');
-        this.renderWindow();
+        this.stashActiveWindow();
+
+        const record = this.createWindowRecord(name);
+        this.windows.push(record);
+        this.activeWindowIndex = this.windows.length - 1;
+
+        const pane = this.createPaneElement(window.location.href);
+        this.ui.panes.appendChild(pane);
+
+        this.layout = bmuxLeaf(pane);
+        this.rootPane = pane;
+        this.zoomedPane = null;
+        this.layoutName = null;
+        this.lastActivePane = null;
+
+        this.setActivePane(pane);
+        this.applyWindowVisibility();
+        this.renderLayout();
+
+        return { ok: true, pane: pane, window: record };
     }
 
-    /** Reset the overlay to a single pane showing the current page. */
-    renderWindow() {
+    /** Reset THIS window to a single pane showing the current page. */
+    resetLayout() {
         this.clearPaneIndexes();
         this.clearAllFilters();
         this.cancelPrompts();
@@ -3840,8 +4228,7 @@ class BMUXClient {
         this.lastActivePane = null;
         this.rects = new Map();
 
-        Array.prototype.slice.call(this.ui.panes.querySelectorAll('.bmux-pane'))
-            .forEach((pane) => pane.remove());
+        this.getPanes().forEach((pane) => this.destroyPane(pane));
 
         const pane = this.createPaneElement(window.location.href);
         this.ui.panes.appendChild(pane);
@@ -3849,7 +4236,20 @@ class BMUXClient {
         this.rootPane = pane;
 
         this.setActivePane(pane);
+        this.applyWindowVisibility();
         this.renderLayout();
+    }
+
+    /** First window of a fresh overlay (no snapshot): one pane on this page. */
+    ensureFirstWindow() {
+        if (!this.windows.length) {
+            const record = this.createWindowRecord('1');
+            this.windows.push(record);
+            this.activeWindowIndex = 0;
+        }
+        this.resetLayout();
+        this.stashActiveWindow();
+        return this.getActiveWindow();
     }
 
     createPaneElement(url) {
@@ -3858,6 +4258,10 @@ class BMUXClient {
 
         // Ids are assigned once and never reused; numbers follow the layout.
         pane.dataset.paneId = `%${this.nextPaneId++}`;
+
+        // Which window owns this pane: hiding a window is one display:none.
+        const owner = this.getActiveWindow();
+        if (owner) pane.dataset.windowId = owner.id;
 
         // Clicking anywhere on the pane makes it the active pane. Clicks that land
         // inside the iframe itself are caught by the window blur sync instead.
