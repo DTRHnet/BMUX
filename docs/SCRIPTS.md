@@ -1,6 +1,7 @@
 # `.bmux` script files
 
-**Version 0.6.0** — scripts shipped in 0.6.0; the format is stable within 0.6.x.
+**Version 0.7.0** — scripts shipped in 0.6.0; the format is stable, and windows
+(0.7.0) are ordinary commands inside a script.
 
 A `.bmux` file is a list of commands that BMUX runs in order, one line at a time,
 with `sleep` between the steps. It is how you record a demo, how you show someone
@@ -23,7 +24,7 @@ hand when you want to watch it happen more slowly.
 # A leading ">" or "$" is stripped, so a pasted transcript still runs.
 
 sleep 1                          # pause 1s between steps
-new-window                       # one command per line
+reset-layout                     # one command per line
 split-window -h -l 62%
 filter img; filter a             # ";" still chains inside a line
 sleep 2.5
@@ -91,15 +92,15 @@ The panel has the same buttons — **Run**, **Stop**, **File**, **×** — and
 `Ctrl+Enter` runs what is in the textarea. `script file` opens the browser's own
 file picker; if a browser ever refuses to open it from a typed command (activation
 rules differ), the panel's **File** button is the same call from a real click. Its progress line always names the
-command being run (`7/73 · select-layout main-vertical`), and turns ice-blue while
+command being run (`7/87 · select-layout main-vertical`), and turns ice-blue while
 a script is running.
 
 ```bmux
 > script demo
-Script "demo.bmux": ran 73 command(s)
+Script "demo.bmux": ran 87 command(s)
 ```
 
-Every step is echoed into the debug console with its index (`[7/73] …`) and its
+Every step is echoed into the debug console with its index (`[7/87] …`) and its
 result, so the transcript of a run is the same transcript you would get by typing
 it all yourself.
 
@@ -110,7 +111,7 @@ runs, because a demo that dies on one missing preset is useless. The run ends wi
 a count:
 
 ```
-Script "demo.bmux": ran 73/73, 2 command(s) reported an error (see the log)
+Script "demo.bmux": ran 87/87, 2 command(s) reported an error (see the log)
 ```
 
 ---
@@ -135,7 +136,7 @@ Script "demo.bmux": ran 73/73, 2 command(s) reported an error (see the log)
 ## Writing a demo script
 
 The pacing is the whole trick. From the shipped
-[`examples/demo.bmux`](../examples/demo.bmux) - 73 commands, about 50 s:
+[`examples/demo.bmux`](../examples/demo.bmux) - 87 commands, about a minute:
 
 | Step | Pause before the next line |
 |------|----------------------------|
@@ -143,25 +144,27 @@ The pacing is the whole trick. From the shipped
 | something the viewer must read (`list-layouts`, `help`, `info layout`) | 2.0 – 3.0 s |
 | a filter being drawn and left on screen | 2.0 – 2.4 s |
 | a quick confirmation of state (`save-layout`, `persist status`) | 0.6 – 1.2 s |
+| a window switch (`next-window`, `select-window`) | 1.4 – 1.8 s |
 
 Other habits worth copying:
 
-- **Start from a clean slate**: `sleep 1` then `new-window`, so the demo does not
-  depend on what the tab looked like before.
+- **Start from a clean slate**: `sleep 1` then `reset-layout`, so the demo does not
+  depend on what the tab looked like before. (`new-window` in 0.6.0 meant this; in
+  0.7.0 it creates a window — see the windows chapter below.)
 - **Name the panes** (`rename-pane main`) — the titles make the subsequent swap,
   rotate and zoom legible instead of anonymous boxes.
 - **Leave the reader oriented**: after a rotation or a preset change, a 1.2 s
   pause is enough; after `help`, three seconds is not too long.
 - **Do not end on a transient state.** The demo closes with `theme frost` and
   `focus-pane 1` so the final frame is a stable, presentable layout.
-- **Keep it under a minute.** `examples/demo.bmux` runs about 50 s including the
+- **Keep it under a minute.** `examples/demo.bmux` runs about 58 s including the
   command time; longer demos lose the room.
 
 ### The shipped demo, step by step
 
 `examples/demo.bmux` (identical to what `script demo` runs) walks through:
 
-1. **A useful three-pane layout** — `new-window`, two splits, then a title per
+1. **A useful three-pane layout** — `reset-layout`, two splits, then a title per
    pane (`main`, `docs`, `tools`).
 2. **Rearranging without reloads** — `select-layout main-vertical`, `swap-pane`,
    `rotate-window`, `select-layout tiled`, then `resize-pane -Z` twice to zoom in
@@ -173,7 +176,10 @@ Other habits worth copying:
    `persist status`.
 5. **Console and palette** — `verbose on`, `log on`, `log size 240`,
    `log detach`, `log attach`, `theme classic`, `theme frost`.
-6. **Polish** — `display-panes`, `info layout`, `verbose off`, `help`.
+6. **Windows** — `new-window docs`, a split inside it, `rename-window docs`,
+   `list-windows`, then `previous-window` / `next-window` and `select-window 1`.
+   Switching is a show/hide, so a recording of this chapter shows no page loading.
+7. **Polish** — `display-panes`, `info layout`, `verbose off`, `help`.
 
 ---
 
@@ -216,7 +222,7 @@ Practical notes:
 | `content/scripts.js` | the format: `bmuxParseScript`, `bmuxParseSleepArg`, and the built-in `BMUX_DEMO_SCRIPT` |
 | `content/main.js` | the runner: `runScript`, `stopScript`, `sleepSeconds`, the panel |
 | `content/commands.js` | the `sleep` and `script` commands |
-| `examples/demo.bmux` | the shipped demo, byte-identical to the built-in one |
+| `examples/demo.bmux` | the shipped demo (87 commands), byte-identical to the built-in one |
 | `examples/dtrh-tour.bmux` | the site tour used for the screenshot and the recording |
 
 See also: [COMMAND_USAGE.md](COMMAND_USAGE.md) for every command,

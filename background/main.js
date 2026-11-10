@@ -20,7 +20,14 @@
  *   local   : `persist:enabled`              - the auto-restore switch
  */
 
-const SNAPSHOT_VERSION = 1;
+// Snapshot format. Version 2 holds a list of windows, each with its own split
+// tree; version 1 had one tree at the top level and is upgraded on read, so a
+// layout saved by 0.6.0 still restores.
+const SNAPSHOT_VERSION = 2;
+const LEGACY_SNAPSHOT_VERSION = 1;
+const MAX_WINDOWS = 6;
+const MAX_WINDOW_NAME = 32;
+const MAX_TOTAL_PANES = 24;
 
 const PERSIST_ENABLED_KEY = 'persist:enabled';
 const PERSIST_INHERIT_KEY = 'persist:inherit';
@@ -32,7 +39,7 @@ const NAMED_PREFIX = 'layout:named:';
 const MAX_PANES = 12;
 const MAX_DEPTH = 32;
 const MAX_NAMED_LAYOUTS = 30;
-const MAX_SNAPSHOT_BYTES = 64 * 1024;
+const MAX_SNAPSHOT_BYTES = 96 * 1024;
 
 // Where `chrome.storage.session` is unavailable, the tab layer falls back to
 // `local` with a short time-to-live so stale layouts do not pile up forever.
@@ -124,45 +131,135 @@ function depthOf(node) {
     return 1 + Math.max(depthOf(node.first), depthOf(node.second));
 }
 
-function validateSnapshot(snapshot) {
+/** Total panes across a version-1 or version-2 snapshot (used in listings). */
+function snapshotPaneCount(snapshot) {
+    if (!snapshot || typeof snapshot !== 'object') return 0;
+    if (Array.isArray(snapshot.windows)) {
+        return snapshot.windows.reduce((total, entry) => total + countPanes(entry && entry.layout), 0);
+    }
+    return countPanes(snapshot.layout);
+}
+
+/** A window name is short, printable and single-token ("select-window <name>"). */
+function sanitizeWindowName(name) {
+    const text = String(name == null ? '' : name).replace(/[\u0000-\u001f:]/g, '').trim();
+    return text.slice(0, MAX_WINDOW_NAME);
+}
+
+/**
+ * Accept a stored snapshot of either version and return a normalized version-2
+ * one. This is the single migration point: the content script only ever sees v2,
+ * so a layout saved before windows existed arrives as one window called "main".
+ */
+function normalizeSnapshot(snapshot) {
     if (!snapshot || typeof snapshot !== 'object') {
         return { ok: false, reason: 'not an object' };
     }
-    if (snapshot.version !== SNAPSHOT_VERSION) {
-        return { ok: false, reason: `unknown version ${snapshot.version}` };
+
+    const version = snapshot.version;
+    if (version !== SNAPSHOT_VERSION && version !== LEGACY_SNAPSHOT_VERSION) {
+        return { ok: false, reason: 'unknown version ' + version };
     }
+
+    let windows;
+
+    if (version === LEGACY_SNAPSHOT_VERSION) {
+        if (!snapshot.layout || typeof snapshot.layout !== 'object') {
+            return { ok: false, reason: 'no layout tree' };
+        }
+        windows = [{
+            name: 'main',
+            layout: snapshot.layout,
+            activeId: snapshot.activeId || null,
+            zoomedId: snapshot.zoomedId || null,
+            rootPaneId: snapshot.rootPaneId || null,
+            layoutName: snapshot.layoutName || null
+        }];
+    } else {
+        if (!Array.isArray(snapshot.windows) || !snapshot.windows.length) {
+            return { ok: false, reason: 'no windows' };
+        }
+        windows = snapshot.windows.map((entry) => {
+            const window = entry && typeof entry === 'object' ? entry : {};
+            return {
+                name: sanitizeWindowName(window.name),
+                layout: window.layout,
+                activeId: window.activeId || null,
+                zoomedId: window.zoomedId || null,
+                rootPaneId: window.rootPaneId || null,
+                layoutName: window.layoutName || null
+            };
+        });
+    }
+
+    if (windows.length > MAX_WINDOWS) {
+        return { ok: false, reason: windows.length + ' windows is over the ' + MAX_WINDOWS + ' window cap' };
+    }
+
+    let total = 0;
+
+    for (let i = 0; i < windows.length; i++) {
+        const layout = windows[i].layout;
+
+        if (!layout || typeof layout !== 'object') {
+            return { ok: false, reason: 'window ' + (i + 1) + ' has no layout tree' };
+        }
+
+        const panes = countPanes(layout);
+        if (panes < 1) return { ok: false, reason: 'window ' + (i + 1) + ' has no panes' };
+        if (panes > MAX_PANES) {
+            return { ok: false, reason: panes + ' panes in window ' + (i + 1) + ' is over the ' + MAX_PANES + ' pane cap' };
+        }
+
+        const depth = depthOf(layout);
+        if (depth > MAX_DEPTH) {
+            return { ok: false, reason: 'window ' + (i + 1) + ' depth ' + depth + ' is over the ' + MAX_DEPTH + ' cap' };
+        }
+
+        if (!isValidNode(layout)) {
+            return { ok: false, reason: 'window ' + (i + 1) + ' has a malformed tree' };
+        }
+
+        total += panes;
+    }
+
+    if (total > MAX_TOTAL_PANES) {
+        return { ok: false, reason: total + ' panes is over the ' + MAX_TOTAL_PANES + ' pane cap' };
+    }
+
+    const requested = Number(snapshot.activeWindow);
+    const activeWindow = Number.isInteger(requested) && requested >= 0 && requested < windows.length
+        ? requested
+        : 0;
+
+    const normalized = {
+        version: SNAPSHOT_VERSION,
+        savedAt: typeof snapshot.savedAt === 'number' && isFinite(snapshot.savedAt) ? snapshot.savedAt : 0,
+        origin: typeof snapshot.origin === 'string' ? snapshot.origin : '',
+        url: typeof snapshot.url === 'string' ? snapshot.url : '',
+        nextPaneId: Number.isInteger(snapshot.nextPaneId) && snapshot.nextPaneId > 0 ? snapshot.nextPaneId : 1,
+        prefs: snapshot.prefs && typeof snapshot.prefs === 'object' ? snapshot.prefs : {},
+        consoles: snapshot.consoles && typeof snapshot.consoles === 'object' ? snapshot.consoles : {},
+        activeWindow: activeWindow,
+        windows: windows
+    };
 
     let bytes = 0;
     try {
-        bytes = JSON.stringify(snapshot).length;
+        bytes = JSON.stringify(normalized).length;
     } catch (e) {
         return { ok: false, reason: 'not serialisable' };
     }
     if (bytes > MAX_SNAPSHOT_BYTES) {
-        return { ok: false, reason: `${bytes} bytes is over the ${MAX_SNAPSHOT_BYTES} byte cap` };
+        return { ok: false, reason: bytes + ' bytes is over the ' + MAX_SNAPSHOT_BYTES + ' byte cap' };
     }
 
-    const layout = snapshot.layout;
-    if (!layout || typeof layout !== 'object') {
-        return { ok: false, reason: 'no layout tree' };
-    }
+    return { ok: true, panes: total, windows: windows.length, snapshot: normalized };
+}
 
-    const panes = countPanes(layout);
-    if (panes < 1) return { ok: false, reason: 'no panes' };
-    if (panes > MAX_PANES) {
-        return { ok: false, reason: `${panes} panes is over the ${MAX_PANES} cap` };
-    }
-
-    const depth = depthOf(layout);
-    if (depth > MAX_DEPTH) {
-        return { ok: false, reason: `tree depth ${depth} is over the ${MAX_DEPTH} cap` };
-    }
-
-    if (!isValidNode(layout)) {
-        return { ok: false, reason: 'malformed tree' };
-    }
-
-    return { ok: true, panes: panes };
+/** Validate a snapshot and hand back the normalized (version 2) form to store. */
+function validateSnapshot(snapshot) {
+    return normalizeSnapshot(snapshot);
 }
 
 function isValidNode(node) {
@@ -254,11 +351,11 @@ async function saveTabLayout(tabId, snapshot) {
 
     const { area, fallback } = await tabArea();
     const record = fallback
-        ? { snapshot: snapshot, savedAt: Date.now(), fallback: true }
-        : { snapshot: snapshot, savedAt: Date.now() };
+        ? { snapshot: check.snapshot, savedAt: Date.now(), fallback: true }
+        : { snapshot: check.snapshot, savedAt: Date.now() };
 
     await areaSet(area, { [tabLayoutKey(tabId)]: record });
-    return { ok: true, panes: check.panes, fallback: fallback };
+    return { ok: true, panes: check.panes, windows: check.windows, fallback: fallback };
 }
 
 async function loadTabLayout(tabId) {
@@ -281,7 +378,7 @@ async function loadTabLayout(tabId) {
         return { ok: true, snapshot: null, reason: check.reason };
     }
 
-    return { ok: true, snapshot: record.snapshot };
+    return { ok: true, snapshot: check.snapshot };
 }
 
 async function clearTabLayout(tabId) {
@@ -302,7 +399,7 @@ async function listNamedLayouts(origin) {
             return {
                 name: key.slice(prefix.length),
                 savedAt: record.savedAt || 0,
-                panes: record.panes || countPanes(record.snapshot && record.snapshot.layout)
+                panes: record.panes || snapshotPaneCount(record.snapshot)
             };
         })
         .sort((a, b) => b.savedAt - a.savedAt);
@@ -317,7 +414,7 @@ async function saveNamedLayout(origin, name, snapshot) {
     if (!check.ok) return { ok: false, reason: check.reason };
 
     const local = localArea();
-    const record = { savedAt: Date.now(), panes: check.panes, snapshot: snapshot };
+    const record = { savedAt: Date.now(), panes: check.panes, snapshot: check.snapshot };
     await areaSet(local, { [namedKey(origin, clean)]: record });
 
     // Keep the newest MAX_NAMED_LAYOUTS for this origin.
@@ -327,7 +424,7 @@ async function saveNamedLayout(origin, name, snapshot) {
         await areaRemove(local, stale);
     }
 
-    return { ok: true, name: clean, panes: check.panes };
+    return { ok: true, name: clean, panes: check.panes, windows: check.windows };
 }
 
 async function loadNamedLayout(origin, name) {
@@ -341,7 +438,7 @@ async function loadNamedLayout(origin, name) {
     const check = validateSnapshot(record.snapshot);
     if (!check.ok) return { ok: true, snapshot: null, reason: check.reason };
 
-    return { ok: true, snapshot: record.snapshot, name: clean };
+    return { ok: true, snapshot: check.snapshot, name: clean };
 }
 
 async function deleteNamedLayouts(origin, name) {

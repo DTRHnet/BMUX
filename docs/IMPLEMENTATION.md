@@ -1,14 +1,15 @@
 # BMUX Implementation Summary
 
-**Version 0.6.0** — this describes the shipped code, not a plan. Where a section
+**Version 0.7.0** — this describes the shipped code, not a plan. Where a section
 records history (the popup that used to exist, the layouts that used to be thrown
 away on reload), it says so.
 
-## Current Status (0.6.0)
+## Current Status (0.7.0)
 
-BMUX is fully functional. 44 commands across two scopes, a ratio-driven split tree
+BMUX is fully functional. 52 commands across two scopes, a ratio-driven split tree
 that never reloads a page, visual filters, clickable prompts, per-pane consoles that
-can be detached, per-tab persistence with named layouts, and `.bmux` script files.
+can be detached, per-tab persistence with named layouts plus several named windows per tab, and
+`.bmux` script files.
 
 ### 1. **Activation**
 There is no popup and no session object. One action — the toolbar icon
@@ -88,6 +89,35 @@ proportionally (`window.resize` handler).
 rectangle and sets `display: none` on the others — they stay loaded (an iframe
 that is merely hidden keeps running). Handles are hidden while zoomed, and a
 directional focus move unzooms first so it reads the real geometry.
+
+### 6b. **Windows**
+A tab holds up to six **windows**, each a complete layout. The trick that keeps the
+diff small: the client's live fields — `layout`, `zoomedPane`, `rootPane`,
+`layoutName`, `lastActivePane` — always describe the **active** window, and every
+other window keeps its own copy in a record:
+
+```javascript
+window = { id: 'w2', name: 'docs', layout, zoomedPane, rootPane, layoutName, lastActivePane }
+```
+
+Switching is therefore three steps, in `activateWindow()`: `stashActiveWindow()`
+copies the live fields into the current record, `unstashWindow(record)` loads the
+target's, and `applyWindowVisibility()` hides every `.bmux-pane` whose
+`dataset.windowId` is not the active window's. `renderLayout()` then runs unchanged
+— it only ever sees one tree, so splitting, focus, zoom, presets, `display-panes`
+and the renderer needed no window awareness at all.
+
+Panes are never moved between windows in the DOM: a hidden window's panes stay where
+they are with `display: none`, which keeps their iframes running (an unloaded iframe
+would reload on the way back). That is what makes a switch instant and what caps the
+feature at six windows.
+
+`killWindow()` destroys that window's panes (`destroyPane()`, which also drops its
+filters, prompts and floating console) and refuses the last window, mirroring
+`kill-pane`'s rule for the last pane. `newWindow()` creates one pane on the current
+page and switches to it; `resetLayout()` is the old `new-window` behaviour, now
+scoped to one window. Completion vocabulary for `select-window`/`kill-window` is
+read from the window list, so names complete without extra wiring.
 
 ### 7. **Focus model**
 - The active pane is the one with the `active` class (an ice-cyan outline and a
@@ -238,7 +268,7 @@ Two layers, both written by `background/main.js` (the content script never touch
 
 | Layer | Key | Lifetime |
 |-------|-----|----------|
-| `storage.session` | `layout:tab:<tabId>` | reload / navigation of that tab; dies with the browser |
+| `storage.session` | `layout:tab:<tabId>` | every window of that tab; survives reload / navigation; dies with the browser |
 | `storage.local` | `layout:named:<origin>:<name>` | explicit saves; survives restarts |
 | `storage.local` | `persist:enabled` | the auto-restore switch |
 | `storage.local` | `persist:inherit` | whether a new tab adopts the newest layout |
@@ -262,10 +292,10 @@ consoles restored, `nextPaneId` at least the highest restored id — inside a
 `restoring` barrier so saves cannot recurse, with `try/finally` so the barrier is
 always cleared.
 
-**Follow the page.** A snapshot records which pane was the root (`rootPaneId`). When
+**Follow the page.** Each window records which pane was its root (`rootPaneId`). When
 the reloaded `window.location.href` differs from the snapshot's `url`, `applySnapshot`
-repoints the root pane at the current address and leaves every other pane's URL
-alone — the tab's layout survives navigation without resurrecting the page you left.
+repoints the **active** window's root pane at the current address (the other windows
+are not this tab's page) and leaves every other pane's URL alone — the tab's layout survives navigation without resurrecting the page you left.
 A plain reload matches, so nothing changes; `restoredNote` reads `followed the page`.
 
 **Inheritance.** With `persist:inherit` on, `persist-load` returns
@@ -275,10 +305,19 @@ and the content script applies it through the same `rootPaneId` path, so the new
 tab shows its own page in the root pane and the copied panes keep theirs. When the
 switch is off, no snapshot is offered to other tabs.
 
-**Validation.** The background validates every snapshot whole (version, node kinds,
-directions, ratios in 1–99%, URL strings, ≤ 12 panes, depth ≤ 32, ≤ 64 KB) before
-storing and again before handing one back; a rejected snapshot is deleted and
-reported as "no snapshot", never partly applied.
+**Snapshot v2 and the v1 upgrade.** Version 1 held one tree at the top level;
+version 2 holds `windows: [{ name, layout, activeId, zoomedId, rootPaneId,
+layoutName }]` plus `activeWindow`. `normalizeSnapshot()` in the background is the
+single migration point: it accepts both versions, wraps a v1 tree as one window
+named `main`, and returns the normalized v2 form, which is what gets stored and
+what `persist-load` hands the client. The content script therefore only ever applies
+v2 and never carries migration code.
+
+**Validation.** Every snapshot is normalized and checked whole before storing and
+again before handing one back: version, window count ≤ 6, node kinds, directions,
+ratios in 1–99%, URL strings, ≤ 12 panes per window, ≤ 24 panes in total, depth
+≤ 32, ≤ 96 KB, and window names sanitized to 32 printable characters. A rejected
+snapshot is deleted and reported as "no snapshot", never partly applied.
 
 **Housekeeping.** `tabs.onRemoved` deletes that tab's key; `onStartup`/`onInstalled`
 prune session keys for tabs that no longer exist; where `storage.session` is
@@ -386,7 +425,7 @@ the filter commands and leaves the clickable card to the person driving the demo
 ### File Structure
 ```
 BMUX/
-├── manifest.json          # Extension configuration (v0.6.0)
+├── manifest.json          # Extension configuration (v0.7.0)
 ├── background/
 │   └── main.js           # Service worker (relay + layout persistence)
 ├── content/
@@ -466,21 +505,24 @@ to `content/commands.js` only.
 3. **Hotkey Conflicts**: If `Alt+Shift+B` is taken, change in `chrome://extensions/shortcuts`
 4. **Restored panes load fresh**: a page cannot be cloned live, so scroll
    position, form input and in-page state are lost on restore
-5. **No multiple windows / layout tabs**: `new-window` resets the overlay
+5. **Windows are capped at six per tab**, and a hidden window keeps its iframes
+   running — that is the cost of switching without reloading
 6. **No floating panes, break/join pane, or input broadcasting**
 7. **Mouse only**: resizing requires a pointer; touch is not handled
 8. **Cross-origin panes** cannot be inspected or boxed (`source`, `filter`,
    `capture-pane`); navigation, reload, sizing and reordering work regardless
 9. **Filter boxes are measured when drawn**: pages that move elements without
    mutating the DOM (CSS transitions) need the filter re-run
-10. **`kill-pane` refuses the last pane**; use `new-window` to reset
-11. **A `.bmux` script cannot click a prompt**: it waits for a human answer or the
-   15 s timeout. The demos pass `-y` instead
-12. **A script does not survive a navigation**: a reload or a new tab destroys the
-   runner, so the persistence round trip stays manual; the script panel is not
-   saved with the layout either
-13. **Scripts are not code**: no variables, loops or branches, and no file or
-   network access — a script is a list of commands you could have typed
+10. **`kill-pane` refuses the last pane**; use `reset-layout` to reset the window
+11. **`new-window` changed meaning in 0.7.0** (create a window, not reset a pane):
+    a `.bmux` script or habit from 0.6.0 wants `reset-layout` instead
+12. **A `.bmux` script cannot click a prompt**: it waits for a human answer or the
+    15 s timeout. The demos pass `-y` instead
+13. **A script does not survive a navigation**: a reload or a new tab destroys the
+    runner, so the persistence round trip stays manual; the script panel is not
+    saved with the layout either
+14. **Scripts are not code**: no variables, loops or branches, and no file or
+    network access — a script is a list of commands you could have typed
 
 ## Troubleshooting
 

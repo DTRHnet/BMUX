@@ -2,7 +2,7 @@
 
 > **Historical (0.0.1).** A snapshot of the first working command registry, when
 > there were six commands. Kept as a record; for the current state see
-> [IMPLEMENTATION.md](IMPLEMENTATION.md) (0.6.0, 44 commands).
+> [IMPLEMENTATION.md](IMPLEMENTATION.md) (0.7.0, 52 commands).
 
 ## Current Status
 

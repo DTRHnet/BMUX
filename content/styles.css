@@ -608,6 +608,41 @@
   background: var(--bmux-accent-soft);
 }
 
+/* Window chip: which layout of this tab you are looking at, and the mouse path
+   to the next one (the `n` key does the same). */
+.bmux-status-window {
+  margin-left: 8px;
+  padding: 1px 8px;
+  border: 1px solid var(--bmux-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--bmux-text-dim);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.bmux-status-window:hover {
+  color: var(--bmux-accent-strong);
+  border-color: var(--bmux-accent-line);
+}
+
+.bmux-status-window.bmux-status-window-many {
+  color: var(--bmux-accent);
+  border-color: var(--bmux-accent-line);
+  background: var(--bmux-accent-soft);
+}
+
+/* The status bar keeps the pane info on the right; the chip sits next to the
+   Control Mode chip on the left. */
+#bmux-status-bar {
+  gap: 8px;
+}
+
+#bmux-status-right {
+  margin-left: auto;
+}
+
 /* --- .bmux script panel (`script`, `script run`, `script file`) --- */
 #bmux-script-panel {
   position: fixed;

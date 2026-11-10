@@ -1,6 +1,6 @@
 # BMUX - Adding Commands
 
-**Version 0.6.0** — commands live in `content/commands.js`, the `.bmux` format
+**Version 0.7.0** — commands live in `content/commands.js`, the `.bmux` format
 in `content/scripts.js`; a command written to these rules is usable from the
 console, the keys *and* a script without extra work.
 
@@ -321,21 +321,53 @@ Rules the persister enforces (in `background/main.js`, on write *and* read): ver
 that produces a bigger or stranger layout will not have it restored — keep layouts
 within those limits.
 
+### Commands and windows
+
+Several windows live in one tab, but only one of them is *live*: `client.layout`,
+`client.zoomedPane`, `client.rootPane`, `client.layoutName` and
+`client.lastActivePane` describe the **active window**, and every existing method
+(`getPanes`, `splitWindow`, `killPane`, `applyLayout`, the renderer) works on it
+unchanged. Do not touch an inactive window's tree:
+
+- Read windows with `client.getWindows()`; the live one is
+  `client.getActiveWindow()` and `client.activeWindowIndex`.
+- `client.stashActiveWindow()` writes the live fields back into the active record.
+  Call it before you read `getWindows()[i].layout` of the active window, or before
+  switching — `activateWindow`, `cycleWindow`, `killWindow` and
+  `serializeLayout()` already do.
+- A pane belongs to a window via `pane.dataset.windowId`; `client.allPanes()` spans
+  every window (used for consoles and id bookkeeping), while `client.getPanes()`
+  is the active window's panes in layout order (used for numbering and focus).
+- New windows go through `client.newWindow(name)`; anything that hides or shows a
+  window must end with `applyWindowVisibility()` so inactive panes stay
+  `display:none` (never `remove()` — hidden iframes keep running, which is the
+  point of windows).
+
 The snapshot shape, if you need to read one:
 
 ```javascript
 {
-  version: 1, savedAt: 0, origin: 'https://example.com', url: 'https://example.com/',
-  rootPaneId: '%1', activeId: '%2', zoomedId: null, nextPaneId: 3,
+  version: 2, savedAt: 0, origin: 'https://example.com', url: 'https://example.com/',
+  nextPaneId: 4,
   prefs: { theme: 'frost', debugOpen: false, verbose: false },
   consoles: { '%1': { open: true, height: 180 } },
-  layout: { kind: 'split', direction: 'row', ratio: 0.3,
-            first:  { kind: 'leaf', pane: { id: '%1', url: '…', title: 'Docs' } },
-            second: { kind: 'leaf', pane: { id: '%2', url: '…' } } }
+  activeWindow: 0,
+  windows: [
+    { name: 'main', rootPaneId: '%1', activeId: '%2', zoomedId: null, layoutName: null,
+      layout: { kind: 'split', direction: 'row', ratio: 0.3,
+                first:  { kind: 'leaf', pane: { id: '%1', url: '…', title: 'Docs' } },
+                second: { kind: 'leaf', pane: { id: '%2', url: '…' } } } },
+    { name: 'docs', rootPaneId: '%3', activeId: '%3', zoomedId: null, layoutName: null,
+      layout: { kind: 'leaf', pane: { id: '%3', url: '…' } } }
+  ]
 }
+
+A version-1 snapshot (one top-level `layout` tree) is still accepted: the background
+normalizes it into this shape with a single window named `main`, so a command that
+writes snapshots never has to handle two formats.
 ```
 
-**`rootPaneId` is the pane that follows the page.** The snapshot belongs to the
+**`rootPaneId` is the pane that follows the page**, on every window. The snapshot belongs to the
 tab, not to the address: when the tab reloads somewhere else, `applySnapshot()`
 writes `window.location.href` into that pane and leaves every other pane alone. If
 your command tracks "the page this layout was made for", read
@@ -351,7 +383,7 @@ panes are the ones the snapshot recorded.
 command that works when typed works in a script — nothing to add. Three rules keep
 it that way:
 
-- **Return a string** for the result (the runner logs it after the `[7/73]` echo),
+- **Return a string** for the result (the runner logs it after the `[7/87]` echo),
   and `Error: …` for a failure so the summary can count it.
 - **Be `async` when you wait.** The runner awaits each line, so an `await` inside
   `execute` holds the script until it resolves — that is how a prompt or a network
@@ -407,7 +439,10 @@ Overlay scope:
 | `select-layout <name>` / `next-layout` | Layout presets |
 | `swap-pane <a> [b]` / `rotate-window [-r]` | Reorder panes |
 | `display-panes` | Show numbers, pick with a digit |
-| `new-window` | Reset the overlay to one pane |
+| `new-window [name]` | Create a window and switch to it |
+| `reset-layout` | Reset this window to one pane |
+| `next-window` / `previous-window` / `last-window` / `select-window` / `rename-window` / `kill-window` / `list-windows` | Window management (see [COMMAND_USAGE](COMMAND_USAGE.md)) |
+| `escape` | What `Esc` runs: clear filter highlights, else leave Control Mode |
 | `detach` | Hide or show the overlay |
 | `control-mode [on\|off\|toggle]` | Enter or leave Control Mode |
 | `command-prompt` | Open the `:` line |

@@ -1,6 +1,6 @@
 # BMUX Command Usage Guide
 
-**Version 0.6.0** — 44 commands. Every command below is what the shipped
+**Version 0.7.0** — 52 commands. Every command below is what the shipped
 `content/commands.js` defines; the `.bmux` script format has its own guide
 ([SCRIPTS.md](SCRIPTS.md)).
 
@@ -87,7 +87,11 @@ Control Mode and the `Ctrl+b` prefix map keys to command lines through
 |-----|--------------|----------------|
 | `%` | `split-window -h` | same |
 | `"` | `split-window -v` | same |
-| `c` | `new-window` | same |
+| `c` | `new-window` (create a window) | same |
+| `n` / `p` | `next-window` / `previous-window` | same |
+| `&` | `kill-window` (asks first) | same |
+| `,` | `rename-window` (asks for a name) | same |
+| `w` | `list-windows` | same |
 | `x` | `kill-pane` | same |
 | `d` | `detach` | same |
 | `:` | `command-prompt` | same |
@@ -236,12 +240,18 @@ explicit cases.
 
 | Thing | Survives | Where |
 |-------|----------|-------|
-| Split tree and ratios, pane URLs, custom titles, focus, maximize, console open/height | page reload, in-page navigation | `chrome.storage.session` (`layout:tab:<tabId>`) |
+| Every window: its name, split tree and ratios, pane URLs, custom titles, focus, maximize, console open/height, and which window is active | page reload, in-page navigation | `chrome.storage.session` (`layout:tab:<tabId>`) |
 | Named layouts (`save-layout`) | browser restart, extension update | `chrome.storage.local` |
 | Prompts, filter boxes, focus history, console scrollback | nothing (transient UI) | — |
 
 Restoring **recreates the panes**, so each page loads fresh: scroll position, form
 input and in-page JavaScript state cannot be carried over.
+
+Snapshots are version 2 (a list of windows). A version-1 snapshot — anything saved
+by 0.6.0 — is upgraded on read: its single tree becomes one window named `main`, so
+upgrading the extension never costs you a layout. Caps: 6 windows, 12 panes per
+window, 24 panes in total, depth 32, 96 KB per snapshot; a snapshot over any cap is
+refused whole.
 
 ### `debug [on|off|toggle]`
 The floating debug window is optional and starts hidden. `debug on` shows it (drag
@@ -492,9 +502,71 @@ every pane one slot along the layout (forwards: each pane moves to the next slot
 Shows each pane's number over it for two seconds. Press a digit to focus that
 pane; `Escape` cancels.
 
-### `new-window`
-Resets the overlay to a single pane showing the current page. This discards the
-current layout (and reloads that one page, because the pane is new).
+### `new-window [name]`
+Creates a **window**: a second layout in this tab, starting as one pane on the
+current page, and switches to it. Up to six per tab.
+
+```
+> new-window docs
+Window 2:docs created (2 window(s), 1 pane(s))
+> new-window
+Error: At most 6 windows per tab
+```
+
+This changed meaning in 0.7.0. It used to reset the overlay; that is `reset-layout`
+now, and a `.bmux` script written for 0.6.0 needs that one-word edit.
+
+### `reset-layout`
+Resets **this window** to a single pane showing the current page. Other windows are
+untouched. (This is what `new-window` did before 0.7.0.)
+
+### `next-window [n]` / `previous-window [n]`
+Switches to the next or previous window, wrapping at either end. `n` and `p` are the
+keys. With one window: `Error: Only one window`.
+
+### `last-window`
+Goes back to the window that was active before this one (a simple two-step toggle
+between the last two windows). No key: `l` is the pane console.
+
+### `select-window <number|name>`
+Switches to a window by its 1-based number in layout order, or by its name.
+
+```
+> select-window 2
+Window 2:docs selected (2 pane(s))
+> select-window docs
+Window 2:docs selected (2 pane(s))
+> select-window 9
+Error: No window 9 (1-2)
+```
+
+### `rename-window [name]`
+Names this window (`rename-window docs`). With no argument it opens a text prompt —
+`, ` does the same. Names are single words up to 32 characters; they are restored
+with the layout.
+
+### `kill-window [number|name]`
+Closes a window and every pane in it. With no argument it asks first with a
+confirmation card (`&` does the same); the last window is always refused, because a
+tab always has one layout.
+
+```
+> kill-window 2
+Killed window "docs" — now 1:1 (1 left)
+> kill-window
+Error: Cannot kill the last window
+```
+
+### `list-windows [-j]`
+Every window in this tab, in order, with its pane count and a marker for the active
+one. `-j` prints JSON with `number`, `name`, `panes` and `active`.
+
+```
+> list-windows
+Windows:
+1 1          3 pane(s)
+2 docs       2 pane(s)  [ACTIVE]
+```
 
 ### `detach`
 Hides or shows the overlay. Reports `Detached` or `Attached`.
@@ -563,15 +635,15 @@ Runs a `.bmux` script — a list of command lines with `sleep` between them.
 
 ```
 > script demo
-Script "demo.bmux": ran 73 command(s)
+Script "demo.bmux": ran 87 command(s)
 > script status
-Script panel: open · 73 command(s)
+Script panel: open · 87 command(s)
 Runner: no script running
 > script run
-Script "demo.bmux": stopped after 12/73
+Script "demo.bmux": stopped after 12/87
 ```
 
-Every line is echoed into the debug console as `[7/73] select-layout main-vertical`
+Every line is echoed into the debug console as `[7/87] select-layout main-vertical`
 with its result, so a run leaves the same transcript as typing it. One script runs
 at a time, a script cannot start another, and a failing line does not stop the rest
 (the run ends with a count of the errors). The format, limits and a walkthrough of
@@ -832,7 +904,8 @@ The debug console and the `:` line always act on the **active pane**:
 
 - Blue glowing border
 - Has the `.active` class
-- Shown in the status bar as `pane 2 %2 · 30%x100%`
+- Shown in the status bar as `2:docs (2/2) · pane 2 %2 · 30%x100%` — the window
+  chip comes first and cycles to the next window when clicked
 - Its footer has a per-pane status segment, used by `filter` to name the element
   under the pointer
 
@@ -1000,7 +1073,7 @@ sleep 2.5
 - **Limits** — 500 commands, 2000 characters per line, 64 KB per file. A script
   that breaks one is refused whole, with the line number.
 - **Errors**: a failing line is logged and the run continues; the summary counts
-  them (`ran 40/73, 2 command(s) reported an error`).
+  them (`ran 87/87, 2 command(s) reported an error`).
 - **Not possible**: clicking a prompt (pass `-y` instead), surviving a reload or
   navigation, variables/loops/branches, background execution.
 
