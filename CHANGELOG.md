@@ -5,6 +5,43 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-10 (second pass)
+
+Four things that make the release feel finished.
+
+### Added
+
+- **Seven palettes.** `theme` now knows `frost` (still the default), `classic`,
+  `midnight`, `amber`, `light`, `nord` and `rose`, and lists them with the current one
+  marked; `theme next` / `theme prev` cycle and the choice is saved with the layout.
+  Every palette is one block of CSS custom properties, so the whole UI follows.
+- **Box-drawn tables everywhere.** `list-panes`, `list-windows`, `list-layouts`,
+  `list-cookies`, `list-storage`, `list-resources` and the theme list now render
+  `┌─┬─┐` rules, right-aligned numeric columns and ellipsised cells, wrapped to 96
+  characters. `list-panes` gained a `state` column (`ACTIVE+ZOOM` when both apply).
+- **The README** leads with the project logo, centred and adapted to light and dark
+  mode, above a centred badge row.
+
+### Fixed
+
+- **Clicking a pane's page now focuses that pane.** Only the footer used to work,
+  because a click inside an iframe never reached the pane element and switching
+  between two iframes does not blur the top window. The frame reports pointer and
+  focus activity to its parent, which maps the window back to its pane; the old
+  blur-based sync stays as a backstop.
+
+### Verification (second pass)
+
+- jsdom: **1138 checks** (30 more) — every palette applies and persists, unknown names
+  are refused, `next`/`prev` cycle, box-table borders/alignment/ellipsis, and the
+  pane-focus message handling (both directions, foreign windows ignored, non-focus
+  messages falling through to the inspection listener).
+- Chromium 150, unpacked: **173 checks** (6 more) — a real mouse click on a pane's
+  page focuses that pane (and the other direction), and `theme midnight` / `light` /
+  `frost` change the computed status-bar colour.
+
+---
+
 ## [0.8.0] - 2026-11-10
 
 BMUX can look inside a pane: cookies, storage, forms, scripts, resources, an

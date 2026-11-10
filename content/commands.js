@@ -103,6 +103,10 @@ function bmuxCookiesToNetscape(cookies, hostLabel) {
 // Directions accepted by focus-pane and resize-pane.
 const BMUX_DIRECTIONS = ['up', 'down', 'left', 'right'];
 
+// Palettes accepted by `theme`. Frost is the default; the rest are pure CSS
+// variable sets in content/styles.css, so adding one is a stylesheet block.
+const BMUX_THEMES = ['frost', 'classic', 'midnight', 'amber', 'light', 'nord', 'rose'];
+
 // Layout presets accepted by select-layout.
 const BMUX_LAYOUT_NAMES = ['even-horizontal', 'even-vertical', 'main-vertical', 'main-horizontal', 'tiled'];
 
@@ -535,19 +539,34 @@ const BMUX_COMMANDS = {
 
     'theme': {
         scope: 'overlay',
-        description: 'Switch the palette: frost (default) or classic black/green',
-        usage: 'theme [frost|classic]',
+        description: 'Switch the palette: frost (default), classic, midnight, amber, light, nord, rose',
+        usage: 'theme [name|next]',
         execute: function (api, args) {
             const client = api.client;
-            const name = (args[0] || '').toLowerCase();
+            const themes = client.themes();
+            const asked = (args[0] || '').toLowerCase();
 
-            if (!name) return `Theme: ${client.theme} (usage: theme frost|classic)`;
-            if (name !== 'frost' && name !== 'classic') {
-                return 'Error: Usage: theme [frost|classic]';
+            if (!asked) {
+                return [`Theme: ${client.theme} (of ${themes.length})`,
+                    client.formatTable(['', 'palette'],
+                        themes.map((name) => [name === client.theme ? '*' : '', name]))
+                ].join('\n');
             }
 
-            client.setTheme(name);
-            return `Theme: ${name}`;
+            if (asked === 'next' || asked === 'prev') {
+                const index = themes.indexOf(client.theme);
+                const step = asked === 'next' ? 1 : -1;
+                const next = themes[(index + step + themes.length) % themes.length];
+                client.setTheme(next);
+                return `Theme: ${next}`;
+            }
+
+            if (themes.indexOf(asked) === -1) {
+                return `Error: Usage: theme [${themes.join('|')}|next]`;
+            }
+
+            client.setTheme(asked);
+            return `Theme: ${asked}`;
         }
     },
 
@@ -614,19 +633,18 @@ const BMUX_COMMANDS = {
             }
 
             const active = client.getActivePane();
-            const width = String(panes.length).length;
 
-            const rows = panes.map((pane) => {
-                const number = String(client.getPaneNumber(pane)).padStart(width, ' ');
-                const id = client.getPaneId(pane).padEnd(4, ' ');
-                const size = client.getPaneSizeLabel(pane).padEnd(10, ' ');
-                let marker = pane === active ? '[ACTIVE]' : '        ';
-                if (client.isZoomed(pane)) marker = '[ZOOM]  ';
-                const title = client.getPaneTitle(pane);
-                return `${number} ${id} ${size} ${marker} ${title} - ${client.getPaneUrl(pane)}`;
-            });
+            const rows = panes.map((pane) => [
+                String(client.getPaneNumber(pane)),
+                client.getPaneId(pane),
+                client.getPaneSizeLabel(pane),
+                [pane === active ? 'ACTIVE' : '', client.isZoomed(pane) ? 'ZOOM' : '']
+                    .filter(Boolean).join('+'),
+                client.getPaneTitle(pane),
+                client.getPaneUrl(pane)
+            ]);
 
-            return ['Panes:', ...rows].join('\n');
+            return ['Panes:', client.formatTable(['#', 'id', 'size', 'state', 'title', 'url'], rows)].join('\n');
         }
     },
 
@@ -1116,14 +1134,15 @@ const BMUX_COMMANDS = {
                 return `No saved layouts for ${listed.origin || 'this site'}`;
             }
 
-            const rows = listed.layouts.map((entry, index) => {
+            const rows = listed.layouts.map((entry) => {
                 const when = entry.savedAt
                     ? new Date(entry.savedAt).toISOString().replace('T', ' ').slice(0, 16)
                     : 'unknown';
-                return `${index + 1}. ${entry.name} - ${entry.panes} pane(s) - ${when}`;
+                return [entry.name, String(entry.panes), when];
             });
 
-            return [`Saved layouts for ${listed.origin || 'this site'}:`, ...rows].join('\n');
+            return [`Saved layouts for ${listed.origin || 'this site'}:`,
+                api.client.formatTable(['name', 'panes', 'saved'], rows)].join('\n');
         }
     },
 

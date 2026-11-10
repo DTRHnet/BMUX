@@ -89,6 +89,9 @@ const BMUX_MAX_WINDOWS = 6;
 // How long a pane frame gets to answer an inspection request (`list-storage`,
 // `forms`, `eval`, …) before the command reports that it did not answer.
 const BMUX_INSPECT_TIMEOUT = 1500;
+
+// Tables wrap at this many characters so a table still fits a pane console.
+const BMUX_TABLE_MAX_WIDTH = 96;
 const BMUX_MAX_WINDOW_NAME = 32;
 
 // Pane console: height when first opened, the drag limits, and scrollback cap.
@@ -595,10 +598,21 @@ class BMUXClient {
     }
 
     /** 'frost' palette (default) or the original 'classic' black/green. */
+    /** The palettes `setTheme` accepts (kept in commands.js with the other vocab). */
+    themes() {
+        return typeof BMUX_THEMES !== 'undefined' ? BMUX_THEMES.slice() : ['frost', 'classic'];
+    }
+
+    /** 'frost' (default), 'classic', 'midnight', 'amber', 'light', 'nord', 'rose'. */
     setTheme(name) {
-        this.theme = String(name || '').toLowerCase() === 'classic' ? 'classic' : 'frost';
-        if (this.ui) this.ui.overlay.dataset.theme = this.theme;
-        this.log(`Theme: ${this.theme}`);
+        const asked = String(name || '').toLowerCase();
+        const themes = this.themes();
+        const picked = themes.indexOf(asked) === -1 ? 'frost' : asked;
+
+        const changed = this.theme !== picked;
+        this.theme = picked;
+        if (this.ui) this.ui.overlay.dataset.theme = picked;
+        if (changed || !this.theme) this.log(`Theme: ${picked}`);
         this.scheduleSave();
         return this.theme;
     }
@@ -917,8 +931,12 @@ class BMUXClient {
     }
 
     setupListeners() {
-        // Answers from pane frames arrive as window messages (see inspectPane).
-        window.addEventListener('message', (event) => this.handleInspectReply(event));
+        // Pane frames report the pointer and inspection answers as window
+        // messages: focus first (cheap), then inspection replies.
+        window.addEventListener('message', (event) => {
+            if (this.handlePaneFocus(event)) return;
+            this.handleInspectReply(event);
+        });
 
         // 1. Message Listener (from Background or Popup)
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
@@ -948,6 +966,25 @@ class BMUXClient {
         // blurring with an iframe as activeElement means that iframe's pane was
         // clicked, so make it the active pane.
         window.addEventListener('blur', () => this.syncActivePaneFromFocus(), true);
+
+        // 3b. Inside a pane's frame: report pointer activity to the parent.
+        //
+        // A click on a page lands in the iframe, not on the pane element, and
+        // moving between two iframes never blurs the top window — which is why
+        // only the footer used to change the active pane. The frame can see its
+        // own pointer events, so it tells the parent, which maps window -> pane.
+        if (!this.isTop) {
+            const tellParent = () => {
+                try {
+                    window.parent.postMessage({ __bmuxPaneFocus: true }, '*');
+                } catch (error) {
+                    // The parent went away (pane removed): nothing to report.
+                }
+            };
+
+            document.addEventListener(window.PointerEvent ? 'pointerdown' : 'mousedown', tellParent, true);
+            window.addEventListener('focus', tellParent, true);
+        }
 
         // 4. The overlay can be resized; pane rects are fractions, so one render
         // keeps every pane proportional to the new size. Filter boxes are in
@@ -2419,13 +2456,14 @@ class BMUXClient {
             })), null, 2);
         }
 
-        const lines = ['Windows:'];
-        this.windows.forEach((record, index) => {
-            const panes = this.paneCountOf(record.layout);
-            const active = index === this.activeWindowIndex ? '  [ACTIVE]' : '';
-            lines.push(`${index + 1} ${String(record.name).padEnd(10)} ${panes} pane(s)${active}`);
-        });
-        return lines.join('\n');
+        const rows = this.windows.map((record, index) => [
+            String(index + 1),
+            record.name,
+            String(this.paneCountOf(record.layout)),
+            index === this.activeWindowIndex ? 'ACTIVE' : ''
+        ]);
+
+        return ['Windows:', this.formatTable(['#', 'name', 'panes', ''], rows)].join('\n');
     }
 
     paneCountOf(tree) {
@@ -2546,6 +2584,29 @@ class BMUXClient {
         });
     }
 
+    /**
+     * A pane's frame reports the pointer is inside it: that pane becomes active.
+     * Returns true when the message was ours, so the inspection listener can be
+     * skipped. Anything from a window we do not own is ignored.
+     */
+    handlePaneFocus(event) {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object' || !data.__bmuxPaneFocus) return false;
+        if (!this.isTop || !this.ui) return true;
+
+        const panes = this.allPanes();
+
+        for (let i = 0; i < panes.length; i++) {
+            const iframe = panes[i].querySelector('iframe');
+            if (iframe && iframe.contentWindow === event.source) {
+                if (this.getActivePane() !== panes[i]) this.setActivePane(panes[i]);
+                return true;
+            }
+        }
+
+        return true;
+    }
+
     /** Resolve a pending inspection when the pane's frame answers. */
     handleInspectReply(event) {
         const data = event && event.data;
@@ -2600,21 +2661,61 @@ class BMUXClient {
         }
     }
 
-    /** Left-aligned, space-padded columns with a header rule. */
-    formatTable(columns, rows) {
-        const widths = columns.map((column, index) => rows.reduce(
-            (max, row) => Math.max(max, String(row[index] == null ? '' : row[index]).length),
-            String(column).length
+    /**
+     * A box-drawn table: `┌─┬─┐`, a header row, one rule, then the rows.
+     * Numeric columns are right-aligned, long cells are ellipsed to fit
+     * `BMUX_TABLE_MAX_WIDTH`, and every row lines up in a monospace console.
+     */
+    formatTable(columns, rows, options) {
+        const opts = options || {};
+        const names = columns.map((column) => String(column));
+        const limit = opts.maxWidth || BMUX_TABLE_MAX_WIDTH;
+
+        const cells = rows.map((row) => names.map((unused, index) => String(
+            row[index] === undefined || row[index] === null ? '' : row[index]
+        )));
+
+        const numeric = names.map((unused, index) => cells.length > 0 && cells.every((row) => {
+            const cell = row[index].trim();
+            return cell === '' || /^-?\d+(\.\d+)?$/.test(cell);
+        }) && cells.some((row) => row[index].trim() !== ''));
+
+        const widths = names.map((name, index) => Math.max(
+            name.length,
+            cells.reduce((max, row) => Math.max(max, row[index].length), 0)
         ));
 
-        const line = (cells) => cells
-            .map((cell, index) => String(cell == null ? '' : cell).padEnd(Math.min(widths[index], 60)))
-            .join('  ')
-            .replace(/\s+$/, '');
+        // Fit the box into the terminal: shrink the widest columns first.
+        const overhead = 3 * names.length + 1;
+        let total = widths.reduce((sum, width) => sum + width, 0) + overhead;
 
-        return [line(columns), line(widths.map((width) => '-'.repeat(Math.min(width, 60))))]
-            .concat(rows.map(line))
-            .join('\n');
+        while (total > limit) {
+            const widest = widths.indexOf(Math.max.apply(null, widths));
+            if (widths[widest] <= 6) break;
+            widths[widest] -= 1;
+            total -= 1;
+        }
+
+        const fit = (text, width) => (text.length <= width
+            ? text
+            : (width <= 1 ? text.slice(0, width) : text.slice(0, width - 1) + '…'));
+
+        const pad = (text, width, right) => {
+            const clipped = fit(text, width);
+            return right ? clipped.padStart(width, ' ') : clipped.padEnd(width, ' ');
+        };
+
+        const rule = (left, middle, right) => left +
+            widths.map((width) => '─'.repeat(width + 2)).join(middle) + right;
+
+        const line = (row, align) => '│ ' +
+            widths.map((width, index) => pad(row === null ? names[index] : row[index], width,
+                row === null ? false : align[index])).join(' │ ') + ' │';
+
+        const out = [rule('┌', '┬', '┐'), line(null), rule('├', '┼', '┤')];
+        cells.forEach((row) => out.push(line(row, numeric)));
+        out.push(rule('└', '┴', '┘'));
+        return out.join('\n');
     }
 
     getPanes() {

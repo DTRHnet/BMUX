@@ -279,10 +279,39 @@ split row ratio 0.30
     leaf %3 https://example.com/blog
 ```
 
-### `theme [frost|classic]`
-`frost` (default) uses cold blues and ice text; `classic` is the original black
-background with green text. Bare `theme` reports the active palette. The choice is
-stored with the layout.
+### `theme [name|next]`
+Switches the palette and prints its name. Bare `theme` lists all of them with the
+current one marked, `theme next` cycles, `theme prev` cycles backwards, and an
+unknown name is refused with the usage line. The choice is stored with the layout.
+
+| Palette | Look |
+|---------|------|
+| `frost` *(default)* | cold blues, ice text, one ice-cyan accent |
+| `classic` | the original black terminal, green text |
+| `midnight` | deep indigo shell, violet accent |
+| `amber` | amber-on-brown CRT |
+| `light` | paper and slate |
+| `nord` | arctic blue-grey |
+| `rose` | deep plum with a sakura accent |
+
+```
+> theme
+Theme: frost (of 7)
+┌─────────┬───┐
+│ theme   │   │
+├─────────┼───┤
+│ * frost │   │
+│   classic │ │
+…
+> theme midnight
+Theme: midnight
+> theme nosuchtheme
+Error: Usage: theme [frost|classic|midnight|amber|light|nord|rose|next]
+```
+
+A palette is a block of CSS variables (`--bmux-bg`, `--bmux-accent`, `--bmux-text`, …)
+selected by `data-theme` on `#bmux-overlay`, so a new one is a stylesheet block plus
+a name in `BMUX_THEMES` — no renderer changes.
 
 ### `keys`
 Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the
@@ -383,9 +412,12 @@ Prints every pane: number, id, size, active/zoom marker, title and URL.
 ```
 $ list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 - **Number** – layout order, top-to-bottom and left-to-right, 1..n. Recomputed
   after every structural change, so it can change.
@@ -564,8 +596,12 @@ one. `-j` prints JSON with `number`, `name`, `panes` and `active`.
 ```
 > list-windows
 Windows:
-1 1          3 pane(s)
-2 docs       2 pane(s)  [ACTIVE]
+┌───┬──────┬───────┬────────┐
+│ # │ name │ panes │        │
+├───┼──────┼───────┼────────┤
+│ 1 │ 1    │     3 │        │
+│ 2 │ docs │     2 │ ACTIVE │
+└───┴──────┴───────┴────────┘
 ```
 
 ### `detach`
@@ -903,9 +939,12 @@ Lists the cookies the browser would send to **this pane's origin** — including
 ```
 > list-cookies
 Cookies for https://www.example.com/ (2):
-name     value     domain          path  expires     secure  httpOnly  sameSite
-session  abc123    .example.com    /     2026-12-01  yes     yes       lax
-theme    dark      example.com     /     session     no      no        -
+┌─────────┬────────┬──────────────┬──────┬────────────┬────────┬──────────┬──────────┐
+│ name    │ value  │ domain       │ path │ expires    │ secure │ httpOnly │ sameSite │
+├─────────┼────────┼──────────────┼──────┼────────────┼────────┼──────────┼──────────┤
+│ session │ abc123 │ .example.com │ /    │ 2026-12-01 │ yes    │ yes      │ lax      │
+│ theme   │ dark   │ example.com  │ /    │ session    │ no     │ no       │ -        │
+└─────────┴────────┴──────────────┴──────┴────────────┴────────┴──────────┴──────────┘
 > list-cookies --export netscape     # a cookie jar curl / wget / yt-dlp accept
 > list-cookies -j                    # the same, as JSON
 ```
@@ -954,10 +993,12 @@ omits values, `-j` prints JSON.
 ```
 > list-storage
 localStorage (https://www.example.com) — 2 of 2 item(s):
-key    size  value
------  ----  -----
-token  48    eyJhbGciOi…
-theme  4     dark
+┌───────┬──────┬──────────────────────────────────────┐
+│ key   │ size │ value                                │
+├───────┼──────┼──────────────────────────────────────┤
+│ token │   48 │ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 │
+│ theme │    4 │ dark                                 │
+└───────┴──────┴──────────────────────────────────────┘
 > list-storage session --keys
 ```
 
@@ -1013,11 +1054,13 @@ falls back to counting the DOM (`resources` is an alias).
 ```
 > list-resources
 37 resource(s) on www.example.com:
-type              count  3rd-party  bytes
-----------------  -----  ---------  -----
-img               21     0          1843 KB
-css               3      1          62 KB
-xmlhttprequest    9      2          11 KB
+┌────────────────┬───────┬───────────┬─────────┐
+│ type           │ count │ 3rd-party │ bytes   │
+├────────────────┼───────┼───────────┼─────────┤
+│ img            │    21 │         0 │ 1843 KB │
+│ css            │     3 │         1 │ 62 KB   │
+│ xmlhttprequest │     9 │         2 │ 11 KB   │
+└────────────────┴───────┴───────────┴─────────┘
 ```
 
 ### `eval <expression>` / `js <expression>`
@@ -1152,15 +1195,21 @@ $ list-panes                    # check numbers, sizes, titles
 ```
 $ list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-$ focus-pane left
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘$ focus-pane left
 Focus left: pane 1/2
 $ list-panes
 Panes:
-1 %1   50%x100%            Docs - https://example.com/docs
-2 %2   50%x100%   [ACTIVE] GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │        │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │ ACTIVE │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 ### Four-pane workspace
 
@@ -1204,6 +1253,11 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 ---
 
 ## 11. Tips
+
+- **Output is a table when it is tabular.** Listings (`list-panes`, `list-windows`,
+  `list-layouts`, `list-cookies`, `list-storage`, `list-resources`, `theme`) are drawn
+  as box tables: `┌─┬─┐` rules, numeric columns right-aligned, long cells ellipsed to
+  fit 96 characters. Add `-j` (or `--json`) for machine-readable output.
 
 1. **`list-panes` first** whenever focus or sizes surprise you.
 2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with

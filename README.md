@@ -1,13 +1,31 @@
-# BMUX - Browser Multiplexer
+# BMUX — Browser Multiplexer
 
-**Version 0.8.0**
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/bmux-logo-dark.png">
+    <img src="docs/images/bmux-logo-light.png" alt="BMUX" width="560">
+  </picture>
+</p>
 
-A Chrome extension (Manifest V3) inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
+<p align="center">
+  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-7fd0f0?style=flat-square">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-9fe8c8?style=flat-square">
+  <img alt="Manifest V3" src="https://img.shields.io/badge/manifest-v3-1e364b?style=flat-square">
+  <img alt="70 commands" src="https://img.shields.io/badge/commands-70-b3e7ff?style=flat-square">
+  <img alt="jsdom 1138 checks" src="https://img.shields.io/badge/jsdom-1138%20checks-86a3ba?style=flat-square">
+  <img alt="Chromium 173 checks" src="https://img.shields.io/badge/chromium-173%20checks-ffd98a?style=flat-square">
+</p>
 
-![BMUX Version](https://img.shields.io/badge/version-0.8.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+<p align="center">
+  <em>A Chrome extension (Manifest V3) inspired by TMUX that turns a browser tab into a
+  terminal-style multiplexer — panes that never reload, layouts that survive, and a
+  command line that can look inside the pages.</em>
+</p>
 
-> **New in 0.8.0:** BMUX can now *look inside* a pane. `list-cookies`, `list-storage`,
+> **New in 0.8.0:** **seven palettes** (`frost` stays the default: `midnight`, `amber`,
+> `light`, `nord`, `rose`, `classic`), **box-drawn tables** for every listing, and
+> clicking a pane's *page* — not just its footer — now focuses that pane. Plus the
+> inspection commands: BMUX can *look inside* a pane. `list-cookies`, `list-storage`,
 > `list-forms`, `list-scripts`, `list-resources`, `outline`, `find-text` and `eval`
 > report what the page really contains — including **cross-origin** panes, because
 > the question is asked inside the pane's own frame. Cookies are brokered through
@@ -110,6 +128,12 @@ prints the heading hierarchy of that same pane and flags that it jumps `h1 → h
 Both answers came from inside the pane's own frame.
 
 ![list-cookies and outline output in a pane console on dtrh.net](docs/images/07-inspection.png)
+
+**A different palette.** `theme` lists the seven and marks the current one; the same
+three-pane layout in `midnight` — indigo shell, violet accent — with the choice saved
+with the layout. Frost is the default, and `theme next` cycles.
+
+![The midnight palette on the same three-pane layout, with the palette list on screen](docs/images/08-themes.png)
 
 ---
 
@@ -244,8 +268,12 @@ panes, and switching between them is a DOM show/hide, so nothing reloads:
 > rename-window docs
 > list-windows
 Windows:
-1 1          3 pane(s)
-2 docs       2 pane(s)  [ACTIVE]
+┌───┬──────┬───────┬────────┐
+│ # │ name │ panes │        │
+├───┼──────┼───────┼────────┤
+│ 1 │ 1    │     3 │        │
+│ 2 │ docs │     2 │ ACTIVE │
+└───┴──────┴───────┴────────┘
 > next-window            # or n, or click the chip in the status bar
 > select-window 1        # by number, or by name: select-window docs
 > kill-window            # asks first; the last window is refused
@@ -401,18 +429,31 @@ form of `Ctrl+b`, `Shift+z`), click `⤡` to restore. Clicking another pane's `�
 moves the maximize there. Keyboard (`z`, `Shift+z`), the toolbar `Zoom` button and
 the pane buttons share one state.
 
-### 🧊 A frost palette, and a calmer Control Mode
-Every terminal surface uses cold blues, ice text and one ice-cyan accent — defined
-as CSS variables at the top of `content/styles.css`, so it is one place to tune.
-Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather
-than a five-pixel blue frame around the page. `theme classic` restores the old
-black/green terminal look:
+### 🧊 Seven palettes, and a calmer Control Mode
+Every terminal surface — toolbar, footers, consoles, panels, the status bar — draws
+from one set of CSS variables, so a palette is a block of colour in
+`content/styles.css` and nothing else. **Frost stays the default**; the rest are one
+command away and the choice is saved with the layout:
+
+| Palette | Look |
+|---------|------|
+| `frost` *(default)* | cold blues, ice text, one ice-cyan accent |
+| `classic` | the original black terminal with green text |
+| `midnight` | deep indigo shell, violet accent |
+| `amber` | amber-on-brown CRT |
+| `light` | paper and slate, for daylight reading |
+| `nord` | arctic blue-grey |
+| `rose` | deep plum with a sakura accent |
 
 ```
-> theme classic      # black background, green text
-> theme frost        # back to the default palette
-> theme              # what is active now
+> theme              # list them, current one marked *
+> theme midnight     # switch
+> theme next         # cycle (theme prev goes back)
+> theme frost        # the default
 ```
+
+Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather than
+a five-pixel blue frame around the page, in every palette.
 
 ### 💻 Per-pane console you can actually read
 The console under each pane's input is a scrollback, not a flash message:
@@ -606,7 +647,7 @@ These act on the whole overlay.
 | `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
 | `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
 | `verbose [on\|off\|status]` | Mirror debug output into the focused pane console | `> verbose on` |
-| `theme [frost\|classic]` | Switch the palette | `> theme classic` |
+| `theme [name\|next]` | Switch palette: frost, classic, midnight, amber, light, nord, rose | `> theme midnight` |
 | `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
 | `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
 | `list-layouts` | Saved layouts for this site | `> list-layouts` |
@@ -656,9 +697,12 @@ rejected as unknown commands.
 ```
 > list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 `-j` prints the same data as JSON with fractional geometry, which is handy for
 scripting:

@@ -135,6 +135,15 @@ yes / no                                  - Type the answer instead
 Esc                                       - Cancel the prompt
 ```
 
+## Palettes (`theme`)
+```
+> theme              - List the palettes, current one marked *
+> theme midnight     - frost (default), classic, midnight, amber, light, nord, rose
+> theme next         - Cycle; theme prev goes back
+```
+A palette is a block of CSS variables in `content/styles.css`; the choice is saved
+with the layout. Frost is the default.
+
 ## Palette and debug output
 ```
 > theme frost        - Default: cold blues, ice text

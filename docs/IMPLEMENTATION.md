@@ -433,7 +433,37 @@ on the pane (`dataset.bmuxFrameId`) and dropped when the pane is destroyed.
 any frame. The commands pass the pane's URL, so the jar is the right origin's;
 `list-cookies --export netscape` renders a jar from the same records.
 
-### 22. **Modern UI Design**
+### 22. **Palettes, output formatting and pointer focus**
+
+**Palettes are variables, not code.** `#bmux-overlay` declares the frost palette as CSS
+custom properties (`--bmux-bg`, `--bmux-line`, `--bmux-text`, `--bmux-accent`, …) and
+every surface — toolbar, footers, consoles, panels, status bar, prompt cards — reads
+those variables. Each extra palette is one block,
+`#bmux-overlay[data-theme="midnight"] { … }`, setting the same names, so
+`setTheme()` is a single `dataset.theme` assignment plus a save. The names live in
+`BMUX_THEMES` (`content/commands.js`) next to the other vocabulary; `setTheme` falls
+back to `frost` for anything unknown, so a corrupt stored value cannot leave the UI
+unstyled. Seven palettes ship: frost (default), classic, midnight, amber, light, nord,
+rose.
+
+**Output is formatted in one place.** `BMUXClient.formatTable(columns, rows)` draws
+box-drawn tables (`┌─┬─┐`, a header row, a rule, `└─┴─┘`), right-aligns columns whose
+cells are all numeric, ellipses cells to fit `BMUX_TABLE_MAX_WIDTH` (96 characters) by
+shrinking the widest column first, and `formatValue()` routes lists of records through
+it while keeping a lone object as pretty JSON. Every listing command uses it, so a new
+command gets consistent output for free.
+
+**Pointer focus works through the frame relay.** A click on a page lands in the pane's
+iframe, and moving between two iframes never blurs the top window — which is why only
+the footer used to change the active pane. Frames now report activity
+(`document.pointerdown` and `window.focus` → `parent.postMessage({ __bmuxPaneFocus: true })`),
+and the top frame maps `event.source` back to the pane whose `iframe.contentWindow` it
+is. `handlePaneFocus()` answers before `handleInspectReply()` in the single message
+listener; a window that BMUX does not own is ignored. The old
+`syncActivePaneFromFocus()` path (top window blur with an iframe as `activeElement`)
+stays as a backstop for keyboard focus.
+
+### 23. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
