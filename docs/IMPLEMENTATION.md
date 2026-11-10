@@ -4,7 +4,7 @@
 records history (the popup that used to exist, the layouts that used to be thrown
 away on reload), it says so.
 
-## Current Status (0.8.0)
+## Current Status (1.0.0)
 
 BMUX is fully functional. 70 commands across two scopes, a ratio-driven split tree
 that never reloads a page, visual filters, clickable prompts, per-pane consoles that

@@ -1057,11 +1057,11 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - **Cookie restrictions** may affect third-party content
 - **Same limitations** as browser DevTools iframes
 
-### Current Version (0.7.0)
+### Current Version (1.0.0)
 - ⏳ **Restored panes load fresh** - a page cannot be cloned live, so scroll
   position, form input and in-page state are lost on restore
 - ⏳ **Not persisted**: prompts, filter boxes, focus history and console
-  scrollback (transient UI); console open/height is
+  scrollback (transient UI); console open/height *is* persisted
 - ⏳ **A new tab inherits the newest layout from another tab**, so it copies the
   shape (fresh pages), not the live pages; only one layout is offered
 - ⏳ **Extension reload/update clears `storage.session`**, so the tab layout is
@@ -1101,7 +1101,7 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - ⏳ **Chained filters keep appending** until `filter -c` or `--replace`
 - ⏳ **Presets depend on the page's markup** — `prices`/`comments` need
   conventional class names, so plain selectors are the fallback
-- ⏳ `kill-pane` refuses the last pane (use `new-window` to reset)
+- ⏳ `kill-pane` refuses the last pane (use `reset-layout` to start the window over)
 
 ---
 
