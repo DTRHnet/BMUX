@@ -810,7 +810,8 @@ Panes:
 ├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
 │ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
 │ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
-└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘
+```
 
 `-j` prints the same data as JSON with fractional geometry, which is handy for
 scripting:
