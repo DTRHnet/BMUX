@@ -1184,6 +1184,8 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] The overlay re-checks every configured button and skips commands it does not know
 
 ### Version 0.10.0
+- [ ] Pipes and `>` to a file — planned in
+      [docs/plans/0.10.0-pipes-and-redirects.md](docs/plans/0.10.0-pipes-and-redirects.md)
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Broadcasting input to all panes
