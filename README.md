@@ -1183,9 +1183,11 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] The extension version in the top menu (and in the menu popup)
 - [x] The overlay re-checks every configured button and skips commands it does not know
 
-### Version 0.10.0
+### Version 1.1.0
 - [ ] Pipes and `>` to a file — planned in
-      [docs/plans/0.10.0-pipes-and-redirects.md](docs/plans/0.10.0-pipes-and-redirects.md)
+      [docs/plans/1.1.0-pipes-and-redirects.md](docs/plans/1.1.0-pipes-and-redirects.md)
+
+### Version 1.2.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Broadcasting input to all panes
