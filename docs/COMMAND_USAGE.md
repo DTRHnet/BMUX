@@ -1,6 +1,6 @@
 # BMUX Command Usage Guide
 
-**Version 0.8.0** — 70 commands. Every command below is what the shipped
+**Version 0.9.0** — 70 commands. Every command below is what the shipped
 `content/commands.js` defines; the `.bmux` script format has its own guide
 ([SCRIPTS.md](SCRIPTS.md)).
 
@@ -312,6 +312,74 @@ Error: Usage: theme [frost|classic|midnight|amber|light|nord|rose|next]
 A palette is a block of CSS variables (`--bmux-bg`, `--bmux-accent`, `--bmux-text`, …)
 selected by `data-theme` on `#bmux-overlay`, so a new one is a stylesheet block plus
 a name in `BMUX_THEMES` — no renderer changes.
+
+### `help [command|category|scope|filter]`
+The command reference, built from the registry and from `BMUX_HELP`.
+
+- **`help`** — every command in box-drawn tables, grouped by **category** and
+  **sub-category** (Layout & panes › Split, kill, reorder / Size & presets / Focus &
+  numbering; Windows; Persistence › This tab / Named layouts; Scripts; Cookies;
+  Storage; Inspection › Page inventory / Code / Pane content & filters; Appearance;
+  Diagnostics; Overlay & input).
+- **`help <category>`** — one category, sub-categories kept;
+  **`help <category>/<sub>`** narrows to one sub-category (`help layout/focus`).
+- **`help overlay`** / **`help pane`** — every command in that scope.
+- **`help <command>`** — a full page: a summary line (scope, aliases), the
+  description, the **usage** line, an **arguments** table (parameter, whether it is
+  required, what it is), a **flags** table, **examples**, **notes**, **see also**, and
+  where the full documentation lives.
+- **`help <filter>`** — when the word is not a command, category or scope, every
+  command whose name or description contains it.
+- A name that is both a command and a category (`cookies`) resolves to the command;
+  `help cookies/` lists the category.
+- **`help <alias>`** — an alias (`cookies`, `js`, `structure`…) resolves to the command
+  it mirrors and says so.
+
+```
+> help list-panes
+list-panes — overlay command
+
+List every pane: number, id, size, active marker, title and URL
+
+Usage
+  list-panes [-j|--json]
+
+Flags
+┌──────────────┬────────────────────────────────────────────────────┐
+│ flag         │ what it does                                       │
+├──────────────┼────────────────────────────────────────────────────┤
+│ -j, --json   │ print the same data as JSON (geometry, flags, URL) │
+└──────────────┴────────────────────────────────────────────────────┘
+
+Examples
+  > list-panes
+  > list-panes -j
+
+Notes
+  - Numbers are layout order (top-to-bottom, left-to-right) and can change; ids
+    (%1, %2) never do.
+See also: list-windows, capture-pane, display-panes
+
+Full documentation: docs/COMMAND_USAGE.md
+> help layout
+Layout & panes — 13 command(s)
+
+Split, kill, reorder
+┌───────────────┬───────────────────────────────────────────────────┐
+│ command       │ what it does                                      │
+├───────────────┼───────────────────────────────────────────────────┤
+│ kill-pane     │ Close a pane and give its space to its neighbour  │
+…
+> help list
+No command named "list" — 8 match(es):
+┌──────────────────┬──────────────────────────────────────────────────┐
+…
+> help zzz
+Error: no command matches "zzz". Type "help" for the full list.
+```
+
+The metadata lives in `BMUX_HELP` next to the registry, so a new command documents
+itself by adding one entry (see [ADDING_COMMANDS.md](ADDING_COMMANDS.md)).
 
 ### `keys`
 Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the

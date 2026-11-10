@@ -1,6 +1,6 @@
 # BMUX Implementation Summary
 
-**Version 0.8.0** — this describes the shipped code, not a plan. Where a section
+**Version 0.9.0** — this describes the shipped code, not a plan. Where a section
 records history (the popup that used to exist, the layouts that used to be thrown
 away on reload), it says so.
 
@@ -13,11 +13,16 @@ script files, and pane inspection (cookies, storage, DOM inventory and page-worl
 `eval`).
 
 ### 1. **Activation**
-There is no popup and no session object. One action — the toolbar icon
-(`chrome.action.onClicked`) or `Alt+Shift+B` — shows the overlay *and* enters
-Control Mode, and doing it again hides the overlay and leaves Control Mode.
-`detach` (`d`) toggles the same state from the keyboard. The legacy `popup/`
-directory and the dead `STATE` / `createSession` machinery were removed in 0.5.0.
+Two ways in, and no session object. `Alt+Shift+B` (or `detach`, `d`) shows the
+overlay *and* enters Control Mode, and doing it again hides the overlay and leaves
+Control Mode. The toolbar icon opens the **menu** (0.9.0): `popup/popup.html` with
+**Toggle** (which sends `toggle-bmux` to the active tab) and **Settings** (which opens
+the options page). With `default_popup` declared, `chrome.action.onClicked` no longer
+fires — the menu is the icon's action, the hotkey stays the direct path.
+`detach` (`d`) toggles the same state from the keyboard. The 0.5.0 removal of the
+popup and of the dead `STATE` / `createSession` machinery still stands for what the
+popup *was*: a session manager. The menu that came back in 0.9.0 holds two verbs —
+toggle and settings — and no state of its own.
 
 ### 2. **Global Hotkey (Alt+Shift+B)**
 - Registered in `manifest.json` as a browser-level shortcut
@@ -28,7 +33,7 @@ directory and the dead `STATE` / `createSession` machinery were removed in 0.5.0
 ### 3. **Control Mode**
 Activation is one state: clicking the toolbar icon (`chrome.action.onClicked`) or
 pressing `Alt+Shift+B` shows the overlay *and* enters Control Mode; doing it again
-hides the overlay and leaves Control Mode. There is no popup. When activated:
+hides the overlay and leaves Control Mode. When activated:
 - A quiet one-pixel inset ring around the overlay (`.bmux-control-active`) and a
   tinted `CONTROL MODE` chip in the status bar — not a thick blue frame
 - The status bar's left segment reads `CONTROL MODE` (tinted) or `NORMAL`
@@ -463,7 +468,44 @@ listener; a window that BMUX does not own is ignored. The old
 `syncActivePaneFromFocus()` path (top window blur with an iframe as `activeElement`)
 stays as a backstop for keyboard focus.
 
-### 23. **Modern UI Design**
+### 23. **The extension menu, the editable toolbar and help**
+
+**The menu** (`popup/`) is two buttons and a status line. Toggle asks
+`chrome.tabs.query({active, currentWindow})` for the tab and sends it
+`{ command: 'toggle-bmux' }` — the same message the icon used to trigger directly, so
+activation still has exactly one implementation (`toggle()` in the content script).
+Settings calls `chrome.runtime.openOptionsPage()`. The popup cannot read another
+tab's DOM, so it never guesses the overlay's state: Toggle is a verb, not a switch.
+
+**The toolbar is configuration.** `background/main.js` owns
+`chrome.storage.local → toolbar:buttons`, a list of `{ label, command }` pairs
+(default: 16 buttons; `MAX_TOOLBAR_BUTTONS` 24, label ≤ 24 chars, command ≤ 120). The
+background validates *shape* only — it cannot see the registry — while the settings
+page (`settings/`, which loads `content/scripts.js` and `content/commands.js` so it has
+the real `BMUX_COMMANDS`) and the content script's `sanitizeToolbar()` provide the
+semantic check: a button whose first token is not a registered command is refused in
+the editor and skipped with a log line at render time. `renderToolbar()` draws
+`#bmux-toolbar-buttons` from that list and wires each button to
+`runCommandAndLog(command)`, so a custom button cannot behave differently from a typed
+command. `loadToolbar()` asks the background on activation; the built-in set renders
+first so the overlay is never empty.
+
+**The version is in the menu.** `renderToolbarBrand()` puts
+`chrome.runtime.getManifest().version` next to the wordmark (`BMUX v0.9.0`), and the
+popup footer shows the same number; when the runtime cannot answer, the chip stays
+empty rather than guessing.
+
+**Help is data.** `BMUX_HELP` in `content/commands.js` carries, per command,
+`category`, `sub`, `args`, `flags`, `examples`, `notes`, `related` and `aliasOf`;
+`BMUX_HELP_CATEGORIES` is the ordered category tree. `help` renders category tables
+(sub-tables included) from the registry plus that metadata, `help <category>` and
+`help <category>/<sub>` narrow it, `help overlay`/`help pane` filter by scope,
+`help <command>` renders the summary, usage, arguments table, flags table, examples,
+notes, aliases, category and a docs pointer, and `help <filter>` searches names and
+descriptions. Because the metadata is data, a new command
+documents itself by adding one entry — and the harness fails if a command has none.
+
+### 24. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -510,7 +552,9 @@ BMUX/
 ├── examples/
 │   ├── demo.bmux         # Site-agnostic demo (what `script demo` runs)
 │   └── dtrh-tour.bmux    # Three-page tour of dtrh.net (screenshot/recording)
-└── (no popup: the toolbar icon activates BMUX directly)
+├── popup/                 # The extension menu: Toggle + Settings (popup.js/css)
+├── settings/              # Toolbar editor (loads the registry to validate commands)
+└── (the icon opens the menu; Alt+Shift+B toggles directly)
 ```
 
 `manifest.json` loads `content/scripts.js`, then `content/commands.js`, then

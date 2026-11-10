@@ -548,6 +548,95 @@ async function execInFrame(tabId, frameId, code) {
     }
 }
 
+// --- toolbar configuration ---
+//
+// The overlay's toolbar is a list of `{ label, command }` pairs the user can edit
+// in the settings page (verified against the command registry there, and again by
+// the content script that renders it). The background owns the storage, like every
+// other persisted thing: the content script and the settings page only ask.
+
+const TOOLBAR_KEY = 'toolbar:buttons';
+const MAX_TOOLBAR_BUTTONS = 24;
+const MAX_BUTTON_LABEL = 24;
+const MAX_BUTTON_COMMAND = 120;
+
+const DEFAULT_TOOLBAR = [
+    { label: 'Split H', command: 'split-window -h' },
+    { label: 'Split V', command: 'split-window -v' },
+    { label: 'New Window', command: 'new-window' },
+    { label: 'Panes', command: 'list-panes' },
+    { label: 'Windows', command: 'list-windows' },
+    { label: 'Cookies', command: 'list-cookies' },
+    { label: 'Storage', command: 'list-storage' },
+    { label: 'Forms', command: 'list-forms' },
+    { label: 'Outline', command: 'outline' },
+    { label: 'Up', command: 'focus-pane up' },
+    { label: 'Down', command: 'focus-pane down' },
+    { label: 'Left', command: 'focus-pane left' },
+    { label: 'Right', command: 'focus-pane right' },
+    { label: 'Zoom', command: 'resize-pane -Z' },
+    { label: 'Layout', command: 'next-layout' },
+    { label: 'Detach', command: 'detach' }
+];
+
+/** Structural validation; the command itself is verified against the registry. */
+function cleanToolbarButton(entry) {
+    if (!entry || typeof entry !== 'object') return null;
+
+    const label = String(entry.label == null ? '' : entry.label)
+        .replace(/[\u0000-\u001f]/g, '')
+        .trim()
+        .slice(0, MAX_BUTTON_LABEL);
+    const command = String(entry.command == null ? '' : entry.command)
+        .replace(/[\u0000-\u001f]/g, '')
+        .trim()
+        .slice(0, MAX_BUTTON_COMMAND);
+
+    if (!label || !command) return null;
+    return { label: label, command: command };
+}
+
+function cleanToolbar(buttons) {
+    if (!Array.isArray(buttons)) return { ok: false, reason: 'the toolbar must be a list' };
+
+    const cleaned = [];
+    for (let i = 0; i < buttons.length && cleaned.length < MAX_TOOLBAR_BUTTONS; i++) {
+        const button = cleanToolbarButton(buttons[i]);
+        if (!button) continue;
+        const duplicate = cleaned.some((existing) =>
+            existing.label === button.label && existing.command === button.command);
+        if (!duplicate) cleaned.push(button);
+    }
+
+    if (!cleaned.length) return { ok: false, reason: 'the toolbar needs at least one button' };
+    return { ok: true, buttons: cleaned };
+}
+
+async function getToolbar() {
+    const stored = await areaGet(localArea(), [TOOLBAR_KEY]);
+    const record = stored[TOOLBAR_KEY];
+    const custom = record && Array.isArray(record.buttons) ? cleanToolbar(record.buttons) : null;
+
+    if (custom && custom.ok) {
+        return { ok: true, buttons: custom.buttons, source: 'custom' };
+    }
+
+    return { ok: true, buttons: DEFAULT_TOOLBAR.slice(), source: 'default' };
+}
+
+async function setToolbar(buttons) {
+    const cleaned = cleanToolbar(buttons);
+    if (!cleaned.ok) return cleaned;
+
+    await areaSet(localArea(), { [TOOLBAR_KEY]: { buttons: cleaned.buttons, savedAt: Date.now() } });
+    return { ok: true, buttons: cleaned.buttons, source: 'custom' };
+}
+
+async function resetToolbar() {
+    await areaRemove(localArea(), [TOOLBAR_KEY]);
+    return { ok: true, buttons: DEFAULT_TOOLBAR.slice(), source: 'default' };
+}
+
 // --- cookies ---
 //
 // The content script cannot read `httpOnly` cookies (they are invisible to
@@ -832,6 +921,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             setEnabled(request.enabled).then(async (enabled) => {
                 if (!enabled) await clearTabLayout(tabId);
                 sendResponse({ status: 'ok', enabled: enabled });
+            });
+            return true;
+
+        // --- toolbar configuration (the overlay's buttons) ---
+        case 'toolbar-get':
+            getToolbar().then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
+            });
+            return true;
+
+        case 'toolbar-set':
+            setToolbar(request.buttons).then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
+            });
+            return true;
+
+        case 'toolbar-reset':
+            resetToolbar().then((result) => {
+                sendResponse(Object.assign({ status: 'ok' }, result));
             });
             return true;
 

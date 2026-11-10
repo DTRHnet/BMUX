@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>BMUX settings — toolbar buttons</title>
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <header>
+        <h1>BMUX <span>settings</span></h1>
+        <p class="lede">
+            The buttons in the overlay's top menu. Every button runs the command written on
+            it, so anything <code>help</code> lists can be a button — including the listing
+            commands, a scripted demo, or one of your own commands.
+        </p>
+    </header>
+
+    <main>
+        <section class="panel">
+            <h2>Toolbar</h2>
+            <div id="preview" class="preview" aria-label="Preview"></div>
+            <table class="buttons">
+                <thead>
+                    <tr>
+                        <th class="col-num">#</th>
+                        <th>Label</th>
+                        <th>Command</th>
+                        <th class="col-actions">Move / remove</th>
+                    </tr>
+                </thead>
+                <tbody id="toolbar-list"></tbody>
+            </table>
+            <p id="empty" class="empty" hidden>No buttons yet — add one below.</p>
+        </section>
+
+        <section class="panel">
+            <h2>Add a button</h2>
+            <div class="add-row">
+                <label>
+                    <span>Label</span>
+                    <input id="new-label" type="text" maxlength="24" placeholder="Cookies" autocomplete="off">
+                </label>
+                <label class="grow">
+                    <span>Command</span>
+                    <input id="new-command" type="text" maxlength="120" list="command-options"
+                           placeholder="list-cookies -j" autocomplete="off" spellcheck="false">
+                </label>
+                <button id="add" class="primary">Add</button>
+            </div>
+            <datalist id="command-options"></datalist>
+            <p id="command-hint" class="hint">Start typing a command name; only real commands can be added.</p>
+            <p id="error" class="error" hidden></p>
+        </section>
+
+        <section class="panel">
+            <h2>Commands that can be buttons</h2>
+            <p class="hint">
+                <span id="command-count">0</span> commands are registered. The list is the
+                extension's own registry, read from <code>content/commands.js</code>, so a
+                button can only run something that exists.
+            </p>
+            <div id="catalog" class="catalog"></div>
+        </section>
+    </main>
+
+    <footer>
+        <button id="save" class="primary">Save</button>
+        <button id="reset">Load defaults</button>
+        <button id="reload">Discard changes</button>
+        <span id="status" class="status">Ready</span>
+    </footer>
+
+    <!-- The registry itself: the same files the content script uses, loaded here so
+         the settings page validates against what actually ships. -->
+    <script src="../content/scripts.js"></script>
+    <script src="../content/commands.js"></script>
+    <script src="settings.js"></script>
+</body>
+</html>

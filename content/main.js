@@ -534,6 +534,8 @@ class BMUXClient {
         this.scriptPanelOpen = false;
         this.scriptProgress = '';
         this.scriptRunOnLoad = false; // `script file --run` starts it on load
+        this.toolbarButtons = [];             // the toolbar's buttons, from config
+        this.toolbarSource = 'default';
         this.pendingInspections = new Map();  // nonce -> { resolve, timer, source }
         this.inspectNonce = 0;
         this.sleepState = null;       // the pending `sleep`, so `script stop` can cut it
@@ -661,20 +663,14 @@ class BMUXClient {
         overlay.className = 'hidden';
 
         overlay.innerHTML = `
+          <!-- Buttons are rendered from the saved toolbar configuration
+               (Settings in the extension menu), so this starts empty. -->
           <div id="bmux-toolbar">
-             <div style="font-weight:bold; margin-right:15px; color:#fff;">BMUX</div>
-             <button class="bmux-btn" id="btn-split-h">Split H</button>
-             <button class="bmux-btn" id="btn-split-v">Split V</button>
-             <button class="bmux-btn" id="btn-new-win">New Window</button>
-             <button class="bmux-btn" id="btn-detach">Detach</button>
-             <div class="bmux-nav-group">
-                <button class="bmux-btn bmux-btn-nav" id="btn-focus-up" title="focus-pane up">Up</button>
-                <button class="bmux-btn bmux-btn-nav" id="btn-focus-down" title="focus-pane down">Down</button>
-                <button class="bmux-btn bmux-btn-nav" id="btn-focus-left" title="focus-pane left">Left</button>
-                <button class="bmux-btn bmux-btn-nav" id="btn-focus-right" title="focus-pane right">Right</button>
-                <button class="bmux-btn bmux-btn-nav" id="btn-zoom" title="resize-pane -Z">Zoom</button>
-                <button class="bmux-btn bmux-btn-nav" id="btn-layout" title="next-layout">Layout</button>
+             <div id="bmux-toolbar-brand" title="BMUX — click the extension icon for the menu">
+                <span class="bmux-brand-name">BMUX</span>
+                <span class="bmux-brand-version" id="bmux-toolbar-version"></span>
              </div>
+             <div id="bmux-toolbar-buttons"></div>
           </div>
 
           <div id="bmux-panes">
@@ -759,32 +755,16 @@ class BMUXClient {
             debugContainer: overlay.querySelector('#bmux-debug-overlay'),
             debugInput: overlay.querySelector('#bmux-debug-input'),
 
-            btnSplitH: overlay.querySelector('#btn-split-h'),
-            btnSplitV: overlay.querySelector('#btn-split-v'),
-            btnNewWin: overlay.querySelector('#btn-new-win'),
-            btnDetach: overlay.querySelector('#btn-detach'),
-
-            btnFocusUp: overlay.querySelector('#btn-focus-up'),
-            btnFocusDown: overlay.querySelector('#btn-focus-down'),
-            btnFocusLeft: overlay.querySelector('#btn-focus-left'),
-            btnFocusRight: overlay.querySelector('#btn-focus-right'),
-            btnZoom: overlay.querySelector('#btn-zoom'),
-            btnLayout: overlay.querySelector('#btn-layout')
+            toolbar: overlay.querySelector('#bmux-toolbar'),
+            toolbarBrand: overlay.querySelector('#bmux-toolbar-brand'),
+            toolbarVersion: overlay.querySelector('#bmux-toolbar-version'),
+            toolbarButtons: overlay.querySelector('#bmux-toolbar-buttons')
         };
 
-        // Bind Toolbar
-        // Every button runs the command it is named after, through the same
-        // dispatcher as the console, so the toolbar cannot drift from commands.js.
-        this.ui.btnSplitH.onclick = () => this.runCommandAndLog('split-window -h');
-        this.ui.btnSplitV.onclick = () => this.runCommandAndLog('split-window -v');
-        this.ui.btnNewWin.onclick = () => this.runCommandAndLog('new-window');
-        this.ui.btnDetach.onclick = () => this.runCommandAndLog('detach');
-        this.ui.btnFocusUp.onclick = () => this.runCommandAndLog('focus-pane up');
-        this.ui.btnFocusDown.onclick = () => this.runCommandAndLog('focus-pane down');
-        this.ui.btnFocusLeft.onclick = () => this.runCommandAndLog('focus-pane left');
-        this.ui.btnFocusRight.onclick = () => this.runCommandAndLog('focus-pane right');
-        this.ui.btnZoom.onclick = () => this.runCommandAndLog('resize-pane -Z');
-        this.ui.btnLayout.onclick = () => this.runCommandAndLog('next-layout');
+        // The toolbar is data: entries come from the saved configuration and every
+        // button runs its command through the same dispatcher as the console, so a
+        // custom button cannot behave differently from a typed command.
+        this.renderToolbar();
 
         // Bind the debug console input: history, completion and Enter.
         this.bindCommandInput(this.ui.debugInput, {
@@ -798,8 +778,12 @@ class BMUXClient {
             report: (text) => this.log(text)
         });
 
-        // The first window is created by loadPersistedLayout(): either from the
-        // snapshot or as a fresh one-pane window.
+        // The toolbar is drawn from the saved configuration; the built-in set
+        // renders immediately so the overlay is never empty while that is in flight.
+        this.toolbarButtons = this.defaultToolbar();
+        this.renderToolbar();
+        this.loadToolbar();
+
 
         // The window chip is the mouse path to the next window (n does the same).
         if (this.ui.statusWindow) {
@@ -2223,6 +2207,128 @@ class BMUXClient {
     // --- Pane primitives (used by commands.js through api.client) ---
 
     /** Panes in layout order (reading order of the split tree). */
+    // --- toolbar (the top menu, configured from the settings page) ---
+
+    /** The built-in toolbar, used before the saved configuration arrives. */
+    defaultToolbar() {
+        return [
+            { label: 'Split H', command: 'split-window -h' },
+            { label: 'Split V', command: 'split-window -v' },
+            { label: 'New Window', command: 'new-window' },
+            { label: 'Panes', command: 'list-panes' },
+            { label: 'Windows', command: 'list-windows' },
+            { label: 'Cookies', command: 'list-cookies' },
+            { label: 'Storage', command: 'list-storage' },
+            { label: 'Forms', command: 'list-forms' },
+            { label: 'Outline', command: 'outline' },
+            { label: 'Up', command: 'focus-pane up' },
+            { label: 'Down', command: 'focus-pane down' },
+            { label: 'Left', command: 'focus-pane left' },
+            { label: 'Right', command: 'focus-pane right' },
+            { label: 'Zoom', command: 'resize-pane -Z' },
+            { label: 'Layout', command: 'next-layout' },
+            { label: 'Detach', command: 'detach' }
+        ];
+    }
+
+    /**
+     * Keep only buttons whose command exists, so a toolbar edited elsewhere (or a
+     * command renamed in a later release) can never render a dead button.
+     */
+    sanitizeToolbar(entries) {
+        if (!Array.isArray(entries)) return null;
+
+        const registry = typeof BMUX_COMMANDS === 'undefined' ? null : BMUX_COMMANDS;
+        const cleaned = [];
+        const dropped = [];
+
+        entries.forEach((entry) => {
+            if (!entry || typeof entry !== 'object') return;
+
+            const label = String(entry.label == null ? '' : entry.label).trim().slice(0, 24);
+            const command = String(entry.command == null ? '' : entry.command).trim().slice(0, 120);
+            if (!label || !command) return;
+
+            const name = command.split(/\s+/)[0];
+            if (registry && !bmuxHasOwn(registry, name)) {
+                dropped.push(name);
+                return;
+            }
+
+            if (cleaned.some((button) => button.label === label && button.command === command)) return;
+            cleaned.push({ label: label, command: command });
+        });
+
+        if (dropped.length) {
+            this.log(`Toolbar: skipped unknown command(s): ${dropped.join(', ')}`);
+        }
+
+        return cleaned.length ? cleaned : null;
+    }
+
+    /** The extension's own version, when the runtime can tell us. */
+    extensionVersion() {
+        try {
+            const manifest = chrome && chrome.runtime && chrome.runtime.getManifest
+                ? chrome.runtime.getManifest()
+                : null;
+            return manifest && manifest.version ? String(manifest.version) : '';
+        } catch (error) {
+            return '';
+        }
+    }
+
+    /** Draw the brand (with its version) and the buttons. */
+    renderToolbarBrand() {
+        if (!this.ui || !this.ui.toolbarVersion) return '';
+
+        const version = this.extensionVersion();
+        this.ui.toolbarVersion.textContent = version ? `v${version}` : '';
+        this.ui.toolbarVersion.title = version ? `BMUX ${version}` : '';
+        if (this.ui.toolbarVersion.parentNode) {
+            this.ui.toolbarVersion.parentNode.title = version
+                ? `BMUX ${version} — click the extension icon for the menu`
+                : 'BMUX — click the extension icon for the menu';
+        }
+        return version;
+    }
+
+    /** Draw the toolbar from `this.toolbarButtons`. */
+    renderToolbar() {
+        if (!this.ui || !this.ui.toolbarButtons) return;
+
+        const container = this.ui.toolbarButtons;
+        container.textContent = '';
+
+        this.renderToolbarBrand();
+
+        this.toolbarButtons.forEach((entry) => {
+            const button = document.createElement('button');
+            button.className = 'bmux-btn';
+            button.textContent = entry.label;
+            button.title = entry.command;
+            button.dataset.command = entry.command;
+            button.onclick = () => this.runCommandAndLog(entry.command);
+            container.appendChild(button);
+        });
+
+        const count = this.toolbarButtons.length;
+        if (this.ui.toolbar) {
+            this.ui.toolbar.title = `${count} button(s) — edit them in the extension menu (Settings)`;
+        }
+    }
+
+    /** Ask the background for the saved toolbar and draw it. */
+    async loadToolbar() {
+        const reply = await this.persistRequest({ command: 'toolbar-get' }, 1200);
+        const custom = reply && reply.status === 'ok' ? this.sanitizeToolbar(reply.buttons) : null;
+
+        this.toolbarButtons = custom || this.sanitizeToolbar(this.defaultToolbar()) || this.defaultToolbar();
+        this.toolbarSource = custom ? (reply.source || 'custom') : 'default';
+        this.renderToolbar();
+        return this.toolbarButtons;
+    }
+
     // --- windows: several layouts in one tab ---
 
     /** Every pane in the overlay, across all windows (including hidden ones). */

@@ -1,0 +1,116 @@
+/* The extension-icon menu: two actions, frost palette, no scrolling. */
+:root {
+    --bg-deep: #08111c;
+    --bg: #0e1a27;
+    --bg-raised: #132434;
+    --bg-sunken: #0a1520;
+    --line: #1e364b;
+    --text: #dbe9f5;
+    --text-dim: #86a3ba;
+    --accent: #7fd0f0;
+    --accent-strong: #b3e7ff;
+    --accent-soft: rgba(127, 208, 240, 0.16);
+    --accent-line: rgba(127, 208, 240, 0.45);
+    --ok: #9fe8c8;
+    --warn: #ffd98a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+    margin: 0;
+    width: 260px;
+    padding: 10px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 13px;
+}
+
+header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 2px 8px;
+    border-bottom: 1px solid var(--line);
+}
+
+.mark {
+    font-weight: bold;
+    letter-spacing: 0.08em;
+    color: var(--accent-strong);
+}
+
+.tab {
+    color: var(--text-dim);
+    font-size: 11px;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.action {
+    display: block;
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 10px;
+    text-align: left;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--bg-raised);
+    color: var(--text);
+    cursor: pointer;
+}
+
+.action:hover {
+    border-color: var(--accent-line);
+}
+
+.action.primary {
+    background: var(--accent-soft);
+    border-color: var(--accent-line);
+}
+
+.action-label {
+    display: block;
+    font-weight: bold;
+}
+
+.action.primary .action-label {
+    color: var(--accent-strong);
+}
+
+.action-hint {
+    display: block;
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+footer {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--line);
+    color: var(--text-dim);
+    font-size: 11px;
+    min-height: 14px;
+}
+
+/* The extension version, bottom right: small, monospace, quiet. */
+footer .version {
+    font-family: 'Consolas', 'Monaco', monospace;
+    color: var(--text-dim);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 15px;
+}
+
+footer.error { color: var(--warn); }
+footer.ok { color: var(--ok); }

@@ -1,6 +1,6 @@
 # BMUX - Adding Commands
 
-**Version 0.8.0** — commands live in `content/commands.js`, the `.bmux` format
+**Version 0.9.0** — commands live in `content/commands.js`, the `.bmux` format
 in `content/scripts.js`; a command written to these rules is usable from the
 console, the keys *and* a script without extra work.
 
@@ -321,6 +321,40 @@ Rules the persister enforces (in `background/main.js`, on write *and* read): ver
 that produces a bigger or stranger layout will not have it restored — keep layouts
 within those limits.
 
+### Documenting a command (required)
+
+Add one entry to `BMUX_HELP` in `content/commands.js`; `help <command>` is built from
+it, and the verification harness fails when a visible command has no entry.
+
+```javascript
+'list-panes': {
+    category: 'layout',                    // required: which help category it belongs to
+    sub: 'panes',                          // optional: a sub-category within it
+    args: [                                // positional parameters, in order
+        { form: '<number>', description: 'what it means', required: true }
+    ],
+    flags: [                               // options and switches
+        { flag: '-j, --json', description: 'print JSON' }
+    ],
+    examples: ['list-panes', 'list-panes -j'],   // shown with a "> " prefix
+    notes: ['One-line caveats, limits and gotchas.'],
+    related: ['list-windows', 'capture-pane'],   // must be real command names
+    aliasOf: 'list-cookies'                      // only for alias commands
+}
+```
+
+`help` with no argument needs the registry only (`scope`, `description`) — but the
+*grouping* comes from `category`/`sub`, and the harness fails when a command has no
+category. Existing categories: `layout` (subs `panes`, `sizing`, `focus`), `windows`,
+`persistence` (subs `tab`, `named`), `scripts`, `cookies`, `storage`, `inspect` (subs
+`dom`, `code`, `pane`), `appearance`, `diagnostics`, `input`. Add a category by
+appending to `BMUX_HELP_CATEGORIES` (key, title, sub pairs) — the overview, the
+`help <category>` view and the detail page's `category:` line all read from it.
+
+Being in the registry is also what makes a command **eligible for a toolbar button**:
+the settings page lists `Object.keys(BMUX_COMMANDS)`, so a new command appears in the
+editor automatically — no extra registration.
+
 ### Commands that inspect a pane
 
 Two helpers, and a rule: **ask the pane, do not reach into it**.
@@ -450,7 +484,7 @@ Overlay scope:
 
 | Command | Description |
 |---------|-------------|
-| `help` | List every command, grouped by scope |
+| `help [command\|category\|overlay\|pane\|filter]` | Tables of every command by category, or one command in detail |
 | `list-panes [-j]` | Number, id, size, marker, title, URL |
 | `focus-pane <n\|%id\|dir>` | Focus by number, id, or direction (wraps) |
 | `last-pane` | Focus the previous pane |
@@ -463,7 +497,7 @@ Overlay scope:
 | `display-panes` | Show numbers, pick with a digit |
 | `new-window [name]` | Create a window and switch to it |
 | `reset-layout` | Reset this window to one pane |
-| `next-window` / `previous-window` / `last-window` / `select-window` / `rename-window` / `kill-window` / `list-windows` | Window management (see [COMMAND_USAGE](COMMAND_USAGE.md)) |
+| `next-window` / `previous-window` / `last-window` / `select-window` / `rename-window` / `kill-window` / `list-windows` | Window management (see [COMMAND_USAGE](COMMAND_USAGE.md)) |
 | `escape` | What `Esc` runs: clear filter highlights, else leave Control Mode |
 | `list-cookies` / `set-cookie` / `delete-cookie` / `clear-cookies` | Cookies via the background broker (`cookies` permission) |
 | `list-storage` / `set-storage` | Storage of the pane's origin, read inside the pane |
