@@ -85,6 +85,13 @@ const BMUX_RESTORE_TIMEOUT = 800;
 // ever has to apply v2.
 const SNAPSHOT_VERSION = 2;
 const BMUX_MAX_WINDOWS = 6;
+
+// How long a pane frame gets to answer an inspection request (`list-storage`,
+// `forms`, `eval`, …) before the command reports that it did not answer.
+const BMUX_INSPECT_TIMEOUT = 1500;
+
+// Tables wrap at this many characters so a table still fits a pane console.
+const BMUX_TABLE_MAX_WIDTH = 96;
 const BMUX_MAX_WINDOW_NAME = 32;
 
 // Pane console: height when first opened, the drag limits, and scrollback cap.
@@ -527,6 +534,8 @@ class BMUXClient {
         this.scriptPanelOpen = false;
         this.scriptProgress = '';
         this.scriptRunOnLoad = false; // `script file --run` starts it on load
+        this.pendingInspections = new Map();  // nonce -> { resolve, timer, source }
+        this.inspectNonce = 0;
         this.sleepState = null;       // the pending `sleep`, so `script stop` can cut it
 
         this.ui = null;
@@ -589,10 +598,21 @@ class BMUXClient {
     }
 
     /** 'frost' palette (default) or the original 'classic' black/green. */
+    /** The palettes `setTheme` accepts (kept in commands.js with the other vocab). */
+    themes() {
+        return typeof BMUX_THEMES !== 'undefined' ? BMUX_THEMES.slice() : ['frost', 'classic'];
+    }
+
+    /** 'frost' (default), 'classic', 'midnight', 'amber', 'light', 'nord', 'rose'. */
     setTheme(name) {
-        this.theme = String(name || '').toLowerCase() === 'classic' ? 'classic' : 'frost';
-        if (this.ui) this.ui.overlay.dataset.theme = this.theme;
-        this.log(`Theme: ${this.theme}`);
+        const asked = String(name || '').toLowerCase();
+        const themes = this.themes();
+        const picked = themes.indexOf(asked) === -1 ? 'frost' : asked;
+
+        const changed = this.theme !== picked;
+        this.theme = picked;
+        if (this.ui) this.ui.overlay.dataset.theme = picked;
+        if (changed || !this.theme) this.log(`Theme: ${picked}`);
         this.scheduleSave();
         return this.theme;
     }
@@ -911,6 +931,13 @@ class BMUXClient {
     }
 
     setupListeners() {
+        // Pane frames report the pointer and inspection answers as window
+        // messages: focus first (cheap), then inspection replies.
+        window.addEventListener('message', (event) => {
+            if (this.handlePaneFocus(event)) return;
+            this.handleInspectReply(event);
+        });
+
         // 1. Message Listener (from Background or Popup)
         chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             if (this.isTop && request.command === 'toggle-bmux') {
@@ -939,6 +966,25 @@ class BMUXClient {
         // blurring with an iframe as activeElement means that iframe's pane was
         // clicked, so make it the active pane.
         window.addEventListener('blur', () => this.syncActivePaneFromFocus(), true);
+
+        // 3b. Inside a pane's frame: report pointer activity to the parent.
+        //
+        // A click on a page lands in the iframe, not on the pane element, and
+        // moving between two iframes never blurs the top window — which is why
+        // only the footer used to change the active pane. The frame can see its
+        // own pointer events, so it tells the parent, which maps window -> pane.
+        if (!this.isTop) {
+            const tellParent = () => {
+                try {
+                    window.parent.postMessage({ __bmuxPaneFocus: true }, '*');
+                } catch (error) {
+                    // The parent went away (pane removed): nothing to report.
+                }
+            };
+
+            document.addEventListener(window.PointerEvent ? 'pointerdown' : 'mousedown', tellParent, true);
+            window.addEventListener('focus', tellParent, true);
+        }
 
         // 4. The overlay can be resized; pane rects are fractions, so one render
         // keeps every pane proportional to the new size. Filter boxes are in
@@ -2383,6 +2429,7 @@ class BMUXClient {
     /** Remove a pane element and everything the client tracks for it. */
     destroyPane(pane) {
         if (!pane) return;
+        if (pane.dataset) delete pane.dataset.bmuxFrameId;
         this.clearFilter(pane);
         this.cancelPrompt(pane, 'its pane was removed');
         if (this.filters && this.filters.delete) this.filters.delete(pane);
@@ -2409,19 +2456,266 @@ class BMUXClient {
             })), null, 2);
         }
 
-        const lines = ['Windows:'];
-        this.windows.forEach((record, index) => {
-            const panes = this.paneCountOf(record.layout);
-            const active = index === this.activeWindowIndex ? '  [ACTIVE]' : '';
-            lines.push(`${index + 1} ${String(record.name).padEnd(10)} ${panes} pane(s)${active}`);
-        });
-        return lines.join('\n');
+        const rows = this.windows.map((record, index) => [
+            String(index + 1),
+            record.name,
+            String(this.paneCountOf(record.layout)),
+            index === this.activeWindowIndex ? 'ACTIVE' : ''
+        ]);
+
+        return ['Windows:', this.formatTable(['#', 'name', 'panes', ''], rows)].join('\n');
     }
 
     paneCountOf(tree) {
         const panes = [];
         this.collectPaneRefs(tree, panes);
         return panes.length;
+    }
+
+    // --- cookies: the background holds the permission, the pane gives the URL ---
+
+    /** A pane's URL when it is usable as a cookie origin, else this tab's page. */
+    cookieUrlForPane(pane) {
+        const target = pane || this.getActivePane();
+        const url = target ? this.getPaneUrl(target) : window.location.href;
+        return /^https?:/i.test(String(url)) ? String(url) : window.location.href;
+    }
+
+    async cookieRequest(message) {
+        const reply = await this.persistRequest(message, 3000);
+        if (!reply) {
+            return { ok: false, error: 'the background did not answer — reload the extension if it predates 0.8.0' };
+        }
+        if (reply.status !== 'ok') {
+            return { ok: false, error: reply.reason || 'the background refused the request' };
+        }
+        return reply;
+    }
+
+    listCookies(filters, url) {
+        const target = url || this.cookieUrlForPane();
+        return this.cookieRequest({ command: 'cookie-list', url: target, filters: filters || {} })
+            .then((reply) => (reply.ok
+                ? { ok: true, cookies: reply.cookies || [], url: reply.url || target }
+                : reply));
+    }
+
+    setCookie(details, url) {
+        const target = url || this.cookieUrlForPane();
+        return this.cookieRequest({ command: 'cookie-set', url: target, details: details || {} })
+            .then((reply) => (reply.ok ? { ok: true, cookie: reply.cookie } : reply));
+    }
+
+    removeCookies(name, url) {
+        const target = url || this.cookieUrlForPane();
+        return this.cookieRequest({ command: 'cookie-remove', url: target, name: name == null ? null : String(name) })
+            .then((reply) => (reply.ok
+                ? { ok: true, removed: reply.removed || 0, names: reply.names || [] }
+                : reply));
+    }
+
+    /**
+     * Evaluate an expression in a pane's **page** world.
+     *
+     * MV3 forbids `eval` in a content script, so this asks the frame for its id and
+     * has the background run the code with `chrome.scripting.executeScript`. The id
+     * is cached on the pane: it does not change while the frame lives.
+     */
+    async evalInPane(pane, code) {
+        if (!pane) return { ok: false, error: 'no pane' };
+
+        let frameId = pane.dataset ? pane.dataset.bmuxFrameId : undefined;
+
+        if (frameId === undefined) {
+            const identified = await this.inspectPane(pane, 'frame-id', {}, 1200);
+            if (!identified.ok) {
+                return { ok: false, error: 'could not identify the pane frame: ' + identified.error };
+            }
+            frameId = String(identified.result.frameId);
+            if (pane.dataset) pane.dataset.bmuxFrameId = frameId;
+        }
+
+        const reply = await this.persistRequest({
+            command: 'exec-script',
+            frameId: Number(frameId),
+            code: String(code == null ? '' : code)
+        }, 3000);
+
+        if (!reply) return { ok: false, error: 'the background did not answer' };
+        if (reply.status !== 'ok') return { ok: false, error: reply.reason || 'the browser refused to run it' };
+
+        return { ok: true, type: reply.type, value: reply.value };
+    }
+
+    // --- pane inspection: ask the frame that owns a pane to look at itself ---
+
+    /**
+     * Post an inspection request into a pane's frame and resolve with its answer.
+     * `content/inspect.js` runs inside every frame and replies to its parent, which
+     * is why this works on cross-origin panes: `postMessage` is allowed across
+     * origins, `iframe.contentWindow.location` is not.
+     */
+    inspectPane(pane, kind, args, timeoutMs) {
+        const iframe = pane && pane.querySelector ? pane.querySelector('iframe') : null;
+        const target = iframe && iframe.contentWindow;
+        if (!target) return Promise.resolve({ ok: false, error: 'this pane has no frame' });
+
+        const nonce = `i${++this.inspectNonce}-${Date.now().toString(36)}`;
+        const budget = timeoutMs || BMUX_INSPECT_TIMEOUT;
+
+        return new Promise((resolve) => {
+            const timer = setTimeout(() => {
+                this.pendingInspections.delete(nonce);
+                resolve({
+                    ok: false,
+                    error: `the pane did not answer within ${budget}ms (blocked, sandboxed or still loading)`
+                });
+            }, budget);
+
+            this.pendingInspections.set(nonce, { resolve: resolve, timer: timer, source: target });
+
+            try {
+                target.postMessage({ __bmuxInspect: nonce, kind: kind, args: args || {} }, '*');
+            } catch (error) {
+                clearTimeout(timer);
+                this.pendingInspections.delete(nonce);
+                resolve({ ok: false, error: 'could not reach the pane: ' + (error && error.message) });
+            }
+        });
+    }
+
+    /**
+     * A pane's frame reports the pointer is inside it: that pane becomes active.
+     * Returns true when the message was ours, so the inspection listener can be
+     * skipped. Anything from a window we do not own is ignored.
+     */
+    handlePaneFocus(event) {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object' || !data.__bmuxPaneFocus) return false;
+        if (!this.isTop || !this.ui) return true;
+
+        const panes = this.allPanes();
+
+        for (let i = 0; i < panes.length; i++) {
+            const iframe = panes[i].querySelector('iframe');
+            if (iframe && iframe.contentWindow === event.source) {
+                if (this.getActivePane() !== panes[i]) this.setActivePane(panes[i]);
+                return true;
+            }
+        }
+
+        return true;
+    }
+
+    /** Resolve a pending inspection when the pane's frame answers. */
+    handleInspectReply(event) {
+        const data = event && event.data;
+        if (!data || typeof data !== 'object' || !data.__bmuxInspectReply) return false;
+
+        const entry = this.pendingInspections.get(data.__bmuxInspectReply);
+        if (!entry) return false;
+        if (entry.source && event.source !== entry.source) return false;
+
+        clearTimeout(entry.timer);
+        this.pendingInspections.delete(data.__bmuxInspectReply);
+        entry.resolve(data.ok
+            ? { ok: true, result: data.result }
+            : { ok: false, error: data.error || 'the pane reported an error' });
+        return true;
+    }
+
+    /**
+     * Render an inspection result for the console: aligned columns for a list of
+     * records, one per line for plain values, pretty JSON for a lone object.
+     */
+    formatValue(value) {
+        if (value == null) return 'null';
+        if (typeof value === 'string') return value;
+        if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+
+        if (Array.isArray(value)) {
+            if (!value.length) return '(empty)';
+            const objects = value.every((item) => item && typeof item === 'object' && !Array.isArray(item));
+            if (!objects) return value.map((item) => this.formatValue(item)).join('\n');
+
+            const columns = [];
+            value.forEach((item) => {
+                Object.keys(item).forEach((key) => {
+                    if (columns.indexOf(key) === -1) columns.push(key);
+                });
+            });
+            const rows = value.map((item) => columns.map((key) => {
+                const cell = item[key];
+                if (cell === undefined) return '';
+                if (typeof cell === 'object') return JSON.stringify(cell);
+                return String(cell);
+            }));
+            return this.formatTable(columns, rows);
+        }
+
+        // Plain object: pretty JSON, which stays copy-pasteable.
+        try {
+            return JSON.stringify(value, null, 2);
+        } catch (error) {
+            return String(value);
+        }
+    }
+
+    /**
+     * A box-drawn table: `┌─┬─┐`, a header row, one rule, then the rows.
+     * Numeric columns are right-aligned, long cells are ellipsed to fit
+     * `BMUX_TABLE_MAX_WIDTH`, and every row lines up in a monospace console.
+     */
+    formatTable(columns, rows, options) {
+        const opts = options || {};
+        const names = columns.map((column) => String(column));
+        const limit = opts.maxWidth || BMUX_TABLE_MAX_WIDTH;
+
+        const cells = rows.map((row) => names.map((unused, index) => String(
+            row[index] === undefined || row[index] === null ? '' : row[index]
+        )));
+
+        const numeric = names.map((unused, index) => cells.length > 0 && cells.every((row) => {
+            const cell = row[index].trim();
+            return cell === '' || /^-?\d+(\.\d+)?$/.test(cell);
+        }) && cells.some((row) => row[index].trim() !== ''));
+
+        const widths = names.map((name, index) => Math.max(
+            name.length,
+            cells.reduce((max, row) => Math.max(max, row[index].length), 0)
+        ));
+
+        // Fit the box into the terminal: shrink the widest columns first.
+        const overhead = 3 * names.length + 1;
+        let total = widths.reduce((sum, width) => sum + width, 0) + overhead;
+
+        while (total > limit) {
+            const widest = widths.indexOf(Math.max.apply(null, widths));
+            if (widths[widest] <= 6) break;
+            widths[widest] -= 1;
+            total -= 1;
+        }
+
+        const fit = (text, width) => (text.length <= width
+            ? text
+            : (width <= 1 ? text.slice(0, width) : text.slice(0, width - 1) + '…'));
+
+        const pad = (text, width, right) => {
+            const clipped = fit(text, width);
+            return right ? clipped.padStart(width, ' ') : clipped.padEnd(width, ' ');
+        };
+
+        const rule = (left, middle, right) => left +
+            widths.map((width) => '─'.repeat(width + 2)).join(middle) + right;
+
+        const line = (row, align) => '│ ' +
+            widths.map((width, index) => pad(row === null ? names[index] : row[index], width,
+                row === null ? false : align[index])).join(' │ ') + ' │';
+
+        const out = [rule('┌', '┬', '┐'), line(null), rule('├', '┼', '┤')];
+        cells.forEach((row) => out.push(line(row, numeric)));
+        out.push(rule('└', '┴', '┘'));
+        return out.join('\n');
     }
 
     getPanes() {

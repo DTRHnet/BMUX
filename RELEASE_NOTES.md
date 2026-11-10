@@ -1,3 +1,94 @@
+# BMUX Version 0.8.0 - Release Summary
+
+## Release Information
+
+**Version**: 0.8.0
+**Release Date**: November 10, 2026
+**Status**: Inspection release
+**License**: MIT
+
+---
+
+## Highlights
+
+| Area | What shipped |
+|------|--------------|
+| Cookies | `list-cookies` / `cookies` (httpOnly included), `set-cookie`, `delete-cookie`, `clear-cookies`; `-j` and a Netscape jar for `curl`/`wget`/`yt-dlp` |
+| Storage | `list-storage [local\|session] [pattern] [-j] [--keys]`, `set-storage <key>=<value> [session]` (and `--remove`) |
+| DOM inventory | `list-forms` (fields, types, required, passwords masked), `list-scripts` (`[3rd]` flagged), `list-resources`, `outline` (headings + landmarks + level jumps) |
+| Text and code | `find-text` (boxes drawn in the pane), `eval` / `js` (page-world, prints tables or pretty JSON) |
+| Cross-origin | A frame-side relay (`content/inspect.js`) answers inside the pane, so inspection works on panes BMUX cannot otherwise read |
+| Permissions | `cookies` added to the manifest; used only when you ask about a pane's jar |
+| Commands | 52 → 70 (12 new commands, 6 aliases) |
+| Palettes | Seven: `frost` (default), `classic`, `midnight`, `amber`, `light`, `nord`, `rose` — one CSS-variable block each, `theme next` to cycle |
+| Output | Box-drawn tables with right-aligned numbers and ellipsised cells; `-j` for JSON |
+| Pointer focus | Clicking a pane's *page* (not just its footer) focuses it: frames report pointer activity to their parent |
+| README | Centred logo (light and dark variants) above a centred badge row |
+
+## The shape of it
+
+**The relay.** `content/inspect.js` is injected into every frame by the manifest. The
+top frame posts `{ __bmuxInspect: <nonce>, kind, args }` into the pane's
+`contentWindow` (allowed across origins) and waits for
+`{ __bmuxInspectReply: <nonce>, ok, result }` from that same window, with a 1.5 s
+timeout that reports "the pane did not answer". Handlers are synchronous DOM reads
+except `frame-id`, which is a promise.
+
+**`eval` is the exception.** MV3 forbids `eval` inside a content script — the first
+implementation hit exactly that wall, and an inline `<script>` injected from the
+isolated world was refused as well. So the pane reports its own `frameId`, and the
+background runs the expression with `chrome.scripting.executeScript({ world: 'MAIN' })`
+in that frame: real page globals, values serialised in-page (nodes as `<h1#id>`,
+depth 3, arrays capped at 50) and formatted by the top frame.
+
+**Cookies are brokered by the background** through the `cookies` permission, which is
+the only way to see `httpOnly` cookies or to touch a cross-origin pane's jar. The
+commands pass the pane's URL, so the jar is the right origin's, and nothing is stored
+by BMUX.
+
+## What is still same-origin only
+
+`source`, `filter` and `capture-pane` read the pane's document from the top frame, so
+they still need a same-origin pane. Everything inspection-related does not — that is
+the point of asking the frame itself.
+
+## Docs
+
+README (inspection section, command tables, permissions), QUICKSTART (inspection
+block), COMMAND_USAGE (twelve command entries plus a new section 13 on the relay and
+the cookie broker), ADDING_COMMANDS (how to write a pane-inspecting command),
+IMPLEMENTATION (section 21, the mechanisms and their limits), CROSS_ORIGIN (corrected:
+cross-origin panes are no longer opaque). All stamped 0.8.0.
+
+## Second pass (same release)
+
+- **Seven palettes**, frost still the default; `theme` lists them, `theme next`/`prev`
+  cycle, the choice is saved with the layout. `setTheme()` falls back to frost for an
+  unknown name, so a corrupt stored value cannot leave the UI unstyled.
+- **Box-drawn tables** in every listing command, with numeric alignment, ellipsis and
+  a 96-character wrap; `list-panes` gained a `state` column (`ACTIVE+ZOOM`).
+- **Pointer focus fixed**: a click inside a pane's iframe now makes that pane active —
+  the frame reports `pointerdown`/`focus` to its parent, which maps the window back to
+  its pane. Previously only the footer worked, because switching between two iframes
+  never blurs the top window.
+- The README opens with the logo (a light and a dark rendering of the same artwork,
+  chosen with `prefers-color-scheme`) above a centred badge row.
+
+## Verification
+
+- **1138 jsdom checks** (108 new in total): every frame handler, the message protocol (including
+  the async `frame-id` path and a foreign source being ignored), the top-frame relay
+  (timeout, source matching, formatting), the cookie broker (list/filter/set/remove/
+  clear, Netscape export, missing permission) and the `eval` plumbing.
+- **173 Chromium checks** (26 new in total), including real mouse clicks on a pane's
+  page focusing that pane and the computed colours changing with `theme midnight` /
+  `light` / `frost`, plus: storage, forms, outline, find-text boxes inside
+  the pane, `eval`, scripts and resources on the test page; the same inspection on a
+  cross-origin pane (`localhost` vs `127.0.0.1`); cookies set, listed, exported and
+  deleted through the browser's own API.
+
+---
+
 # BMUX Version 0.7.0 - Release Summary
 
 ## Release Information

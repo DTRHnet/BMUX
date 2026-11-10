@@ -1,6 +1,6 @@
 # BMUX Command Usage Guide
 
-**Version 0.7.0** — 52 commands. Every command below is what the shipped
+**Version 0.8.0** — 70 commands. Every command below is what the shipped
 `content/commands.js` defines; the `.bmux` script format has its own guide
 ([SCRIPTS.md](SCRIPTS.md)).
 
@@ -279,10 +279,39 @@ split row ratio 0.30
     leaf %3 https://example.com/blog
 ```
 
-### `theme [frost|classic]`
-`frost` (default) uses cold blues and ice text; `classic` is the original black
-background with green text. Bare `theme` reports the active palette. The choice is
-stored with the layout.
+### `theme [name|next]`
+Switches the palette and prints its name. Bare `theme` lists all of them with the
+current one marked, `theme next` cycles, `theme prev` cycles backwards, and an
+unknown name is refused with the usage line. The choice is stored with the layout.
+
+| Palette | Look |
+|---------|------|
+| `frost` *(default)* | cold blues, ice text, one ice-cyan accent |
+| `classic` | the original black terminal, green text |
+| `midnight` | deep indigo shell, violet accent |
+| `amber` | amber-on-brown CRT |
+| `light` | paper and slate |
+| `nord` | arctic blue-grey |
+| `rose` | deep plum with a sakura accent |
+
+```
+> theme
+Theme: frost (of 7)
+┌─────────┬───┐
+│ theme   │   │
+├─────────┼───┤
+│ * frost │   │
+│   classic │ │
+…
+> theme midnight
+Theme: midnight
+> theme nosuchtheme
+Error: Usage: theme [frost|classic|midnight|amber|light|nord|rose|next]
+```
+
+A palette is a block of CSS variables (`--bmux-bg`, `--bmux-accent`, `--bmux-text`, …)
+selected by `data-theme` on `#bmux-overlay`, so a new one is a stylesheet block plus
+a name in `BMUX_THEMES` — no renderer changes.
 
 ### `keys`
 Prints the last twelve key events: the raw `key`, the `code`, the modifiers, the
@@ -383,9 +412,12 @@ Prints every pane: number, id, size, active/zoom marker, title and URL.
 ```
 $ list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 - **Number** – layout order, top-to-bottom and left-to-right, 1..n. Recomputed
   after every structural change, so it can change.
@@ -564,8 +596,12 @@ one. `-j` prints JSON with `number`, `name`, `panes` and `active`.
 ```
 > list-windows
 Windows:
-1 1          3 pane(s)
-2 docs       2 pane(s)  [ACTIVE]
+┌───┬──────┬───────┬────────┐
+│ # │ name │ panes │        │
+├───┼──────┼───────┼────────┤
+│ 1 │ 1    │     3 │        │
+│ 2 │ docs │     2 │ ACTIVE │
+└───┴──────┴───────┴────────┘
 ```
 
 ### `detach`
@@ -896,6 +932,193 @@ Reloads the pane. Cross-origin panes are reloaded by reassigning `src`.
 ### `clear`
 Clears the pane's output area and prints nothing.
 
+### `list-cookies [-j] [--domain d] [--name n] [--export netscape|json]`
+Lists the cookies the browser would send to **this pane's origin** — including
+`httpOnly` ones, which `document.cookie` can never show. `cookies` is an alias.
+
+```
+> list-cookies
+Cookies for https://www.example.com/ (2):
+┌─────────┬────────┬──────────────┬──────┬────────────┬────────┬──────────┬──────────┐
+│ name    │ value  │ domain       │ path │ expires    │ secure │ httpOnly │ sameSite │
+├─────────┼────────┼──────────────┼──────┼────────────┼────────┼──────────┼──────────┤
+│ session │ abc123 │ .example.com │ /    │ 2026-12-01 │ yes    │ yes      │ lax      │
+│ theme   │ dark   │ example.com  │ /    │ session    │ no     │ no       │ -        │
+└─────────┴────────┴──────────────┴──────┴────────────┴────────┴──────────┴──────────┘
+> list-cookies --export netscape     # a cookie jar curl / wget / yt-dlp accept
+> list-cookies -j                    # the same, as JSON
+```
+
+Columns: `name`, `value` (truncated to 40 characters), `domain`, `path`, `expires`
+(date or `session`), `secure`, `httpOnly`, `sameSite`. `--name` matches a prefix,
+`--domain` narrows to one domain, `--export netscape` prints a
+`# Netscape HTTP Cookie File` jar (`--export json` is `-j`).
+
+Cookies come from the browser's `cookies` API in the background, not from the page,
+so this works on cross-origin panes and sees cookies the page could not.
+
+### `set-cookie <name>=<value> [--domain d] [--path /] [--expires seconds] [--secure] [--http-only] [--same-site lax|strict|none]`
+Writes a cookie for this pane's origin. `--expires` is a number of seconds from now;
+without it the cookie is a session cookie.
+
+```
+> set-cookie session=abc123 --http-only --path /
+Set cookie session on example.com/ (httpOnly) · expires session
+```
+
+### `delete-cookie <name>`
+Removes one cookie for this pane's origin (every domain/path that carries the name).
+
+```
+> delete-cookie session
+Deleted 1 cookie(s): session
+> delete-cookie ghost
+No cookie named "ghost" for this pane
+```
+
+### `clear-cookies [-y]`
+Removes every cookie this pane would send. Asks first with a confirmation card;
+`-y` skips the question. Handy for testing login states across panes.
+
+```
+> clear-cookies
+Cleared 2 cookie(s) for https://www.example.com/
+```
+
+### `list-storage [local|session] [pattern] [-j] [--keys]`
+Dumps `localStorage` (the default) or `sessionStorage` **of the pane's own origin**.
+The optional pattern is a case-insensitive regular expression on the key, `--keys`
+omits values, `-j` prints JSON.
+
+```
+> list-storage
+localStorage (https://www.example.com) — 2 of 2 item(s):
+┌───────┬──────┬──────────────────────────────────────┐
+│ key   │ size │ value                                │
+├───────┼──────┼──────────────────────────────────────┤
+│ token │   48 │ eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9 │
+│ theme │    4 │ dark                                 │
+└───────┴──────┴──────────────────────────────────────┘
+> list-storage session --keys
+```
+
+The values are read inside the pane's frame, so this works on cross-origin panes —
+and each origin has its own storage, which is the point when you are comparing two
+panes of the same site.
+
+### `set-storage <key>=<value> [session]` / `set-storage <key> --remove`
+Writes (or deletes) one storage item in the pane's origin.
+
+```
+> set-storage token=abc123
+Set token in localStorage (6 chars)
+> set-storage temp=e2e session
+Set temp in sessionStorage (3 chars)
+> set-storage token --remove
+Removed token from localStorage
+```
+
+### `list-forms [-j] [--highlight]`
+Enumerates `<form>` elements: `action`, `method`, `name`/`id`, and every named
+field with its type, `required` flag, placeholder and value — except passwords,
+which print as `(password)`. Inputs that live outside any form are listed after.
+`--highlight` boxes the forms inside the pane (`forms` is an alias).
+
+```
+> list-forms
+2 form(s), 1 input(s) outside a form — 2 box(es) drawn
+1. POST /login name=login #signin
+   user [text] required placeholder="you@example.com"
+   pass [password] = (password)
+   remember [checkbox]
+outside any form: search[search]
+```
+
+### `list-scripts [-j] [--third-party]`
+Every `<script>` on the page: external URLs, inline sizes, `async`/`defer`, and a
+`[3rd]` flag when the host differs from the page's (`scripts` is an alias).
+
+```
+> list-scripts --third-party
+2 script(s) on www.example.com — 1 third-party, 1 inline
+  [3rd] https://cdn.example-cdn.net/app.js async
+     /static/app.js defer
+```
+
+### `list-resources [-j]`
+Groups the `performance` resource entries by initiator type — images, stylesheets,
+fonts, `xmlhttprequest`, `fetch`, scripts — with counts, third-party counts and
+bytes per group, plus a few example URLs. On a page without resource timing it
+falls back to counting the DOM (`resources` is an alias).
+
+```
+> list-resources
+37 resource(s) on www.example.com:
+┌────────────────┬───────┬───────────┬─────────┐
+│ type           │ count │ 3rd-party │ bytes   │
+├────────────────┼───────┼───────────┼─────────┤
+│ img            │    21 │         0 │ 1843 KB │
+│ css            │     3 │         1 │ 62 KB   │
+│ xmlhttprequest │     9 │         2 │ 11 KB   │
+└────────────────┴───────┴───────────┴─────────┘
+```
+
+### `eval <expression>` / `js <expression>`
+Runs JavaScript **in the page's own world** and prints the result: strings as-is,
+numbers and booleans literally, objects as pretty JSON, arrays of records as a
+table, DOM nodes as `<h1#main>`. Errors come back as `Error: …`.
+
+```
+> eval document.title
+Example Domain
+(string · https://www.example.com/)
+> eval "document.querySelectorAll('a').length"
+12
+(number · https://www.example.com/)
+> eval "({ links: document.links.length, base: document.baseURI })"
+{
+  "links": 12,
+  "base": "https://www.example.com/"
+}
+```
+
+How it works, because it matters: MV3 forbids `eval` inside a content script. So the
+top frame asks the pane's frame for its **frame id** (`frame-id`, answered by
+`content/inspect.js`), then has the background run the expression with
+`chrome.scripting.executeScript({ world: 'MAIN' })` — the page's own world, real page
+globals. The result is serialised in the page (`<h1#main>`, plain objects, arrays
+capped at 50) and printed by the top frame. A page whose CSP disallows `unsafe-eval`
+still refuses the expression; that is reported, not faked.
+
+### `find-text <query> [--no-highlight] [--clear]`
+Searches the **visible text** of the pane (text nodes, skipping `script`/`style`/
+`noscript`), counts occurrences, and boxes every matched node *inside the pane* —
+so the boxes work on cross-origin pages and survive BMUX redraws. `--clear` removes
+them, `--no-highlight` only reports.
+
+```
+> find-text beta
+"beta": 2 occurrence(s) in 1 text node(s), 1 box(es) drawn
+  <p> alpha beta gamma beta
+> find-text --clear
+Text highlights cleared
+```
+
+### `outline [-j]`
+The heading hierarchy plus the page's landmarks, which is the fastest way to see
+what a page is made of (`structure` is an alias). It also flags heading level jumps.
+
+```
+> outline
+Example Domain — 3 heading(s), 2 landmark(s)
+h1 Example Domain
+  h2 Getting started
+landmarks: main, nav[Main]
+```
+
+The aliases `cookies`, `forms`, `scripts`, `resources`, `structure` and `js` take the
+same arguments as the command they mirror.
+
 ---
 
 ## 8. Active pane context
@@ -972,15 +1195,21 @@ $ list-panes                    # check numbers, sizes, titles
 ```
 $ list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-$ focus-pane left
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘$ focus-pane left
 Focus left: pane 1/2
 $ list-panes
 Panes:
-1 %1   50%x100%            Docs - https://example.com/docs
-2 %2   50%x100%   [ACTIVE] GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │        │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │ ACTIVE │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 ### Four-pane workspace
 
@@ -1024,6 +1253,11 @@ $ resize-pane -Z             # layout restored, all pages still loaded
 ---
 
 ## 11. Tips
+
+- **Output is a table when it is tabular.** Listings (`list-panes`, `list-windows`,
+  `list-layouts`, `list-cookies`, `list-storage`, `list-resources`, `theme`) are drawn
+  as box tables: `┌─┬─┐` rules, numeric columns right-aligned, long cells ellipsed to
+  fit 96 characters. Add `-j` (or `--json`) for machine-readable output.
 
 1. **`list-panes` first** whenever focus or sizes surprise you.
 2. **Numbers move, ids do not.** Numbers follow the layout; `%N` ids stay with
@@ -1082,7 +1316,45 @@ The format reference, the limits, how to write a demo and how to record it are i
 
 ---
 
-## 13. Where commands live
+## 13. Inspecting a pane
+
+Two mechanisms make the inspection commands possible, and both are worth knowing
+because they decide what you can and cannot do.
+
+**The frame relay.** A pane is an iframe, so only code running *inside* that iframe
+can read its storage, walk its DOM or evaluate its JavaScript. `content/inspect.js`
+is loaded into every frame; the top frame posts a request into the pane's window
+(`{ __bmuxInspect: <nonce>, kind, args }`), the frame runs the handler and posts
+`{ __bmuxInspectReply: <nonce>, ok, result | error }` back to its parent. Because
+`postMessage` is allowed across origins, `list-storage`, `list-forms`, `list-scripts`,
+`list-resources`, `outline`, `find-text` and `eval` all work on **cross-origin**
+panes.
+
+- Only requests whose `event.source` is the frame's parent are answered, and the
+  reply goes back to that source.
+- A pane that does not answer within 1.5 s (blocked, sandboxed, still loading) is
+  reported as such — the command never hangs.
+- `source`, `filter` and `capture-pane` still need a same-origin pane: they read the
+  document from the top frame instead of asking the frame.
+
+**The cookie broker.** The background holds the `cookies` permission and answers
+`cookie-list`, `cookie-set` and `cookie-remove` for the URL of the pane you named.
+That is what makes `httpOnly` cookies visible and what lets `set-cookie` write them.
+
+Limits worth knowing:
+
+- `eval` runs in the page's world through `chrome.scripting`, addressed by the frame
+  id the pane reports; a page whose CSP forbids `unsafe-eval` refuses it (reported).
+- `find-text` boxes are drawn once; scrolling the page does not move them (they are
+  a snapshot, like filter boxes).
+- `list-resources` depends on the browser's resource timing; a page that clears its
+  timing buffer shows the DOM fallback instead.
+- Inspection answers are capped (200 entries, 4000 text nodes) so a huge page cannot
+  flood the console.
+
+---
+
+## 14. Where commands live
 
 | File | Responsibility |
 |------|----------------|

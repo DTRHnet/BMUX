@@ -1,12 +1,38 @@
-# BMUX - Browser Multiplexer
+# BMUX — Browser Multiplexer
 
-**Version 0.7.0**
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/bmux-logo-dark.png">
+    <img src="docs/images/bmux-logo-light.png" alt="BMUX" width="560">
+  </picture>
+</p>
 
-A Chrome extension (Manifest V3) inspired by TMUX that transforms your browser into a powerful terminal-style multiplexer. Split your browser window into multiple independent panes, each displaying different web content — and rearrange them without reloading a single page.
+<p align="center">
+  <img alt="version 0.8.0" src="https://img.shields.io/badge/version-0.8.0-7fd0f0?style=flat-square">
+  <img alt="license MIT" src="https://img.shields.io/badge/license-MIT-9fe8c8?style=flat-square">
+  <img alt="Manifest V3" src="https://img.shields.io/badge/manifest-v3-1e364b?style=flat-square">
+  <img alt="70 commands" src="https://img.shields.io/badge/commands-70-b3e7ff?style=flat-square">
+  <img alt="jsdom 1138 checks" src="https://img.shields.io/badge/jsdom-1138%20checks-86a3ba?style=flat-square">
+  <img alt="Chromium 173 checks" src="https://img.shields.io/badge/chromium-173%20checks-ffd98a?style=flat-square">
+</p>
 
-![BMUX Version](https://img.shields.io/badge/version-0.7.0-blue)
-![License](https://img.shields.io/badge/license-MIT-green)
+<p align="center">
+  <em>A Chrome extension (Manifest V3) inspired by TMUX that turns a browser tab into a
+  terminal-style multiplexer — panes that never reload, layouts that survive, and a
+  command line that can look inside the pages.</em>
+</p>
 
+> **New in 0.8.0:** **seven palettes** (`frost` stays the default: `midnight`, `amber`,
+> `light`, `nord`, `rose`, `classic`), **box-drawn tables** for every listing, and
+> clicking a pane's *page* — not just its footer — now focuses that pane. Plus the
+> inspection commands: BMUX can *look inside* a pane. `list-cookies`, `list-storage`,
+> `list-forms`, `list-scripts`, `list-resources`, `outline`, `find-text` and `eval`
+> report what the page really contains — including **cross-origin** panes, because
+> the question is asked inside the pane's own frame. Cookies are brokered through
+> the browser's `cookies` API, so `httpOnly` ones show up and `set-cookie` /
+> `delete-cookie` work. Cookie jars export as Netscape files for `curl`, `wget` and
+> `yt-dlp`.
+>
 > **New in 0.7.0:** a tab can hold several **windows** — named layouts you switch
 > between instantly (`n` / `p`, `select-window`, or the chip in the status bar)
 > without reloading a single page. Each window keeps its own split tree, focus,
@@ -94,6 +120,20 @@ pane(s)` / `2 docs · 2 pane(s) [ACTIVE]`). The window chip at the bottom reads
 pages reloaded to get here.
 
 ![Two windows in one tab, with list-windows printed and the window chip showing 2:docs](docs/images/06-windows.png)
+
+**Inspecting a pane.** `list-cookies` for the `/changelog` pane shows the site's
+`_ga` cookies and ones BMUX just injected (`set-cookie bmux_demo=1`), with
+`domain`, `path`, `expires`, `secure`, `httpOnly` and `sameSite` — then `outline`
+prints the heading hierarchy of that same pane and flags that it jumps `h1 → h4`.
+Both answers came from inside the pane's own frame.
+
+![list-cookies and outline output in a pane console on dtrh.net](docs/images/07-inspection.png)
+
+**A different palette.** `theme` lists the seven and marks the current one; the same
+three-pane layout in `midnight` — indigo shell, violet accent — with the choice saved
+with the layout. Frost is the default, and `theme next` cycles.
+
+![The midnight palette on the same three-pane layout, with the palette list on screen](docs/images/08-themes.png)
 
 ---
 
@@ -184,6 +224,40 @@ pages reloaded to get here.
 - **`cycle-pane next|prev`** and **`last-pane`** (`o` and `;`)
 - **Every move is logged** - e.g. `Focus right: pane 1/2 (wrapped)`
 
+### 🔬 Looking inside a pane
+Every pane is a different page, often a different origin. These commands ask the
+pane's **own frame** what it contains, so they answer for pages BMUX otherwise
+cannot inspect (a cross-origin iframe still runs a BMUX frame script):
+
+```
+> outline                      # heading hierarchy + landmarks (h1 … h3, level jumps)
+> list-forms                   # action, method, every field: name, type, required
+> list-scripts --third-party    # scripts, with [3rd] flagged and inline sizes
+> list-resources               # images, css, fonts, xhr — counts and bytes per type
+> find-text beta               # box every visible match, right there in the page
+> list-storage                 # localStorage (or sessionStorage) keys and values
+> set-storage injected=1       # write one; --remove deletes
+> eval document.title          # run JS in the pane and print the result
+> js "document.querySelectorAll('a').length"
+```
+
+- **Cookies live in the background**, behind the `cookies` permission: `list-cookies`
+  shows `value`, `domain`, `path`, `expires`, `secure`, `httpOnly` and `sameSite`
+  for the pane's origin, including cookies `document.cookie` can never see.
+  `set-cookie name=value [--http-only] [--secure] [--expires 3600]` injects one,
+  `delete-cookie <name>` removes one, `clear-cookies` empties the jar (after asking).
+  `list-cookies --export netscape` prints a jar that `curl -b`, `wget --load-cookies`
+  and `yt-dlp --cookies` accept; `-j` gives JSON.
+- **`eval` runs in the page's own world** — real page globals, not a sandbox — via
+  `chrome.scripting`, addressed by the frame id the pane reports for itself (see the
+  screenshot above: `list-cookies` and `outline` in one pane console). Values
+  print as a table or pretty JSON; MV3 forbids `eval` inside a content script, which
+  is why it takes that route.
+- **`find-text` boxes stay in the pane's own document**, so they work on
+  cross-origin pages and survive BMUX redraws; `find-text --clear` removes them.
+- Results print as aligned tables (`formatValue`), pipe into `-j` for JSON, and are
+  ordinary command output — so a `.bmux` script can capture them with `sleep`.
+
 ### 🪟 Windows: several layouts in one tab
 A browser tab no longer has one layout — it can have up to six, each with its own
 panes, and switching between them is a DOM show/hide, so nothing reloads:
@@ -194,8 +268,12 @@ panes, and switching between them is a DOM show/hide, so nothing reloads:
 > rename-window docs
 > list-windows
 Windows:
-1 1          3 pane(s)
-2 docs       2 pane(s)  [ACTIVE]
+┌───┬──────┬───────┬────────┐
+│ # │ name │ panes │        │
+├───┼──────┼───────┼────────┤
+│ 1 │ 1    │     3 │        │
+│ 2 │ docs │     2 │ ACTIVE │
+└───┴──────┴───────┴────────┘
 > next-window            # or n, or click the chip in the status bar
 > select-window 1        # by number, or by name: select-window docs
 > kill-window            # asks first; the last window is refused
@@ -351,18 +429,31 @@ form of `Ctrl+b`, `Shift+z`), click `⤡` to restore. Clicking another pane's `�
 moves the maximize there. Keyboard (`z`, `Shift+z`), the toolbar `Zoom` button and
 the pane buttons share one state.
 
-### 🧊 A frost palette, and a calmer Control Mode
-Every terminal surface uses cold blues, ice text and one ice-cyan accent — defined
-as CSS variables at the top of `content/styles.css`, so it is one place to tune.
-Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather
-than a five-pixel blue frame around the page. `theme classic` restores the old
-black/green terminal look:
+### 🧊 Seven palettes, and a calmer Control Mode
+Every terminal surface — toolbar, footers, consoles, panels, the status bar — draws
+from one set of CSS variables, so a palette is a block of colour in
+`content/styles.css` and nothing else. **Frost stays the default**; the rest are one
+command away and the choice is saved with the layout:
+
+| Palette | Look |
+|---------|------|
+| `frost` *(default)* | cold blues, ice text, one ice-cyan accent |
+| `classic` | the original black terminal with green text |
+| `midnight` | deep indigo shell, violet accent |
+| `amber` | amber-on-brown CRT |
+| `light` | paper and slate, for daylight reading |
+| `nord` | arctic blue-grey |
+| `rose` | deep plum with a sakura accent |
 
 ```
-> theme classic      # black background, green text
-> theme frost        # back to the default palette
-> theme              # what is active now
+> theme              # list them, current one marked *
+> theme midnight     # switch
+> theme next         # cycle (theme prev goes back)
+> theme frost        # the default
 ```
+
+Control Mode is a one-pixel inset ring with a tinted `CONTROL MODE` chip rather than
+a five-pixel blue frame around the page, in every palette.
 
 ### 💻 Per-pane console you can actually read
 The console under each pane's input is a scrollback, not a flash message:
@@ -556,7 +647,7 @@ These act on the whole overlay.
 | `info [section]` | Verbose diagnostics: `layout`, `panes`, `keys`, `state` | `> info panes` |
 | `debug [on\|off\|toggle]` | Show or hide the floating debug window | `> debug on` |
 | `verbose [on\|off\|status]` | Mirror debug output into the focused pane console | `> verbose on` |
-| `theme [frost\|classic]` | Switch the palette | `> theme classic` |
+| `theme [name\|next]` | Switch palette: frost, classic, midnight, amber, light, nord, rose | `> theme midnight` |
 | `save-layout [name]` | Save the layout for this site (survives restarts) | `> save-layout work` |
 | `restore-layout <name>` | Apply a saved layout | `> restore-layout work` |
 | `list-layouts` | Saved layouts for this site | `> list-layouts` |
@@ -582,6 +673,18 @@ for the console and `:` line.
 | `url [new-url]` | Show or change pane URL | `> url github.com` |
 | `reload` | Reload the pane | `> reload` |
 | `log [toggle\|on\|off\|clear\|size px\|detach\|attach]` | Show, hide, resize, clear, or float this pane's console | `> log detach` |
+| `list-cookies [filters] [-j] [--export netscape\|json]` | Cookies this pane would send, `httpOnly` included (`cookies` is an alias) | `> list-cookies --export netscape` |
+| `set-cookie <name>=<value> [flags]` | Set a cookie for this pane's origin (`--http-only`, `--secure`, `--path`, `--domain`, `--expires`, `--same-site`) | `> set-cookie session=abc --http-only` |
+| `delete-cookie <name>` | Remove one cookie | `> delete-cookie session` |
+| `clear-cookies [-y]` | Remove every cookie for this pane (asks first) | `> clear-cookies` |
+| `list-storage [local\|session] [pattern] [-j] [--keys]` | localStorage / sessionStorage of this pane | `> list-storage session` |
+| `set-storage <key>=<value> [session]` | Write a storage item (`<key> --remove` deletes) | `> set-storage token=abc` |
+| `list-forms [-j] [--highlight]` | Forms: action, method, every field (`forms` is an alias) | `> list-forms` |
+| `list-scripts [-j] [--third-party]` | Scripts with third-party flags and inline sizes (`scripts` is an alias) | `> list-scripts --third-party` |
+| `list-resources [-j]` | Images, stylesheets, fonts, xhr — counts and bytes (`resources` is an alias) | `> list-resources` |
+| `eval <expression>` | Run JS in the pane and print the result (`js` is an alias) | `> eval document.title` |
+| `find-text <query> [--no-highlight] [--clear]` | Search the visible text and box the matches | `> find-text beta` |
+| `outline [-j]` | Heading hierarchy and landmarks (`structure` is an alias) | `> outline` |
 | `clear` | Empty the pane console scrollback | `> clear` |
 
 Bad input never throws: an unknown command, an unknown pane, a missing argument,
@@ -594,9 +697,12 @@ rejected as unknown commands.
 ```
 > list-panes
 Panes:
-1 %1   50%x100%   [ACTIVE] Docs - https://example.com/docs
-2 %2   50%x100%            GitHub - https://github.com/
-```
+┌───┬────┬──────────┬────────┬────────┬──────────────────────────┐
+│ # │ id │ size     │ state  │ title  │ url                      │
+├───┼────┼──────────┼────────┼────────┼──────────────────────────┤
+│ 1 │ %1 │ 50%x100% │ ACTIVE │ Docs   │ https://example.com/docs │
+│ 2 │ %2 │ 50%x100% │        │ GitHub │ https://github.com/      │
+└───┴────┴──────────┴────────┴────────┴──────────────────────────┘```
 
 `-j` prints the same data as JSON with fractional geometry, which is handy for
 scripting:
@@ -712,6 +818,7 @@ BMUX/
 │   └── main.js            # Service worker (state, message relay)
 ├── content/
 │   ├── main.js            # Overlay DOM, layout engine, focus, dispatcher, script runner
+│   ├── inspect.js         # Frame-side inspection: storage, DOM inventory, eval id
 │   ├── commands.js        # Command registry + key bindings (source of truth)
 │   ├── scripts.js         # .bmux format: parser, sleep arguments, built-in demo
 │   └── styles.css         # Frost palette, split handles, panels, drag shield
@@ -760,6 +867,7 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 
 ### What BMUX Does
 - ✅ Removes CSP/X-Frame-Options headers for panes
+- ✅ Brokers cookies for the pane you ask about, through the `cookies` permission
 - ✅ Stores state locally in browser
 - ✅ Open source - fully auditable code
 
@@ -772,6 +880,12 @@ BMUX is **inspired by** TMUX but adapted for the browser:
 - **Never `sync`**, never uploaded. `persist off` clears the current tab's
   snapshot; `delete-layout --all` removes a site's named layouts. Both are
   plaintext in your own browser profile, like history.
+
+### What BMUX Does With Cookies
+- Only when you run `list-cookies`, `set-cookie`, `delete-cookie` or `clear-cookies` —
+  there is no background harvesting, no periodic sync and no upload.
+- The jar is read for the URL of the pane you name, and printed to the console (or
+  exported to the clipboard as a file). Nothing is stored by BMUX itself.
 
 ### What BMUX Does NOT Do
 - ❌ Track your browsing
@@ -826,8 +940,18 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - ⏳ **No `break-pane` / `join-pane`**
 - ⏳ **No broadcasting** of input to several panes
 - ⏳ **Mouse only** - resizing needs a pointer; touch is not handled
-- ⏳ **Cross-origin panes** cannot be inspected or boxed (`source`, `filter`,
-  `capture-pane`); navigation, reload, sizing and reordering work regardless
+- ⏳ **`source`, `filter` and `capture-pane` need a same-origin pane** — they read the
+  pane's document from the top frame. The inspection commands (`list-storage`,
+  `forms`, `scripts`, `resources`, `outline`, `find-text`, `eval`) and the cookie
+  commands work on **cross-origin** panes, because they ask the pane's own frame or
+  the background
+- ⏳ **`eval` is subject to the page's CSP**: MV3 forbids eval in a content script, so
+  BMUX runs it through `chrome.scripting` in the frame's main world — a page that
+  keeps a CSP (`<meta>`) and disallows `unsafe-eval` will refuse the expression, and
+  the command says so
+- ⏳ **The `cookies` permission** is why `httpOnly` cookies can be listed and cleared;
+  the extension declares it explicitly, and it is used only for the pane you ask
+  about
 - ⏳ **Filter boxes are measured when drawn** — a page that moves elements without
   mutating the DOM (CSS transitions) needs the filter re-run
 - ⏳ **A yes/no prompt times out after 15s** (cancelled, boxes stay); text
@@ -901,6 +1025,14 @@ See [`docs/CSP_HANDLING.md`](docs/CSP_HANDLING.md) for full security details.
 - [x] Switching windows never reloads a page (verified with a page-load counter)
 
 ### Version 0.8.0
+- [x] `list-cookies` / `set-cookie` / `delete-cookie` / `clear-cookies`, with `-j` and Netscape export
+- [x] `list-storage` / `set-storage` for `localStorage` and `sessionStorage`
+- [x] `list-forms`, `list-scripts` (third-party flagged), `list-resources`
+- [x] `eval` / `js`, `find-text` (boxes drawn in the pane), `outline` / `structure`
+- [x] A frame-side inspection relay, so the above work on cross-origin panes
+- [x] Background cookie broker: `httpOnly` visibility, inject and delete
+
+### Version 0.9.0
 - [ ] Floating panes (overlay a pane without taking layout space)
 - [ ] `break-pane` / `join-pane`
 - [ ] Broadcasting input to all panes
@@ -950,4 +1082,4 @@ MIT License - See LICENSE file for details
 
 **Made with ❤️ for productivity enthusiasts who miss TMUX when browsing**
 
-Version 0.7.0 | Last Updated: November 2026
+Version 0.8.0 | Last Updated: November 2026

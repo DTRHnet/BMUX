@@ -1,15 +1,16 @@
 # BMUX Implementation Summary
 
-**Version 0.7.0** — this describes the shipped code, not a plan. Where a section
+**Version 0.8.0** — this describes the shipped code, not a plan. Where a section
 records history (the popup that used to exist, the layouts that used to be thrown
 away on reload), it says so.
 
-## Current Status (0.7.0)
+## Current Status (0.8.0)
 
-BMUX is fully functional. 52 commands across two scopes, a ratio-driven split tree
+BMUX is fully functional. 70 commands across two scopes, a ratio-driven split tree
 that never reloads a page, visual filters, clickable prompts, per-pane consoles that
-can be detached, per-tab persistence with named layouts plus several named windows per tab, and
-`.bmux` script files.
+can be detached, per-tab persistence with named layouts plus several named windows per tab, `.bmux`
+script files, and pane inspection (cookies, storage, DOM inventory and page-world
+`eval`).
 
 ### 1. **Activation**
 There is no popup and no session object. One action — the toolbar icon
@@ -275,8 +276,9 @@ Two layers, both written by `background/main.js` (the content script never touch
 
 Messages the content script uses: `persist-load`, `persist-save`, `persist-clear`,
 `persist-set-enabled`, `persist-set-inherit`, `layout-save`, `layout-list`,
-`layout-load`, `layout-delete`. Every reply carries the origin and tab id; nothing is stored by the
-content script.
+`layout-load`, `layout-delete`, and the 0.8.0 brokers `frame-id`, `exec-script`,
+`cookie-list`, `cookie-set`, `cookie-remove`. Every reply carries the origin and tab
+id; nothing is stored by the content script.
 
 **Write path.** `renderLayout()` ends with `scheduleSave()` (400 ms debounce);
 `setActivePane`, `renamePane` and the console setters save explicitly;
@@ -390,7 +392,78 @@ session, and a running script dies with the page anyway.
 that opens one waits for it (or the 15 s timeout). The shipped demo passes `-y` to
 the filter commands and leaves the clickable card to the person driving the demo.
 
-### 21. **Modern UI Design**
+### 21. **Pane inspection and cookies**
+A pane is an iframe, so the code that can answer questions about it is the code
+*inside* that iframe. `content/inspect.js` is loaded into every frame (`all_frames`)
+and speaks a two-message protocol with its parent:
+
+```
+parent -> pane : { __bmuxInspect: <nonce>, kind: 'storage'|'forms'|'scripts'|
+                                    'resources'|'outline'|'find-text'|'frame-id',
+                   args: {…} }
+pane -> parent : { __bmuxInspectReply: <nonce>, ok, result | error }
+```
+
+`BMUXClient.inspectPane(pane, kind, args, timeout)` posts into
+`iframe.contentWindow` (which works across origins — `postMessage` is allowed,
+`contentWindow.location` is not), keeps a `nonce -> { resolve, timer, source }` entry
+and resolves on the reply, on a 1.5 s timeout, or on a failure to post. A reply is
+only accepted from the pane's own window, and inspect.js only answers requests whose
+`event.source` is its parent, so the channel is not an oracle for the page. Handlers
+may be synchronous (DOM reads) or return a promise (`frame-id`).
+
+**Why it matters**: `list-storage`, `list-forms`, `list-scripts`, `list-resources`,
+`outline` and `find-text` work on cross-origin panes, where `source`, `filter` and
+`capture-pane` cannot. `find-text` also draws its boxes *inside* the pane's document,
+so they survive BMUX redraws.
+
+**`eval`** is the exception: MV3 forbids `eval`/`new Function` in a content script
+(the extension CSP blocks them — the first implementation failed exactly there, and
+an inline `<script>` injected from the isolated world was refused too). So the pane
+reports its own `frameId` (`frame-id` → `chrome.runtime.sendMessage`, answered by the
+background from `sender.frameId`), and the top frame asks the background to run the
+expression with `chrome.scripting.executeScript({ target: { tabId, frameIds },
+world: 'MAIN', func })`. That runs in the page's own world with real page globals; the
+injected function serialises the value in-page (nodes as `<h1#id>`, arrays capped at
+50, depth 3) because only JSON-serialisable values cross back. The frame id is cached
+on the pane (`dataset.bmuxFrameId`) and dropped when the pane is destroyed.
+
+**Cookies** are brokered by the background through the `cookies` permission
+(`cookie-list`, `cookie-set`, `cookie-remove`), because `httpOnly` is invisible from
+any frame. The commands pass the pane's URL, so the jar is the right origin's;
+`list-cookies --export netscape` renders a jar from the same records.
+
+### 22. **Palettes, output formatting and pointer focus**
+
+**Palettes are variables, not code.** `#bmux-overlay` declares the frost palette as CSS
+custom properties (`--bmux-bg`, `--bmux-line`, `--bmux-text`, `--bmux-accent`, …) and
+every surface — toolbar, footers, consoles, panels, status bar, prompt cards — reads
+those variables. Each extra palette is one block,
+`#bmux-overlay[data-theme="midnight"] { … }`, setting the same names, so
+`setTheme()` is a single `dataset.theme` assignment plus a save. The names live in
+`BMUX_THEMES` (`content/commands.js`) next to the other vocabulary; `setTheme` falls
+back to `frost` for anything unknown, so a corrupt stored value cannot leave the UI
+unstyled. Seven palettes ship: frost (default), classic, midnight, amber, light, nord,
+rose.
+
+**Output is formatted in one place.** `BMUXClient.formatTable(columns, rows)` draws
+box-drawn tables (`┌─┬─┐`, a header row, a rule, `└─┴─┘`), right-aligns columns whose
+cells are all numeric, ellipses cells to fit `BMUX_TABLE_MAX_WIDTH` (96 characters) by
+shrinking the widest column first, and `formatValue()` routes lists of records through
+it while keeping a lone object as pretty JSON. Every listing command uses it, so a new
+command gets consistent output for free.
+
+**Pointer focus works through the frame relay.** A click on a page lands in the pane's
+iframe, and moving between two iframes never blurs the top window — which is why only
+the footer used to change the active pane. Frames now report activity
+(`document.pointerdown` and `window.focus` → `parent.postMessage({ __bmuxPaneFocus: true })`),
+and the top frame maps `event.source` back to the pane whose `iframe.contentWindow` it
+is. `handlePaneFocus()` answers before `handleInspectReply()` in the single message
+listener; a window that BMUX does not own is ignored. The old
+`syncActivePaneFromFocus()` path (top window blur with an iframe as `activeElement`)
+stays as a backstop for keyboard focus.
+
+### 23. **Modern UI Design**
 - **Glassmorphism**: semi-transparent backdrop with blur
 - **Toolbar**: window actions, then focus / zoom / layout buttons on the right
 - **Draggable, resizable debug console**: floating, scrollback, runs any command
@@ -431,6 +504,7 @@ BMUX/
 ├── content/
 │   ├── main.js           # Client: overlay DOM, layout engine, focus, dispatcher, script runner
 │   ├── commands.js       # Command registry + key bindings (source of truth)
+│   ├── inspect.js        # frame-side inspection: storage, forms, scripts, eval id
 │   ├── scripts.js        # .bmux format: parser, sleep arguments, built-in demo
 │   └── styles.css        # UI, split handles, panels, drag shield
 ├── examples/
@@ -523,6 +597,11 @@ to `content/commands.js` only.
     saved with the layout either
 14. **Scripts are not code**: no variables, loops or branches, and no file or
     network access — a script is a list of commands you could have typed
+15. **`eval` needs the page's consent**: a CSP that forbids `unsafe-eval` refuses the
+    expression (reported, not worked around); `source`, `filter` and `capture-pane`
+    still require a same-origin pane
+16. **Inspection answers are capped** (200 entries, 4000 text nodes), and
+    `find-text` boxes are a snapshot: scrolling the page does not move them
 
 ## Troubleshooting
 

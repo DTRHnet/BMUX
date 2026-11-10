@@ -456,6 +456,249 @@ async function deleteNamedLayouts(origin, name) {
     return { ok: true, deleted: 1, name: clean };
 }
 
+// --- running code in a pane's page world ---
+//
+// MV3 forbids `eval` inside a content script, so `eval` asks the background to run
+// the expression in the frame's MAIN world through `chrome.scripting`. The pane's
+// frame id comes from the frame itself (`frame-id`), never guessed.
+
+async function execInFrame(tabId, frameId, code) {
+    if (!chrome.scripting || !chrome.scripting.executeScript) {
+        return { ok: false, reason: 'the scripting permission is not available' };
+    }
+    if (tabId === undefined || tabId === null) return { ok: false, reason: 'no tab id' };
+
+    const target = {
+        tabId: tabId,
+        frameIds: [frameId === undefined || frameId === null ? 0 : frameId]
+    };
+
+    try {
+        const results = await chrome.scripting.executeScript({
+            target: target,
+            world: 'MAIN',
+            args: [String(code)],
+            func: function (source) {
+                // Runs in the page's world: no closure, only `source`.
+                function serialise(value, depth) {
+                    const level = depth || 0;
+                    if (value === null) return null;
+                    if (value === undefined) return '[undefined]';
+
+                    const type = typeof value;
+                    if (type === 'string') {
+                        const text = String(value);
+                        return text.length > 300 ? text.slice(0, 300) + '…' : text;
+                    }
+                    if (type === 'number' || type === 'boolean') return value;
+                    if (type === 'function') return '[function ' + (value.name || 'anonymous') + ']';
+                    if (type === 'bigint') return String(value) + 'n';
+                    if (type === 'symbol') return String(value);
+                    if (value instanceof Error) return value.name + ': ' + value.message;
+
+                    if (typeof Node !== 'undefined' && value instanceof Node) {
+                        const tag = value.tagName ? value.tagName.toLowerCase() : 'node';
+                        return '<' + tag + (value.id ? '#' + value.id : '') + '>';
+                    }
+
+                    if (level >= 3) return Array.isArray(value) ? '[array ×' + value.length + ']' : '[object]';
+
+                    if (Array.isArray(value)) {
+                        const items = value.slice(0, 50).map(function (item) { return serialise(item, level + 1); });
+                        if (value.length > 50) items.push('…' + (value.length - 50) + ' more');
+                        return items;
+                    }
+
+                    if (value instanceof Map) return '[Map ×' + value.size + ']';
+                    if (value instanceof Set) return '[Set ×' + value.size + ']';
+
+                    const out = {};
+                    let keys = [];
+                    try {
+                        keys = Object.keys(value);
+                    } catch (error) {
+                        return '[object]';
+                    }
+                    keys.slice(0, 50).forEach(function (key) {
+                        out[key] = serialise(value[key], level + 1);
+                    });
+                    return out;
+                }
+
+                try {
+                    const value = (0, eval)(source);
+                    return { ok: true, type: typeof value, value: serialise(value, 0) };
+                } catch (error) {
+                    return { ok: false, error: String(error && error.message ? error.message : error) };
+                }
+            }
+        });
+
+        const first = Array.isArray(results) ? results[0] : null;
+        if (!first) return { ok: false, reason: 'the frame returned nothing (blocked or gone)' };
+
+        const value = first.result;
+        if (!value) return { ok: false, reason: 'the frame returned nothing (a CSP may have blocked it)' };
+
+        return value.ok
+            ? { ok: true, type: value.type, value: value.value }
+            : { ok: false, reason: value.error };
+    } catch (error) {
+        return { ok: false, reason: error && error.message ? error.message : String(error) };
+    }
+}
+
+// --- cookies ---
+//
+// The content script cannot read `httpOnly` cookies (they are invisible to
+// `document.cookie`), and cannot touch a cross-origin pane's cookies at all, so
+// the background brokers them through the `cookies` permission.
+
+function cookiesApi() {
+    return chrome.cookies || null;
+}
+
+function cookieUrlFor(url) {
+    try {
+        return new URL(String(url)).href;
+    } catch (error) {
+        return '';
+    }
+}
+
+/** A cookie as the console wants it: no secrets dropped, no undefined fields. */
+function describeCookie(cookie) {
+    const sameSite = String(cookie.sameSite || 'unspecified').toLowerCase();
+
+    return {
+        name: cookie.name,
+        value: cookie.value,
+        domain: cookie.domain || '',
+        path: cookie.path || '/',
+        secure: !!cookie.secure,
+        httpOnly: !!cookie.httpOnly,
+        session: !!cookie.session,
+        sameSite: sameSite,
+        hostOnly: !!cookie.hostOnly,
+        expirationDate: typeof cookie.expirationDate === 'number' ? cookie.expirationDate : null
+    };
+}
+
+async function listCookies(url, filters) {
+    const api = cookiesApi();
+    if (!api || !api.getAll) return { ok: false, reason: 'the cookies permission is not available' };
+
+    const target = cookieUrlFor(url);
+    if (!target) return { ok: false, reason: 'no usable URL for this pane' };
+
+    const options = { url: target };
+    if (filters && filters.domain) options.domain = String(filters.domain);
+
+    const found = await new Promise((resolve) => {
+        try {
+            api.getAll(options, (cookies) => resolve(cookies || []));
+        } catch (error) {
+            resolve([]);
+        }
+    });
+
+    let cookies = found.map(describeCookie);
+    if (filters && filters.name) {
+        const wanted = String(filters.name);
+        cookies = cookies.filter((cookie) => cookie.name === wanted || cookie.name.indexOf(wanted) !== -1);
+    }
+
+    cookies.sort((a, b) => (a.name === b.name ? a.domain.localeCompare(b.domain) : a.name.localeCompare(b.name)));
+    return { ok: true, url: target, cookies: cookies };
+}
+
+async function setCookie(url, details) {
+    const api = cookiesApi();
+    if (!api || !api.set) return { ok: false, reason: 'the cookies permission is not available' };
+
+    const target = cookieUrlFor(url);
+    if (!target) return { ok: false, reason: 'no usable URL for this pane' };
+    if (!details || details.name === undefined || details.name === '') {
+        return { ok: false, reason: 'a cookie needs a name' };
+    }
+
+    const payload = {
+        url: target,
+        name: String(details.name),
+        value: String(details.value == null ? '' : details.value)
+    };
+
+    if (details.path) payload.path = String(details.path);
+    if (details.domain) payload.domain = String(details.domain);
+    if (details.secure) payload.secure = true;
+    if (details.httpOnly) payload.httpOnly = true;
+    if (details.sameSite) payload.sameSite = String(details.sameSite);
+    if (typeof details.expiresIn === 'number' && isFinite(details.expiresIn)) {
+        payload.expirationDate = Math.floor(Date.now() / 1000) + Math.max(0, Math.floor(details.expiresIn));
+    }
+
+    return new Promise((resolve) => {
+        try {
+            api.set(payload, (cookie) => {
+                if (!cookie) {
+                    resolve({ ok: false, reason: (chrome.runtime && chrome.runtime.lastError && chrome.runtime.lastError.message) || 'the browser refused the cookie' });
+                    return;
+                }
+                resolve({ ok: true, cookie: describeCookie(cookie) });
+            });
+        } catch (error) {
+            resolve({ ok: false, reason: error && error.message ? error.message : String(error) });
+        }
+    });
+}
+
+async function removeCookie(url, name) {
+    const api = cookiesApi();
+    if (!api || !api.remove) return { ok: false, reason: 'the cookies permission is not available' };
+
+    const target = cookieUrlFor(url);
+    if (!target) return { ok: false, reason: 'no usable URL for this pane' };
+
+    const list = await listCookies(target, { name: '' });
+    if (!list.ok) return list;
+
+    const victims = list.cookies.filter((cookie) => !name || cookie.name === String(name));
+    if (!victims.length) {
+        return { ok: true, removed: 0, names: [], reason: name ? 'no cookie with that name' : 'no cookies' };
+    }
+
+    const removed = [];
+
+    for (const cookie of victims) {
+        const urlForCookie = `http${cookie.secure ? 's' : ''}://${String(cookie.domain).replace(/^\./, '')}${cookie.path || '/'}`;
+        const result = await new Promise((resolve) => {
+            try {
+                api.remove({ url: urlForCookie, name: cookie.name }, (detail) => resolve(detail || null));
+            } catch (error) {
+                resolve(null);
+            }
+        });
+        if (result) removed.push(cookie.name);
+    }
+
+    return { ok: true, removed: removed.length, names: removed };
+}
+
+/** Netscape cookie-jar lines, which curl, wget and yt-dlp all accept. */
+function cookiesToNetscape(cookies) {
+    const lines = ['# Netscape HTTP Cookie File', '# Generated by BMUX', ''];
+
+    cookies.forEach((cookie) => {
+        const domain = cookie.hostOnly ? cookie.domain : (cookie.domain.charAt(0) === '.' ? cookie.domain : '.' + cookie.domain);
+        const includeSubdomains = cookie.hostOnly ? 'FALSE' : 'TRUE';
+        const secure = cookie.secure ? 'TRUE' : 'FALSE';
+        const expires = cookie.expirationDate ? Math.floor(cookie.expirationDate) : 0;
+        lines.push([domain, includeSubdomains, cookie.path || '/', secure, expires, cookie.name, cookie.value].join('\t'));
+    });
+
+    return lines.join('\n');
+}
+
 // --- housekeeping ---
 
 async function pruneSessionLayouts() {
@@ -589,6 +832,40 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
             setEnabled(request.enabled).then(async (enabled) => {
                 if (!enabled) await clearTabLayout(tabId);
                 sendResponse({ status: 'ok', enabled: enabled });
+            });
+            return true;
+
+        // --- frame identity and page-world eval ---
+        case 'frame-id':
+            sendResponse({
+                status: 'ok',
+                tabId: tabId,
+                frameId: sender && sender.frameId !== undefined ? sender.frameId : 0
+            });
+            break;
+
+        case 'exec-script':
+            execInFrame(tabId, request.frameId, request.code).then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
+            });
+            return true;
+
+        // --- cookies (background broker: httpOnly needs the permission) ---
+        case 'cookie-list':
+            listCookies(request.url, request.filters).then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
+            });
+            return true;
+
+        case 'cookie-set':
+            setCookie(request.url, request.details).then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
+            });
+            return true;
+
+        case 'cookie-remove':
+            removeCookie(request.url, request.name).then((result) => {
+                sendResponse(Object.assign({ status: result.ok ? 'ok' : 'error' }, result));
             });
             return true;
 

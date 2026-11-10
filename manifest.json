@@ -1,7 +1,7 @@
 {
     "manifest_version": 3,
     "name": "BMUX",
-    "version": "0.7.0",
+    "version": "0.8.0",
     "description": "A TMUX-inspired Browser Multiplexer",
     "permissions": [
         "tabs",
@@ -9,7 +9,8 @@
         "activeTab",
         "scripting",
         "declarativeNetRequest",
-        "webRequest"
+        "webRequest",
+        "cookies"
     ],
     "host_permissions": [
         "<all_urls>"
@@ -26,6 +27,7 @@
                 "<all_urls>"
             ],
             "js": [
+                "content/inspect.js",
                 "content/scripts.js",
                 "content/commands.js",
                 "content/main.js"

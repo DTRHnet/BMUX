@@ -5,6 +5,121 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-11-10 (second pass)
+
+Four things that make the release feel finished.
+
+### Added
+
+- **Seven palettes.** `theme` now knows `frost` (still the default), `classic`,
+  `midnight`, `amber`, `light`, `nord` and `rose`, and lists them with the current one
+  marked; `theme next` / `theme prev` cycle and the choice is saved with the layout.
+  Every palette is one block of CSS custom properties, so the whole UI follows.
+- **Box-drawn tables everywhere.** `list-panes`, `list-windows`, `list-layouts`,
+  `list-cookies`, `list-storage`, `list-resources` and the theme list now render
+  `┌─┬─┐` rules, right-aligned numeric columns and ellipsised cells, wrapped to 96
+  characters. `list-panes` gained a `state` column (`ACTIVE+ZOOM` when both apply).
+- **The README** leads with the project logo, centred and adapted to light and dark
+  mode, above a centred badge row.
+
+### Fixed
+
+- **Clicking a pane's page now focuses that pane.** Only the footer used to work,
+  because a click inside an iframe never reached the pane element and switching
+  between two iframes does not blur the top window. The frame reports pointer and
+  focus activity to its parent, which maps the window back to its pane; the old
+  blur-based sync stays as a backstop.
+
+### Verification (second pass)
+
+- jsdom: **1138 checks** (30 more) — every palette applies and persists, unknown names
+  are refused, `next`/`prev` cycle, box-table borders/alignment/ellipsis, and the
+  pane-focus message handling (both directions, foreign windows ignored, non-focus
+  messages falling through to the inspection listener).
+- Chromium 150, unpacked: **173 checks** (6 more) — a real mouse click on a pane's
+  page focuses that pane (and the other direction), and `theme midnight` / `light` /
+  `frost` change the computed status-bar colour.
+
+---
+
+## [0.8.0] - 2026-11-10
+
+BMUX can look inside a pane: cookies, storage, forms, scripts, resources, an
+outline, text search and page-world `eval` — on cross-origin panes too.
+
+### Added
+
+- **Cookies, through the `cookies` permission.** `list-cookies` (`cookies`) prints
+  `name`, `value`, `domain`, `path`, `expires`, `secure`, `httpOnly`, `sameSite` for
+  the pane's origin — including cookies `document.cookie` can never see — with
+  `--name`/`--domain` filters, `-j` for JSON and `--export netscape` for a jar that
+  `curl -b`, `wget --load-cookies` and `yt-dlp --cookies` accept. `set-cookie
+  name=value [--http-only] [--secure] [--path] [--domain] [--expires 3600]
+  [--same-site …]` injects one, `delete-cookie <name>` removes one, and
+  `clear-cookies` empties the jar after a confirmation card.
+- **Storage.** `list-storage [local|session] [pattern] [-j] [--keys]` dumps the
+  pane's origin storage (values truncated, sizes shown), `set-storage
+  <key>=<value> [session]` writes one and `<key> --remove` deletes it.
+- **DOM inventory.** `list-forms [--highlight]` (action, method, every field with
+  type/required/placeholder, passwords masked, inputs outside forms listed);
+  `list-scripts [--third-party]` (URLs, inline sizes, `async`/`defer`, `[3rd]`
+  flag); `list-resources` (resource timing grouped by type with counts, third-party
+  counts and bytes, DOM fallback when timing is empty); `outline` (heading
+  hierarchy, landmarks, level jumps).
+- **`find-text <query>`** searches visible text, counts occurrences and boxes the
+  matches **inside the pane's own document** (`--clear`, `--no-highlight`), so it
+  works on cross-origin pages.
+- **`eval <expression>` / `js`** evaluates in the page's **own world** and prints the
+  result (tables for arrays of records, pretty JSON for objects, `<h1#id>` for
+  nodes). MV3 forbids eval in a content script, so the frame reports its `frameId`
+  and the background runs the expression with `chrome.scripting.executeScript({ world:
+  'MAIN' })`.
+- **A frame-side inspection relay**: `content/inspect.js` loads into every frame and
+  answers `parent -> pane` `postMessage` requests (`{ __bmuxInspect, kind, args }` →
+  `{ __bmuxInspectReply, ok, result }`), which is what makes the commands work on
+  cross-origin panes. Replies are accepted only from the pane's own window, requests
+  only from the parent, and a silent pane times out with a reason instead of hanging.
+- Six aliases (`cookies`, `forms`, `scripts`, `resources`, `structure`, `js`) — 18 new
+  commands in total, 52 → 70.
+
+### Changed
+
+- `manifest.json` declares the `cookies` permission (needed for `httpOnly`
+  visibility) and loads `content/inspect.js` before the other content scripts.
+- `docs/CROSS_ORIGIN.md` was corrected: cross-origin panes are no longer opaque —
+  `source`, `filter` and `capture-pane` still need a same-origin pane, everything
+  inspection-related does not.
+- README, QUICKSTART, COMMAND_USAGE (a new section 13 on the two mechanisms),
+  ADDING_COMMANDS (how to write a pane-inspecting command) and IMPLEMENTATION
+  (section 21) all document the feature; every doc is stamped 0.8.0.
+
+### Notes
+
+- Inspection answers are capped (200 entries, 4000 text nodes) so a huge page cannot
+  flood the console; `find-text` boxes are a snapshot and do not follow scrolling.
+- `eval` needs the page's consent: a CSP that forbids `unsafe-eval` refuses the
+  expression, which is reported rather than worked around.
+- Cookies are read only when you run a cookie command, for the pane you name, and are
+  never stored by BMUX.
+
+### Verification
+
+- `node --check` clean on all five scripts; CRLF kept; `manifest.json` parses as 0.8.0
+  with the `cookies` permission and four content scripts.
+- jsdom: **1108 checks** (78 new) — the frame handlers (storage list/set/remove/
+  pattern/keys, forms with password masking and highlighting, scripts with
+  third-party flags, resources fallback, outline with level jumps, find-text counts
+  and boxes), the `postMessage` protocol (reply, unknown kind, foreign source, async
+  handler), the top-frame relay (posting, matching/non-matching replies, timeout,
+  table/JSON formatting), the cookie broker (list/filter/set/remove/clear, Netscape
+  export, missing permission) and the `eval` plumbing (`frame-id` then
+  `exec-script`, frame-id caching, blocked scripting, unidentified frame).
+- Chromium 150, unpacked: **167 checks** (20 new) — list/set storage, forms,
+  outline, find-text with boxes inside the pane, `eval` returning values and reading
+  the DOM, scripts, resources, and the same inspection commands plus `eval` on a
+  genuinely cross-origin pane (`localhost` vs `127.0.0.1`), then cookies end to end
+  (set, list, Netscape export, delete).
+
 ## [0.7.0] - 2026-11-09
 
 A tab can hold several windows — named layouts you switch between without

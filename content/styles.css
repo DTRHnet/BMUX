@@ -61,6 +61,100 @@
   --bmux-backdrop: rgba(0, 0, 0, 0.85);
 }
 
+
+/* More palettes. Frost is the default (declared on #bmux-overlay); every theme
+   sets the same variables, so the whole UI follows. */
+
+#bmux-overlay[data-theme="midnight"] {
+  --bmux-bg-deep: #0a0714;
+  --bmux-bg: #120c22;
+  --bmux-bg-raised: #1b1233;
+  --bmux-bg-sunken: #0d0819;
+  --bmux-line: #2c2149;
+  --bmux-line-soft: rgba(167, 139, 250, 0.18);
+  --bmux-text: #e6e1ff;
+  --bmux-text-dim: #9d94c4;
+  --bmux-accent: #a78bfa;
+  --bmux-accent-strong: #cbb8ff;
+  --bmux-accent-soft: rgba(167, 139, 250, 0.16);
+  --bmux-accent-line: rgba(167, 139, 250, 0.5);
+  --bmux-ok: #86efac;
+  --bmux-warn: #fcd34d;
+  --bmux-backdrop: rgba(6, 4, 14, 0.82);
+}
+
+#bmux-overlay[data-theme="amber"] {
+  --bmux-bg-deep: #120d05;
+  --bmux-bg: #1c1408;
+  --bmux-bg-raised: #2a1f0b;
+  --bmux-bg-sunken: #140f06;
+  --bmux-line: #3d2c11;
+  --bmux-line-soft: rgba(255, 176, 0, 0.2);
+  --bmux-text: #ffb000;
+  --bmux-text-dim: #c08a3e;
+  --bmux-accent: #ffcc66;
+  --bmux-accent-strong: #ffe6b0;
+  --bmux-accent-soft: rgba(255, 176, 0, 0.16);
+  --bmux-accent-line: rgba(255, 176, 0, 0.55);
+  --bmux-ok: #b6f09c;
+  --bmux-warn: #ff8a65;
+  --bmux-backdrop: rgba(10, 7, 2, 0.85);
+}
+
+#bmux-overlay[data-theme="light"] {
+  --bmux-bg-deep: #e6edf3;
+  --bmux-bg: #f7fafc;
+  --bmux-bg-raised: #eef3f8;
+  --bmux-bg-sunken: #ffffff;
+  --bmux-line: #cbd8e3;
+  --bmux-line-soft: rgba(30, 54, 75, 0.12);
+  --bmux-text: #10202e;
+  --bmux-text-dim: #5a7184;
+  --bmux-accent: #0b7285;
+  --bmux-accent-strong: #0a5c6b;
+  --bmux-accent-soft: rgba(11, 114, 133, 0.12);
+  --bmux-accent-line: rgba(11, 114, 133, 0.45);
+  --bmux-ok: #1a7f4b;
+  --bmux-warn: #a15c00;
+  --bmux-backdrop: rgba(214, 226, 235, 0.72);
+}
+
+#bmux-overlay[data-theme="nord"] {
+  --bmux-bg-deep: #242933;
+  --bmux-bg: #2e3440;
+  --bmux-bg-raised: #3b4252;
+  --bmux-bg-sunken: #272c36;
+  --bmux-line: #434c5e;
+  --bmux-line-soft: rgba(136, 192, 208, 0.18);
+  --bmux-text: #eceff4;
+  --bmux-text-dim: #a3aab8;
+  --bmux-accent: #88c0d0;
+  --bmux-accent-strong: #b8d8e3;
+  --bmux-accent-soft: rgba(136, 192, 208, 0.16);
+  --bmux-accent-line: rgba(136, 192, 208, 0.5);
+  --bmux-ok: #a3be8c;
+  --bmux-warn: #ebcb8b;
+  --bmux-backdrop: rgba(24, 28, 36, 0.8);
+}
+
+#bmux-overlay[data-theme="rose"] {
+  --bmux-bg-deep: #17090f;
+  --bmux-bg: #22101a;
+  --bmux-bg-raised: #2e1622;
+  --bmux-bg-sunken: #1a0b12;
+  --bmux-line: #4a2233;
+  --bmux-line-soft: rgba(244, 164, 190, 0.18);
+  --bmux-text: #fbe9f0;
+  --bmux-text-dim: #c39aa9;
+  --bmux-accent: #f4a4be;
+  --bmux-accent-strong: #ffd0de;
+  --bmux-accent-soft: rgba(244, 164, 190, 0.16);
+  --bmux-accent-line: rgba(244, 164, 190, 0.5);
+  --bmux-ok: #9ae6b4;
+  --bmux-warn: #ffd98a;
+  --bmux-backdrop: rgba(14, 6, 11, 0.82);
+}
+
 #bmux-overlay.hidden {
   display: none !important;
 }
