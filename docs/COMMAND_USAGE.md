@@ -1,6 +1,6 @@
 # BMUX Command Usage Guide
 
-**Version 0.9.0** — 70 commands. Every command below is what the shipped
+**Version 1.0.0** — 70 commands. Every command below is what the shipped
 `content/commands.js` defines; the `.bmux` script format has its own guide
 ([SCRIPTS.md](SCRIPTS.md)).
 

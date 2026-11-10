@@ -1,6 +1,6 @@
 # `.bmux` script files
 
-**Version 0.9.0** — scripts shipped in 0.6.0; the format is stable, and windows
+**Version 1.0.0** — scripts shipped in 0.6.0; the format is stable, and windows
 (0.7.0) are ordinary commands inside a script.
 
 A `.bmux` file is a list of commands that BMUX runs in order, one line at a time,

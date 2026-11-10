@@ -1,6 +1,6 @@
 # BMUX Implementation Summary
 
-**Version 0.9.0** — this describes the shipped code, not a plan. Where a section
+**Version 1.0.0** — this describes the shipped code, not a plan. Where a section
 records history (the popup that used to exist, the layouts that used to be thrown
 away on reload), it says so.
 
@@ -491,7 +491,7 @@ command. `loadToolbar()` asks the background on activation; the built-in set ren
 first so the overlay is never empty.
 
 **The version is in the menu.** `renderToolbarBrand()` puts
-`chrome.runtime.getManifest().version` next to the wordmark (`BMUX v0.9.0`), and the
+`chrome.runtime.getManifest().version` next to the wordmark (`BMUX v1.0.0`), and the
 popup footer shows the same number; when the runtime cannot answer, the chip stays
 empty rather than guessing.
 

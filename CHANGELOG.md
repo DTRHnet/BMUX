@@ -5,6 +5,54 @@ All notable changes to BMUX will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0] - 2026-11-10
+
+The first stable release. Everything from 0.1.0 to 0.9.0, finished and documented:
+the multiplexer, persistence, windows, scripts, inspection, palettes, the extension
+menu with an editable toolbar, and a help system worth the name.
+
+### Added in this release
+
+- **`RELEASE_1.0.0.md`** — a self-contained release document (install, what is in 1.0,
+  upgrade notes, known limits, verification), usable as the GitHub release body.
+- **`CONTRIBUTING.md`** — how the project is developed, what makes a good pull request,
+  the review process, how to report a bug and where to report a security issue.
+- **A "Why BMUX?" introduction** in the README, and **a designed table of contents**
+  (three columns, every section linked, anchors checked by script).
+- **"At a glance"** replaces the old "Screenshots" heading, and every screenshot
+  caption now states what its capture proves.
+- **Acknowledgments** that actually thank the tmux project and its maintainers by name
+  (and link to them), plus the terminal-tooling community and the Chrome extension
+  platform.
+- **A Documentation section that is a real index**: start here, going deeper,
+  historical — linking QUICKSTART, COMMAND_USAGE, SCRIPTS, IMPLEMENTATION,
+  ADDING_COMMANDS, CROSS_ORIGIN, CSP_HANDLING, CONTRIBUTING, RELEASE_NOTES,
+  CHANGELOG and the release document.
+
+### Changed
+
+- Every document is stamped **1.0.0**; `manifest.json` is 1.0.0.
+- Section headings lost their decorative emoji (features keep theirs), so the table of
+  contents can link to stable anchors.
+- The footer records the release (`Version 1.0.0 · Last updated November 2026`).
+
+### Fixed
+
+- The `list-panes` output blocks were rendering as one unterminated code block: the
+  closing fence had been glued onto the bottom border of the box table, so every table
+  and paragraph after that heading was parsed as code. Fixed in the README and in two
+  places in COMMAND_USAGE, and re-verified with two independent markdown renderers.
+
+### Verification
+
+- `node --check` clean on all seven scripts; `manifest.json` parses as 1.0.0; CRLF kept
+  everywhere.
+- jsdom **1194 checks** and Chromium **188 checks** pass on the release commit.
+- Documentation checks, all scripted: table-of-contents anchors resolve; no unbalanced
+  or glued code fences in any document; every markdown table row has as many cells as
+  its header; every relative link and image reference exists; 70/70 commands appear in
+  the README, the command guide and the help metadata.
+
 ## [0.9.0] - 2026-11-10
 
 The extension menu is back, the toolbar is yours to edit, and `help` became a real

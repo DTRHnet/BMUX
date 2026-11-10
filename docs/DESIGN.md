@@ -3,7 +3,7 @@
 > **Historical (pre-0.1.0).** This is the original design specification, kept for
 > the reasoning behind the architecture. Features described as planned may have
 > shipped differently or not at all — [IMPLEMENTATION.md](IMPLEMENTATION.md) and
-> [COMMAND_USAGE.md](COMMAND_USAGE.md) describe what BMUX 0.9.0 actually does.
+> [COMMAND_USAGE.md](COMMAND_USAGE.md) describe what BMUX 1.0.0 actually does.
 
 ## 1. Overview
 BMUX is a cross-browser extension designed to bring the functionality of TMUX (Terminal Multiplexer) to the web browser. It allows users to manage multiple browsing contexts (panes) within a single window, organize them into windows and sessions, and control them via keyboard shortcuts and scripting.

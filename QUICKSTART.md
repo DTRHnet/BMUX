@@ -1,6 +1,6 @@
 # BMUX Quick Reference
 
-**Version 0.9.0**
+**Version 1.0.0**
 
 ## Activation
 ```
@@ -32,7 +32,7 @@ Extension icon -> Toggle | Settings
 > help cookies/         - A name that is both a command and a category
 > keys                  - What the keyboard actually sent, and what it ran
 ```
-The overlay's wordmark shows the version (`BMUX v0.9.0`), read from the manifest —
+The overlay's wordmark shows the version (`BMUX v1.0.0`), read from the manifest —
 useful when reporting a bug.
 
 ## Control Mode Keys (after Alt+Shift+B)

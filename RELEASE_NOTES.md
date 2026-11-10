@@ -1,3 +1,38 @@
+# BMUX Version 1.0.0 - Release Summary
+
+## Release Information
+
+**Version**: 1.0.0
+**Release Date**: November 10, 2026
+**Status**: First stable release
+**License**: MIT
+
+---
+
+The complete release document — install steps, everything in 1.0, upgrade notes and
+known limits — is **[RELEASE_1.0.0.md](RELEASE_1.0.0.md)**. This page is the running
+record of what each version added, newest first.
+
+## Highlights of 1.0.0
+
+| Area | What shipped |
+|------|--------------|
+| Multiplexer | Ratio-driven split tree, presets, swap/rotate, zoom, geometric focus, six windows per tab, per-pane consoles |
+| Persistence | Per-tab layouts that survive reloads and follow the page, new-tab inheritance, named layouts, validated snapshots |
+| Commands | 70 commands through one dispatcher, categorised `help` with per-command detail, `.bmux` scripts with `sleep` |
+| Inspection | Cookies (`httpOnly`, Netscape export), storage, forms, scripts, resources, outline, find-text, page-world `eval` |
+| Look | Seven palettes, box-drawn tables, extension menu (Toggle/Settings), editable toolbar, the version in the top menu |
+| Project | README with a "Why BMUX?" intro and a designed table of contents, CONTRIBUTING.md, RELEASE_1.0.0.md |
+
+## Verification
+
+- **1194 jsdom checks** and **188 Chromium checks** on the release commit.
+- 70/70 commands documented in the README, the command guide and `BMUX_HELP`.
+- Scripted documentation checks: TOC anchors resolve, no glued code fences, table cell
+  counts match, every relative link and image exists.
+
+---
+
 # BMUX Version 0.9.0 - Release Summary
 
 ## Release Information
